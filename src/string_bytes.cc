@@ -27,6 +27,7 @@
 
 #include "node.h"
 #include "node_buffer.h"
+#include "v8_typed_array_bswap.h"
 #include "v8.h"
 
 namespace node {
@@ -202,13 +203,25 @@ size_t StringBytes::Write(char* buf,
       len = str->WriteUtf8(buf, buflen, chars_written, WRITE_UTF8_FLAGS);
       break;
 
-    case UCS2:
-      len = str->Write(reinterpret_cast<uint16_t*>(buf), 0, buflen, flags);
+    case UCS2: {
+      uint16_t* twobytebuf = reinterpret_cast<uint16_t*>(buf);
+      len = str->Write(twobytebuf, 0, buflen, flags);
       if (chars_written != NULL) {
         *chars_written = len;
       }
+#ifndef V8_TYPED_ARRAY_LITTLE_ENDIAN
+      // Node's "ucs2" encoding wants LE character data stored in the Buffer
+      // and v8::String::Write() provides character data in platform endian
+      // form, so we need to flip on BE platforms.
+      // See http://nodejs.org/api/buffer.html regarding Node's "ucs2" encoding
+      // specification
+      for (size_t i=0; i < len; i++) {      
+        twobytebuf[i] = v8_typed_array::SwapBytes(twobytebuf[i]);
+      }
+#endif
       len = len * sizeof(uint16_t);
       break;
+    }
 
     case BASE64: {
       String::AsciiValue value(str);
@@ -228,7 +241,17 @@ size_t StringBytes::Write(char* buf,
 
       for (size_t i = 0; i < buflen && i < len; i++) {
         unsigned char *b = reinterpret_cast<unsigned char*>(&twobytebuf[i]);
+#ifdef V8_TYPED_ARRAY_LITTLE_ENDIAN
         buf[i] = b[0];
+#else
+        // Node's "binary" encoding uses only the "first" 8-bits of each 16-bit
+        // character code. Node appears to expect LE character data and 
+        // v8::String::Write() provides platform endian character data,
+        // so we need to choose the other 8-bits on BE platforms.
+        // See http://nodejs.org/api/buffer.html regarding Node's "binary"
+        // encoding specification
+        buf[i] = b[1];
+#endif
       }
 
       if (chars_written != NULL) {
@@ -606,7 +629,21 @@ Local<Value> StringBytes::Encode(const char* buf,
 
     case UCS2: {
       const uint16_t* data = reinterpret_cast<const uint16_t*>(buf);
-      val = String::New(data, buflen / 2);
+#ifdef V8_TYPED_ARRAY_LITTLE_ENDIAN
+      val = String::New(data, buflen / 2); 
+#else
+      // Node's "ucs2" encoding expects LE character data inside a Buffer
+      // and v8::String::New() expects to be passed platform endian character
+      // data, so we need to flip on BE platforms.
+      // See http://nodejs.org/api/buffer.html regarding Node's "ucs2" 
+      // encoding specification
+      uint16_t* dst = new uint16_t[buflen / 2];
+      for (size_t i=0; i < buflen / 2; i++) {
+        dst[i] = v8_typed_array::SwapBytes(data[i]);
+      }
+      val = String::New(dst, buflen / 2);
+      delete[] dst;
+#endif
       break;
     }
 
