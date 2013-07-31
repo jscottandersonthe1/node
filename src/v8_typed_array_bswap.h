@@ -24,7 +24,8 @@
 
 // Windows will always be little endian (including ARM), so we just need to
 // worry about gcc.
-#if defined (__ppc__) || defined (__ppc64__) || defined(__ARMEB__)
+#if defined (__ppc__) || defined (__ppc64__) || defined(__ARMEB__) || \
+    defined (__PPC__) || defined (__PPC64__)
 #define V8_TYPED_ARRAY_BIG_ENDIAN 1
 #else
 #define V8_TYPED_ARRAY_LITTLE_ENDIAN 1
