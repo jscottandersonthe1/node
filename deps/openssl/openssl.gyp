@@ -652,13 +652,13 @@
         ['exclude', 'store/.*$']
       ],
       'conditions': [
-      [ 'target_arch=="ppc"', {
-         # Define Big Endian
-         'defines': ['B_ENDIAN']
-      }, {
-         # Define Little Endian
-         'defines':['L_ENDIAN']
-      }],
+        [ 'target_arch=="ppc"', {
+           # Define Big Endian
+           'defines': ['B_ENDIAN']
+        }, {
+           # Define Little Endian
+           'defines':['L_ENDIAN']
+        }],
         ['target_arch!="ia32" and target_arch!="x64" and target_arch!="arm" or openssl_no_asm!=0', {
           # Disable asm
           'defines': [
