@@ -144,6 +144,10 @@
           'include_dirs': [ 'config/openbsd' ],
           'sources': [ 'config/openbsd/ares_config.h' ]
         }],
+        [ 'OS=="aix"', {
+          'include_dirs': [ 'config/aix' ],
+          'sources': [ 'config/aix/ares_config.h' ],
+        }],
         [ 'OS=="solaris"', {
           'include_dirs': [ 'config/sunos' ],
           'sources': [ 'config/sunos/ares_config.h' ],
