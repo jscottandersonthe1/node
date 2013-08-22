@@ -222,7 +222,11 @@ else
 ifeq ($(DESTCPU),arm)
 ARCH=arm
 else
+ifeq ($(DESTCPU),ppc)
+ARCH=ppc
+else
 ARCH=x86
+endif
 endif
 endif
 TARNAME=node-$(VERSION)
@@ -277,7 +281,7 @@ $(PKG): release-only
 	rm -rf out/deps out/Release
 	$(PYTHON) ./configure --without-snapshot --dest-cpu=x64 --tag=$(TAG)
 	$(MAKE) install V=$(V) DESTDIR=$(PKGDIR)
-	SIGN="$(APP_SIGN)" PKGDIR="$(PKGDIR)" bash tools/osx-codesign.sh
+	SIGN="$(SIGN)" PKGDIR="$(PKGDIR)" bash tools/osx-codesign.sh
 	lipo $(PKGDIR)/32/usr/local/bin/node \
 		$(PKGDIR)/usr/local/bin/node \
 		-output $(PKGDIR)/usr/local/bin/node-universal \
@@ -288,7 +292,7 @@ $(PKG): release-only
 		--id "org.nodejs.Node" \
 		--doc tools/osx-pkg.pmdoc \
 		--out $(PKG)
-	SIGN="$(INT_SIGN)" PKG="$(PKG)" bash tools/osx-productsign.sh
+	SIGN="$(SIGN)" PKG="$(PKG)" bash tools/osx-productsign.sh
 
 $(TARBALL): release-only node doc
 	git archive --format=tar --prefix=$(TARNAME)/ HEAD | tar xf -
