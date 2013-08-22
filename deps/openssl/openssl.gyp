@@ -14,7 +14,6 @@
       'type': '<(library)',
       'defines': [
         # No clue what these are for.
-        'L_ENDIAN',
         'PURIFY',
         '_REENTRANT',
 
@@ -663,6 +662,13 @@
         ['exclude', 'store/.*$']
       ],
       'conditions': [
+      [ 'target_arch=="ppc"', {
+         # Define Big Endian
+         'defines': ['B_ENDIAN']
+      }, {
+         # Define Little Endian
+         'defines':['L_ENDIAN']
+      }],
         ['target_arch!="ia32" and target_arch!="x64"', {
           # Disable asm
           'defines': [
