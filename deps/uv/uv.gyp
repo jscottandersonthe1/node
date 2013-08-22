@@ -234,6 +234,7 @@
           'defines': [
             '_ALL_SOURCE',
             '_XOPEN_SOURCE=500',
+            '_LINUX_SOURCE_COMPAT',
           ],
           'link_settings': {
             'libraries': [
