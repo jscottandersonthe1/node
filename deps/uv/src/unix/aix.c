@@ -45,16 +45,184 @@
 #include <sys/proc.h>
 #include <sys/procfs.h>
 
+#define reqevents events
+#define rtnevents revents
+#include <sys/poll.h>
+#undef reqevents
+#undef rtnevents
+#undef events
+#undef revents
+
+#include <sys/pollset.h>
+
 int uv__platform_loop_init(uv_loop_t* loop, int default_loop) {
+  loop->fs_fd = -1;
+
+  loop->backend_fd = pollset_create(256);
+
+  if (loop->backend_fd == -1)
+    return -1;
+
+  uv__cloexec(loop->backend_fd, 1);
+
   return 0;
 }
 
 
 void uv__platform_loop_delete(uv_loop_t* loop) {
+  if (loop->fs_fd == -1) {
+    close(loop->fs_fd);
+    loop->fs_fd = -1;
+  }
+
+  if (loop->backend_fd != -1) {
+    close(loop->backend_fd);
+    loop->backend_fd = -1;
+  }
 }
 
 
 void uv__io_poll(uv_loop_t* loop, int timeout) {
+  struct pollfd events[1024];
+  struct pollfd* pe;
+  struct pollfd e;
+  struct poll_ctl pc;
+  ngx_queue_t* q;
+  uv__io_t* w;
+  uint64_t base;
+  uint64_t diff;
+  int nevents;
+  int count;
+  int nfds;
+  pollset_t ps;
+  int op;
+  int i;
+
+  if (loop->nfds == 0) {
+    assert(ngx_queue_empty(&loop->watcher_queue));
+    return;
+  }
+
+  while (!ngx_queue_empty(&loop->watcher_queue)) {
+    q = ngx_queue_head(&loop->watcher_queue);
+    ngx_queue_remove(q);
+    ngx_queue_init(q);
+
+    w = ngx_queue_data(q, uv__io_t, watcher_queue);
+    assert(w->pevents != 0);
+    assert(w->fd >= 0);
+    assert(w->fd < (int) loop->nwatchers);
+
+    if (w->events == 0)
+      pc.cmd = PS_ADD;
+    else
+      pc.cmd = PS_MOD;
+    pc.events = w->pevents;
+    pc.fd = w->fd;
+
+    /* XXX Future optimization: do PS_MOD lazily if we stop watching
+     * events, skip the syscall and squelch the events after epoll_wait().
+     */
+    if (pollset_ctl(loop->backend_fd, &pc, 1)) {
+      if (errno != EEXIST)
+        abort();
+
+      assert(op == PS_ADD);
+
+      /* We've reactivated a file descriptor that's been watched before. */
+      pc.cmd = PS_MOD;
+      if (pollset_ctl(loop->backend_fd, &pc, 1))
+        abort();
+    }
+
+    w->events = w->pevents;
+  }
+
+  assert(timeout >= -1);
+  base = loop->time;
+  count = 48; /* Benchmarks suggest this gives the best throughput. */
+
+  for (;;) {
+    nfds = pollset_poll(loop->backend_fd,
+                        events,
+                        ARRAY_SIZE(events),
+                        timeout);
+
+    /* Update loop->time unconditionally. It's tempting to skip the update when
+     * timeout == 0 (i.e. non-blocking poll) but there is no guarantee that the
+     * operating system didn't reschedule our process while in the syscall.
+     */
+    SAVE_ERRNO(uv__update_time(loop));
+
+    if (nfds == 0) {
+      assert(timeout != -1);
+      return;
+    }
+
+    if (nfds == -1) {
+      if (errno != EINTR)
+        abort();
+
+      if (timeout == -1)
+        continue;
+
+      if (timeout == 0)
+        return;
+
+      /* Interrupted by a signal. Update timeout and poll again. */
+      goto update_timeout;
+    }
+
+    nevents = 0;
+
+    for (i = 0; i < nfds; i++) {
+      pc.cmd = PS_DELETE;
+      pc.events = events + i;
+      pc.fd = pe;
+
+      assert(ps >= 0);
+      assert((unsigned) ps < loop->nwatchers);
+
+      w = loop->watchers[ps];
+
+      if (w == NULL) {
+        /* File descriptor that we've stopped watching, disarm it.
+         *
+         * Ignore all errors because we may be racing with another thread
+         * when the file descriptor is closed.
+         */
+        pollset_ctl(loop->backend_fd, &pc, 1);
+        continue;
+      }
+
+      w->cb(loop, w, pe->events);
+      nevents++;
+    }
+
+    if (nevents != 0) {
+      if (nfds == ARRAY_SIZE(events) && --count != 0) {
+        /* Poll for more events but don't block this time. */
+        timeout = 0;
+        continue;
+      }
+      return;
+    }
+
+    if (timeout == 0)
+      return;
+
+    if (timeout == -1)
+      continue;
+
+update_timeout:
+    assert(timeout > 0);
+
+    diff = loop->time - base;
+    if (diff >= (uint64_t) timeout)
+      return;
+
+    timeout -= diff;
+  }
 }
 
 
