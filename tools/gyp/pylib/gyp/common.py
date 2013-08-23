@@ -401,9 +401,9 @@ def GetFlavor(params):
 
 
 def CopyTool(flavor, out_path):
-  """Finds (mac|sun|win)_tool.gyp in the gyp directory and copies it
+  """Finds (aix|mac|sun|win)_tool.gyp in the gyp directory and copies it
   to |out_path|."""
-  prefix = { 'solaris': 'sun', 'mac': 'mac', 'win': 'win' }.get(flavor, None)
+  prefix = { 'aix': 'aix', 'solaris': 'sun', 'mac': 'mac', 'win': 'win' }.get(flavor, None)
   if not prefix:
     return
 
