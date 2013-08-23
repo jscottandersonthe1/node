@@ -201,6 +201,9 @@
             'ldflags!': [ '-pthread' ],
           }],
           [ 'OS=="aix"', {
+            'defines': [
+              'V8_INTERPRETED_REGEXP',
+            ],
             'ldflags!': [ '-rdynamic' ],
           }],
         ],
