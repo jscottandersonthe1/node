@@ -33,6 +33,10 @@
           ['target_arch=="x64"', {
             'msvs_configuration_platform': 'x64',
           }],
+          ['OS=="aix"', {
+            'cflags': [ '-gxcoff' ],
+            'ldflags': [ '-Wl,-bbigtoc' ],
+          }],
         ],
         'msvs_settings': {
           'VCCLCompilerTool': {
