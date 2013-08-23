@@ -45,6 +45,19 @@
 #include <sys/proc.h>
 #include <sys/procfs.h>
 
+int uv__platform_loop_init(uv_loop_t* loop, int default_loop) {
+  return 0;
+}
+
+
+void uv__platform_loop_delete(uv_loop_t* loop) {
+}
+
+
+void uv__io_poll(uv_loop_t* loop, int timeout) {
+}
+
+
 uint64_t uv__hrtime(void) {
   uint64_t G = 1000000000;
   timebasestruct_t t;
