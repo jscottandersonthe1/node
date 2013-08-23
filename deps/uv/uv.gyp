@@ -132,6 +132,7 @@
             'include/uv-private/uv-sunos.h',
             'include/uv-private/uv-darwin.h',
             'include/uv-private/uv-bsd.h',
+            'include/uv-private/uv-aix.h',
             'src/unix/async.c',
             'src/unix/core.c',
             'src/unix/dl.c',
