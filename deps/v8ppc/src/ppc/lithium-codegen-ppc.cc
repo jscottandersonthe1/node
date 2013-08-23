@@ -2101,7 +2101,7 @@ void LCodeGen::DoIsSmiAndBranch(LIsSmiAndBranch* instr) {
 
   Register input_reg = EmitLoadRegister(instr->value(), ip);
   __ TestIfSmi(input_reg, r0);
-  EmitBranch(true_block, false_block, eq);
+  EmitBranch(true_block, false_block, eq, cr0);
 }
 
 
@@ -2904,7 +2904,11 @@ void LCodeGen::DoLoadKeyedFastDoubleElement(
   }
 
   if (instr->hydrogen()->RequiresHoleCheck()) {
+#if __FLOAT_WORD_ORDER == __LITTLE_ENDIAN
     __ lwz(scratch, MemOperand(elements, sizeof(kHoleNanLower32)));
+#else
+    __ lwz(scratch, MemOperand(elements));
+#endif
     __ Cmpi(scratch, Operand(kHoleNanUpper32), r0);
     DeoptimizeIf(eq, instr->environment());
   }
