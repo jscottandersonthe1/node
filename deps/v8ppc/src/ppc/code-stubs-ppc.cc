@@ -2278,7 +2278,7 @@ void BinaryOpStub::GenerateSmiSmiOperation(MacroAssembler* masm) {
       __ orx(scratch1, left, right);
       ASSERT((0x80000000u | kSmiTagMask) == 0x80000001);
       __ rlwinm(r0, scratch1, 1, 30, 31, SetRC);
-      __ bne(&not_smi_result);
+      __ bne(&not_smi_result, cr0);
 
       // Check for power of two on the right hand side.
       __ JumpIfNotPowerOfTwoOrZero(right, scratch1, &not_smi_result);
@@ -2763,7 +2763,7 @@ void BinaryOpStub::GenerateInt32Stub(MacroAssembler* masm) {
         __ addi(sp, sp, Operand(8));
 
         __ TestBit(scratch2, 0, r0);  // test sign bit
-        __ bne(&return_heap_number);
+        __ bne(&return_heap_number, cr0);
         __ bind(&not_zero);
 
         // Tag the result and return.
@@ -7538,7 +7538,7 @@ void ProfileEntryHookStub::Generate(MacroAssembler* masm) {
 
   // Save live volatile registers.
   __ mflr(r3);
-  __ Push(r3, r8, r4);
+  __ Push(r3, r30, r4);
   const int32_t kNumSavedRegs = 3;
 
   // Compute the function's address for the first argument.
@@ -7551,7 +7551,7 @@ void ProfileEntryHookStub::Generate(MacroAssembler* masm) {
   // Align the stack if necessary.
   int frame_alignment = masm->ActivationFrameAlignment();
   if (frame_alignment > kPointerSize) {
-    __ mr(r8, sp);
+    __ mr(r30, sp);
     ASSERT(IsPowerOf2(frame_alignment));
     ASSERT(-frame_alignment == -8);
     __ clrrwi(sp, sp, Operand(3));
@@ -7586,10 +7586,10 @@ void ProfileEntryHookStub::Generate(MacroAssembler* masm) {
 
   // Restore the stack pointer if needed.
   if (frame_alignment > kPointerSize) {
-    __ mr(sp, r8);
+    __ mr(sp, r30);
   }
 
-  __ Pop(r0, r8, r4);
+  __ Pop(r0, r30, r4);
   __ mtlr(r0);
   __ Ret();
 }
