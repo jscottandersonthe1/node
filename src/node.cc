@@ -703,7 +703,9 @@ const char *signo_string(int signo) {
 #endif
 
 #ifdef SIGLOST
+# if SIGLOST != SIGABRT
   SIGNO_CASE(SIGLOST);
+# endif
 #endif
 
 #ifdef SIGPWR
