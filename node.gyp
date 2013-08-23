@@ -162,7 +162,7 @@
 
       'conditions': [
         [ 'node_use_openssl=="true"', {
-          'defines': [ 'HAVE_OPENSSL=1','_LINUX_SOURCE_COMPAT' ],
+          'defines': [ 'HAVE_OPENSSL=1' ],
           'sources': [
             'src/node_crypto.cc',
             'src/node_crypto_bio.cc',
@@ -322,6 +322,11 @@
           'libraries': [
             '-lutil',
             '-lkvm',
+          ],
+        }],
+        [ 'OS=="aix"', {
+          'defines': [
+            '_LINUX_SOURCE_COMPAT',
           ],
         }],
         [ 'OS=="solaris"', {
