@@ -285,6 +285,11 @@
             '-lkvm',
           ],
         }],
+        [ 'OS=="aix"', {
+          'defines': [
+            '_LINUX_SOURCE_COMPAT',
+          ],
+        }],
         [ 'OS=="solaris"', {
           'libraries': [
             '-lkstat',
