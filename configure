@@ -386,7 +386,10 @@ def host_arch_cc():
 
   # use 'cc', as CC may be set to a target arch compiler command
   # in case of cross-compilation
-  k = cc_macros('cc')
+  if sys.platform.startswith('aix'):
+    k = cc_macros('gcc')
+  else:
+    k = cc_macros('cc')
 
   matchup = {
     '__x86_64__'  : 'x64',
@@ -394,6 +397,7 @@ def host_arch_cc():
     '__arm__'     : 'arm',
     '__mips__'    : 'mips',
     '__PPC__'     : 'ppc',
+    '_ARCH_PPC'   : 'ppc',
   }
 
   rtn = 'ia32' # default
