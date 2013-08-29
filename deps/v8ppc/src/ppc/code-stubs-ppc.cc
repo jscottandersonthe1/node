@@ -2738,10 +2738,10 @@ void BinaryOpStub::GenerateInt32Stub(MacroAssembler* masm) {
                            scratch2,
                            d8);
 
-        if (result_type_ <= BinaryOpIC::INT32) {
-          // result does not fit in a 32-bit integer.
-          __ bne(&transition);
-        }
+        // result does not fit in a 32-bit integer.
+        Label *not_int32 = ((result_type_ <= BinaryOpIC::INT32) ?
+                            &transition : &return_heap_number);
+        __ bne(not_int32);
 
         // Check if the result fits in a smi.
         __ addis(scratch2, scratch1, Operand(0x40000000u >> 16));
@@ -3516,7 +3516,7 @@ void MathPowStub::Generate(MacroAssembler* masm) {
   __ bge(&done);
 
   __ li(scratch2, Operand(1));
-  FloatingPointHelper::ConvertIntToDouble(masm, scratch2, double_result);
+  FloatingPointHelper::ConvertIntToDouble(masm, scratch2, double_scratch);
   __ fdiv(double_result, double_scratch, double_result);
   // Test whether result is zero.  Bail out to check for subnormal result.
   // Due to subnormals, x^-y == (1/x)^y does not hold in all cases.
