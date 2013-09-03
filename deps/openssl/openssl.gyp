@@ -651,7 +651,7 @@
         ['exclude', 'store/.*$']
       ],
       'conditions': [
-        [ 'target_arch=="ppc"', {
+        [ 'host_arch=="ppc"', {
            # Define Big Endian
            'defines': ['B_ENDIAN']
         }, {
