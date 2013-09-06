@@ -3007,7 +3007,7 @@ void LCodeGen::DoLoadKeyedSpecializedArrayElement(
     switch (elements_kind) {
       case EXTERNAL_BYTE_ELEMENTS:
         if (key_is_constant) {
-          __ lbz(result, mem_operand);
+          __ LoadByte(result, mem_operand, r0);
         } else {
           __ lbzx(result, mem_operand);
         }
@@ -3016,14 +3016,14 @@ void LCodeGen::DoLoadKeyedSpecializedArrayElement(
       case EXTERNAL_PIXEL_ELEMENTS:
       case EXTERNAL_UNSIGNED_BYTE_ELEMENTS:
         if (key_is_constant) {
-          __ lbz(result, mem_operand);
+          __ LoadByte(result, mem_operand, r0);
         } else {
           __ lbzx(result, mem_operand);
         }
         break;
       case EXTERNAL_SHORT_ELEMENTS:
         if (key_is_constant) {
-          __ lhz(result, mem_operand);
+          __ LoadHalfWord(result, mem_operand, r0);
         } else {
           __ lhzx(result, mem_operand);
         }
@@ -3031,21 +3031,21 @@ void LCodeGen::DoLoadKeyedSpecializedArrayElement(
         break;
       case EXTERNAL_UNSIGNED_SHORT_ELEMENTS:
         if (key_is_constant) {
-          __ lhz(result, mem_operand);
+          __ LoadHalfWord(result, mem_operand, r0);
         } else {
           __ lhzx(result, mem_operand);
         }
         break;
       case EXTERNAL_INT_ELEMENTS:
         if (key_is_constant) {
-          __ lwz(result, mem_operand);
+          __ LoadWord(result, mem_operand, r0);
         } else {
           __ lwzx(result, mem_operand);
         }
         break;
       case EXTERNAL_UNSIGNED_INT_ELEMENTS:
         if (key_is_constant) {
-          __ lwz(result, mem_operand);
+          __ LoadWord(result, mem_operand, r0);
         } else {
           __ lwzx(result, mem_operand);
         }
@@ -4213,7 +4213,7 @@ void LCodeGen::DoStoreKeyedSpecializedArrayElement(
       case EXTERNAL_BYTE_ELEMENTS:
       case EXTERNAL_UNSIGNED_BYTE_ELEMENTS:
         if (key_is_constant) {
-          __ stb(value, mem_operand);
+          __ StoreByte(value, mem_operand, r0);
         } else {
           __ stbx(value, mem_operand);
         }
@@ -4221,7 +4221,7 @@ void LCodeGen::DoStoreKeyedSpecializedArrayElement(
       case EXTERNAL_SHORT_ELEMENTS:
       case EXTERNAL_UNSIGNED_SHORT_ELEMENTS:
         if (key_is_constant) {
-          __ sth(value, mem_operand);
+          __ StoreHalfWord(value, mem_operand, r0);
         } else {
           __ sthx(value, mem_operand);
         }
@@ -4229,7 +4229,7 @@ void LCodeGen::DoStoreKeyedSpecializedArrayElement(
       case EXTERNAL_INT_ELEMENTS:
       case EXTERNAL_UNSIGNED_INT_ELEMENTS:
         if (key_is_constant) {
-          __ stw(value, mem_operand);
+          __ StoreWord(value, mem_operand, r0);
         } else {
           __ stwx(value, mem_operand);
         }
@@ -4730,6 +4730,10 @@ void LCodeGen::DoDeferredTaggedToI(LTaggedToI* instr) {
 
     __ lfd(double_scratch,
            FieldMemOperand(input_reg, HeapNumber::kValueOffset));
+    if (instr->hydrogen()->CheckFlag(HValue::kBailoutOnMinusZero)) {
+      // preserve heap number pointer in scratch2 for minus zero check below
+      __ mr(scratch2, input_reg);
+    }
     __ EmitVFPTruncate(kRoundToZero,
                        input_reg,
                        double_scratch,
@@ -4741,11 +4745,10 @@ void LCodeGen::DoDeferredTaggedToI(LTaggedToI* instr) {
     if (instr->hydrogen()->CheckFlag(HValue::kBailoutOnMinusZero)) {
       __ cmpi(input_reg, Operand::Zero());
       __ bne(&done);
-#ifdef PENGUIN_CLEANUP
-      __ vmov(scratch1, double_scratch.high());
+#if __FLOAT_WORD_ORDER == __LITTLE_ENDIAN
+      __ lwz(scratch1, FieldMemOperand(scratch2, HeapNumber::kValueOffset + 4));
 #else
-      PPCPORT_UNIMPLEMENTED();
-      __ fake_asm(fLITHIUM91);
+      __ lwz(scratch1, FieldMemOperand(scratch2, HeapNumber::kValueOffset));
 #endif
       __ TestBit(scratch1, 0, r0);  // test sign bit
       DeoptimizeIf(ne, instr->environment(), cr0);
