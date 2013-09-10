@@ -29,7 +29,9 @@ process.on('exit', function() {
   assert(gotError instanceof Error);
 });
 
-// this should fail with an async EINVAL error, not throw an exception
+// This tests a corner case to ensure file descriptor 0 is treated
+// like any other file descriptor.
+// This should fail with an async error, not throw an exception.
 net.createServer(assert.fail).listen({fd:0}).on('error', function(e) {
   switch(e.code) {
     case 'EINVAL':
