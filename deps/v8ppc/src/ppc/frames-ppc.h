@@ -65,13 +65,12 @@ int JSCallerSavedCode(int n);
 // N.B.  Do not bother saving all non-volatiles -- only those that v8
 //       modifies without saving/restoring inline.
 const RegList kCalleeSaved =
-  1 <<  13 |  // r13 (root in Javascript code)
   1 <<  14 |  // r14 (argument passing in CEntryStub)
   1 <<  15 |  // r15 (argument passing in CEntryStub)
   1 <<  16 |  // r16 (argument passing in CEntryStub)
               // r17-r19 unused
   1 <<  20 |  // r20 (cp in Javascript code)
-              // r21 unused
+  1 <<  21 |  // r21 (roots array in Javascript code)
   1 <<  22 |  // r22 (r9 hack in Javascript code)
               // r23-r25 unused
   1 <<  26 |  // r26 (HandleScope logic in MacroAssembler)
@@ -99,6 +98,33 @@ const int kNumSafepointRegisters = 32;
 const RegList kSafepointSavedRegisters = kJSCallerSaved | kCalleeSaved;
 const int kNumSafepointSavedRegisters = kNumJSCallerSaved + kNumCalleeSaved;
 
+// The following constants describe the stack frame linkage area as
+// defined by the ABI.
+#if defined(_AIX) || defined(V8_TARGET_ARCH_PPC64)
+// [0] back chain
+// [1] condition register save area
+// [2] link register save area
+// [3] reserved for compiler
+// [4] reserved by binder
+// [5] TOC save area
+// [6] Parameter1 save area
+// ...
+// [13] Parameter8 save area
+// [14] Parameter9 slot (if necessary)
+// ...
+const int kNumRequiredStackFrameSlots = 14;
+const int kStackFrameLRSlot = 2;
+const int kStackFrameExtraParamSlot = 14;
+#else
+// [0] back chain
+// [1] link register save area
+// [2] Parameter9 slot (if necessary)
+// ...
+const int kNumRequiredStackFrameSlots = 2;
+const int kStackFrameLRSlot = 1;
+const int kStackFrameExtraParamSlot = 2;
+#endif
+
 // ----------------------------------------------------
 
 
@@ -106,7 +132,12 @@ class StackHandlerConstants : public AllStatic {
  public:
   static const int kNextOffset     = 0 * kPointerSize;
   static const int kCodeOffset     = 1 * kPointerSize;
+#if defined(V8_TARGET_ARCH_PPC64) && (__BYTE_ORDER == __BIG_ENDIAN)
+  static const int kStateOffset    = 2 * kPointerSize + kIntSize;
+#else
   static const int kStateOffset    = 2 * kPointerSize;
+#endif
+  static const int kStateSlot      = 2 * kPointerSize;
   static const int kContextOffset  = 3 * kPointerSize;
   static const int kFPOffset       = 4 * kPointerSize;
 
