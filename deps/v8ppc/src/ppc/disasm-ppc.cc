@@ -101,8 +101,6 @@ class Decoder {
   void PrintRegister(int reg);
   void PrintDRegister(int reg);
   int FormatFPRegister(Instruction* instr, const char* format);
-  void PrintShiftSat(Instruction* instr);
-  void PrintPU(Instruction* instr);
   void PrintSoftwareInterrupt(SoftwareInterruptCodes svc);
 
   // Handle formatting of instructions and their options.
@@ -117,6 +115,7 @@ class Decoder {
   void DecodeExt1(Instruction* instr);
   void DecodeExt2(Instruction* instr);
   void DecodeExt4(Instruction* instr);
+  void DecodeExt5(Instruction* instr);
 
   const disasm::NameConverter& converter_;
   Vector<char> out_buffer_;
@@ -152,7 +151,7 @@ void Decoder::PrintRegister(int reg) {
   Print(converter_.NameOfCPURegister(reg));
 }
 
-// Print the  VFP D register name according to the active name converter.
+// Print the double FP register name according to the active name converter.
 void Decoder::PrintDRegister(int reg) {
   Print(FPRegisters::Name(reg));
 }
@@ -201,48 +200,6 @@ int Decoder::FormatRegister(Instruction* instr, const char* format) {
     return 2;
   }
 
-#if 0
-  if (format[1] == 'n') {  // 'rn: Rn register
-    int reg = instr->RnValue();
-    PrintRegister(reg);
-    return 2;
-  } else if (format[1] == 'd') {  // 'rd: Rd register
-    int reg = instr->RdValue();
-    PrintRegister(reg);
-    return 2;
-  } else if (format[1] == 's') {  // 'rs: Rs register
-    int reg = instr->RsValue();
-    PrintRegister(reg);
-    return 2;
-  } else if (format[1] == 'm') {  // 'rm: Rm register
-    int reg = instr->RmValue();
-    PrintRegister(reg);
-    return 2;
-  } else if (format[1] == 't') {  // 'rt: Rt register
-    int reg = instr->RtValue();
-    PrintRegister(reg);
-    return 2;
-  } else if (format[1] == 'l') {
-    // 'rlist: register list for load and store multiple instructions
-    ASSERT(STRING_STARTS_WITH(format, "rlist"));
-    int rlist = instr->RlistValue();
-    int reg = 0;
-    Print("{");
-    // Print register list in ascending order, by scanning the bit mask.
-    while (rlist != 0) {
-      if ((rlist & 1) != 0) {
-        PrintRegister(reg);
-        if ((rlist >> 1) != 0) {
-          Print(", ");
-        }
-      }
-      reg++;
-      rlist >>= 1;
-    }
-    Print("}");
-    return 5;
-  }
-#endif
   UNREACHABLE();
   return -1;
 }
@@ -345,19 +302,42 @@ int Decoder::FormatOption(Instruction* instr, const char* format) {
                                         reinterpret_cast<byte*>(instr) + off));
         return 8;
       }
-     case 's': {  // SH Bits 15-11
+     case 's': {
        ASSERT(format[1] == 'h');
-       int32_t value = (instr->Bits(15, 11) << 26) >> 26;
+       int32_t value = 0;
+       int32_t opcode = instr->OpcodeValue() << 26;
+       int32_t sh = instr->Bits(15, 11);
+       if (opcode == EXT5 ||
+           (opcode == EXT2 &&
+            instr->Bits(10, 2) << 2 == SRADIX)) {
+         // SH Bits 1 and 15-11 (split field)
+         value = (sh | (instr->Bit(1) << 5));
+       } else {
+         // SH Bits 15-11
+         value = (sh << 26) >> 26;
+       }
        out_buffer_pos_ += OS::SNPrintF(out_buffer_ + out_buffer_pos_,
                                      "%d", value);
        return 2;
      }
      case 'm': {
        int32_t value = 0;
-       if (format[1] == 'e') {  // ME Bits 10-6
-         value = (instr->Bits(10, 6) << 26) >> 26;
-       } else if (format[1] == 'b') {  // MB Bits 5-1
-         value = (instr->Bits(5, 1) << 26) >> 26;
+       if (format[1] == 'e') {
+         if (instr->OpcodeValue() << 26 != EXT5) {
+           // ME Bits 10-6
+           value = (instr->Bits(10, 6) << 26) >> 26;
+         } else {
+           // ME Bits 5 and 10-6 (split field)
+           value = (instr->Bits(10, 6) | (instr->Bit(5) << 5));
+         }
+       } else if (format[1] == 'b') {
+         if (instr->OpcodeValue() << 26 != EXT5) {
+           // MB Bits 5-1
+           value = (instr->Bits(5, 1) << 26) >> 26;
+         } else {
+           // MB Bits 5 and 10-6 (split field)
+           value = (instr->Bits(10, 6) | (instr->Bit(5) << 5));
+         }
        } else {
          UNREACHABLE();  // bad format
        }
@@ -366,229 +346,20 @@ int Decoder::FormatOption(Instruction* instr, const char* format) {
        return 2;
      }
     }
-    default: {
-      UNREACHABLE();
-      break;
-    }
-  }
-#if 0
-  switch (format[0]) {
-    case 'a': {  // 'a: accumulate multiplies
-      if (instr->Bit(21) == 0) {
-        Print("ul");
-      } else {
-        Print("la");
-      }
-      return 1;
-    }
-    case 'b': {  // 'b: byte loads or stores
-      if (instr->HasB()) {
-        Print("b");
-      }
-      return 1;
-    }
-    case 'c': {  // 'cond: conditional execution
-      ASSERT(STRING_STARTS_WITH(format, "cond"));
-      PrintCondition(instr);
-      return 4;
-    }
-    case 'd': {  // 'd: vmov double immediate.
-      double d = instr->DoubleImmedVmov();
+#if V8_TARGET_ARCH_PPC64
+    case 'd': {  // ds value for offset
+      int32_t value = SIGN_EXT_IMM16(instr->Bits(15, 0) & ~3);
       out_buffer_pos_ += OS::SNPrintF(out_buffer_ + out_buffer_pos_,
-                                      "#%g", d);
+                                      "%d", value);
       return 1;
     }
-    case 'f': {  // 'f: bitfield instructions - v7 and above.
-      uint32_t lsbit = instr->Bits(11, 7);
-      uint32_t width = instr->Bits(20, 16) + 1;
-      if (instr->Bit(21) == 0) {
-        // BFC/BFI:
-        // Bits 20-16 represent most-significant bit. Covert to width.
-        width -= lsbit;
-        ASSERT(width > 0);
-      }
-      ASSERT((width + lsbit) <= 32);
-      out_buffer_pos_ += OS::SNPrintF(out_buffer_ + out_buffer_pos_,
-                                      "#%d, #%d", lsbit, width);
-      return 1;
-    }
-    case 'h': {  // 'h: halfword operation for extra loads and stores
-      if (instr->HasH()) {
-        Print("h");
-      } else {
-        Print("b");
-      }
-      return 1;
-    }
-    case 'i': {  // 'i: immediate value from adjacent bits.
-      // Expects tokens in the form imm%02d@%02d, i.e. imm05@07, imm10@16
-      int width = (format[3] - '0') * 10 + (format[4] - '0');
-      int lsb   = (format[6] - '0') * 10 + (format[7] - '0');
-
-      ASSERT((width >= 1) && (width <= 32));
-      ASSERT((lsb >= 0) && (lsb <= 31));
-      ASSERT((width + lsb) <= 32);
-
-      out_buffer_pos_ += OS::SNPrintF(out_buffer_ + out_buffer_pos_,
-                                      "%d",
-                                      instr->Bits(width + lsb - 1, lsb));
-      return 8;
-    }
-    case 'l': {  // 'l: branch and link
-      if (instr->HasLink()) {
-        Print("l");
-      }
-      return 1;
-    }
-    case 'm': {
-      if (format[1] == 'w') {
-        // 'mw: movt/movw instructions.
-        PrintMovwMovt(instr);
-        return 2;
-      }
-      if (format[1] == 'e') {  // 'memop: load/store instructions.
-        ASSERT(STRING_STARTS_WITH(format, "memop"));
-        if (instr->HasL()) {
-          Print("ldr");
-        } else {
-          if ((instr->Bits(27, 25) == 0) && (instr->Bit(20) == 0) &&
-              (instr->Bits(7, 6) == 3) && (instr->Bit(4) == 1)) {
-            if (instr->Bit(5) == 1) {
-              Print("strd");
-            } else {
-              Print("ldrd");
-            }
-            return 5;
-          }
-          Print("str");
-        }
-        return 5;
-      }
-      // 'msg: for simulator break instructions
-      ASSERT(STRING_STARTS_WITH(format, "msg"));
-      byte* str =
-          reinterpret_cast<byte*>(instr->InstructionBits() & 0x0fffffff);
-      out_buffer_pos_ += OS::SNPrintF(out_buffer_ + out_buffer_pos_,
-                                      "%s", converter_.NameInCode(str));
-      return 3;
-    }
-    case 'o': {
-      if ((format[3] == '1') && (format[4] == '2')) {
-        // 'off12: 12-bit offset for load and store instructions
-        ASSERT(STRING_STARTS_WITH(format, "off12"));
-        out_buffer_pos_ += OS::SNPrintF(out_buffer_ + out_buffer_pos_,
-                                        "%d", instr->Offset12Value());
-        return 5;
-      } else if (format[3] == '0') {
-        // 'off0to3and8to19 16-bit immediate encoded in bits 19-8 and 3-0.
-        ASSERT(STRING_STARTS_WITH(format, "off0to3and8to19"));
-        out_buffer_pos_ += OS::SNPrintF(out_buffer_ + out_buffer_pos_,
-                                        "%d",
-                                        (instr->Bits(19, 8) << 4) +
-                                        instr->Bits(3, 0));
-        return 15;
-      }
-      // 'off8: 8-bit offset for extra load and store instructions
-      ASSERT(STRING_STARTS_WITH(format, "off8"));
-      int offs8 = (instr->ImmedHValue() << 4) | instr->ImmedLValue();
-      out_buffer_pos_ += OS::SNPrintF(out_buffer_ + out_buffer_pos_,
-                                      "%d", offs8);
-      return 4;
-    }
-    case 'p': {  // 'pu: P and U bits for load and store instructions
-      ASSERT(STRING_STARTS_WITH(format, "pu"));
-      PrintPU(instr);
-      return 2;
-    }
-    case 'r': {
-      return FormatRegister(instr, format);
-    }
-    case 's': {
-      if (format[1] == 'h') {  // 'shift_op or 'shift_rm or 'shift_sat.
-        if (format[6] == 'o') {  // 'shift_op
-          ASSERT(STRING_STARTS_WITH(format, "shift_op"));
-          if (instr->TypeValue() == 0) {
-            PrintShiftRm(instr);
-          } else {
-            ASSERT(instr->TypeValue() == 1);
-            PrintShiftImm(instr);
-          }
-          return 8;
-        } else if (format[6] == 's') {  // 'shift_sat.
-          ASSERT(STRING_STARTS_WITH(format, "shift_sat"));
-          PrintShiftSat(instr);
-          return 9;
-        } else {  // 'shift_rm
-          ASSERT(STRING_STARTS_WITH(format, "shift_rm"));
-          PrintShiftRm(instr);
-          return 8;
-        }
-      } else if (format[1] == 'v') {  // 'svc
-        ASSERT(STRING_STARTS_WITH(format, "svc"));
-        PrintSoftwareInterrupt(instr->SvcValue());
-        return 3;
-      } else if (format[1] == 'i') {  // 'sign: signed extra loads and stores
-        ASSERT(STRING_STARTS_WITH(format, "sign"));
-        if (instr->HasSign()) {
-          Print("s");
-        }
-        return 4;
-      }
-      // 's: S field of data processing instructions
-      if (instr->HasS()) {
-        Print("s");
-      }
-      return 1;
-    }
-    case 't': {  // 'target: target of branch instructions
-      ASSERT(STRING_STARTS_WITH(format, "target"));
-      int off = (instr->SImmed24Value() << 2) + 8;
-      out_buffer_pos_ += OS::SNPrintF(out_buffer_ + out_buffer_pos_,
-                                      "%+d -> %s",
-                                      off,
-                                      converter_.NameOfAddress(
-                                        reinterpret_cast<byte*>(instr) + off));
-      return 6;
-    }
-    case 'u': {  // 'u: signed or unsigned multiplies
-      // The manual gets the meaning of bit 22 backwards in the multiply
-      // instruction overview on page A3.16.2.  The instructions that
-      // exist in u and s variants are the following:
-      // smull A4.1.87
-      // umull A4.1.129
-      // umlal A4.1.128
-      // smlal A4.1.76
-      // For these 0 means u and 1 means s.  As can be seen on their individual
-      // pages.  The other 18 mul instructions have the bit set or unset in
-      // arbitrary ways that are unrelated to the signedness of the instruction.
-      // None of these 18 instructions exist in both a 'u' and an 's' variant.
-
-      if (instr->Bit(22) == 0) {
-        Print("u");
-      } else {
-        Print("s");
-      }
-      return 1;
-    }
-    case 'v': {
-      return FormatVFPinstruction(instr, format);
-    }
-    case 'S':
-    case 'D': {
-      return FormatFPRegister(instr, format);
-    }
-    case 'w': {  // 'w: W field of load and store instructions
-      if (instr->HasW()) {
-        Print("!");
-      }
-      return 1;
-    }
-    default: {
-      UNREACHABLE();
-      break;
-    }
-  }
 #endif
+    default: {
+      UNREACHABLE();
+      break;
+    }
+  }
+
   UNREACHABLE();
   return -1;
 }
@@ -794,10 +565,22 @@ void Decoder::DecodeExt2(Instruction* instr) {
       Format(instr, "srw'.    'ra, 'rs, 'rb");
       return;
     }
+#if V8_TARGET_ARCH_PPC64
+    case SRDX: {
+      Format(instr, "srd'.    'ra, 'rs, 'rb");
+      return;
+    }
+#endif
     case SRAW: {
       Format(instr, "sraw'.   'ra, 'rs, 'rb");
       return;
     }
+#if V8_TARGET_ARCH_PPC64
+    case SRAD: {
+      Format(instr, "srad'.   'ra, 'rs, 'rb");
+      return;
+    }
+#endif
     case SRAWIX: {
       Format(instr, "srawi'.  'ra,'rs,'sh");
       return;
@@ -806,6 +589,12 @@ void Decoder::DecodeExt2(Instruction* instr) {
       Format(instr, "extsh'.  'ra, 'rs");
       return;
     }
+#if V8_TARGET_ARCH_PPC64
+    case EXTSW: {
+      Format(instr, "extsw'.  'ra, 'rs");
+      return;
+    }
+#endif
     case EXTSB: {
       Format(instr, "extsb'.  'ra, 'rs");
       return;
@@ -844,6 +633,13 @@ void Decoder::DecodeExt2(Instruction* instr) {
     }
   }
 
+  switch (instr->Bits(10, 2) << 2) {
+    case SRADIX: {
+      Format(instr, "sradi'.  'ra,'rs,'sh");
+      return;
+    }
+  }
+
   // ?? are all of these xo_form?
   switch (instr->Bits(9, 1) << 1) {
     case CMP: {
@@ -854,6 +650,12 @@ void Decoder::DecodeExt2(Instruction* instr) {
       Format(instr, "slw'.   'ra, 'rs, 'rb");
       break;
     }
+#if V8_TARGET_ARCH_PPC64
+    case SLDX: {
+      Format(instr, "sld'.   'ra, 'rs, 'rb");
+      break;
+    }
+#endif
     case SUBFCX: {
       Format(instr, "subfc'. 'rt, 'ra, 'rb");
       break;
@@ -866,6 +668,12 @@ void Decoder::DecodeExt2(Instruction* instr) {
       Format(instr, "cntlzw'. 'ra, 'rs");
       break;
     }
+#if V8_TARGET_ARCH_PPC64
+    case CNTLZDX: {
+      Format(instr, "cntlzd'. 'ra, 'rs");
+      break;
+    }
+#endif
     case ANDX: {
       Format(instr, "and'.    'ra, 'rs, 'rb");
       break;
@@ -994,6 +802,24 @@ void Decoder::DecodeExt2(Instruction* instr) {
       Format(instr, "lhzux   'rt, 'ra, 'rb");
       break;
     }
+#if V8_TARGET_ARCH_PPC64
+    case LDX: {
+      Format(instr, "ldx     'rt, 'ra, 'rb");
+      break;
+    }
+    case LDUX: {
+      Format(instr, "ldux    'rt, 'ra, 'rb");
+      break;
+    }
+    case STDX: {
+      Format(instr, "stdx    'rt, 'ra, 'rb");
+      break;
+    }
+    case STDUX: {
+      Format(instr, "stdux   'rt, 'ra, 'rb");
+      break;
+    }
+#endif
     default: {
       Unknown(instr);  // not used by V8
     }
@@ -1091,6 +917,26 @@ void Decoder::DecodeExt4(Instruction* instr) {
   }
 }
 
+void Decoder::DecodeExt5(Instruction* instr) {
+  switch (instr->Bits(4, 2) << 2) {
+    case RLDICL: {
+      Format(instr, "rldicl'. 'ra, 'rs, 'sh, 'mb");
+      break;
+    }
+    case RLDICR: {
+      Format(instr, "rldicr'. 'ra, 'rs, 'sh, 'me");
+      break;
+    }
+    case RLDIC: {
+      Format(instr, "rldic'.  'ra, 'rs, 'sh, 'mb");
+      break;
+    }
+    default: {
+      Unknown(instr);  // not used by V8
+    }
+  }
+}
+
 #undef VERIFIY
 
 // Disassemble the instruction at *instr_ptr into the output buffer.
@@ -1119,7 +965,7 @@ int Decoder::InstructionDecode(byte* instr_ptr) {
       break;
     }
     case CMPI: {
-      Format(instr, "cmpwi   'ra, 'int16");
+      Format(instr, "cmpi    'ra, 'int16");
       break;
     }
     case ADDIC: {
@@ -1344,16 +1190,30 @@ int Decoder::InstructionDecode(byte* instr_ptr) {
       DecodeExt4(instr);
       break;
     }
+    case EXT5: {
+      DecodeExt5(instr);
+      break;
+    }
 #if V8_TARGET_ARCH_PPC64
     case LD: {
-      Format(instr, "ld      'rt, 'int16('ra)");
+      switch (instr->Bits(1, 0)) {
+        case 0:
+          Format(instr, "ld      'rt, 'd('ra)");
+          break;
+        case 1:
+          Format(instr, "ldu     'rt, 'd('ra)");
+          break;
+        case 2:
+          Format(instr, "lwa     'rt, 'd('ra)");
+          break;
+      }
       break;
     }
     case STD: {  // could be STD or STDU
       if (instr->Bit(0) == 0) {
-        Format(instr, "std     'rs, 'int16('ra)");
+        Format(instr, "std     'rs, 'd('ra)");
       } else {
-        Format(instr, "stdu    'rs, 'int16('ra)");
+        Format(instr, "stdu    'rs, 'd('ra)");
       }
       break;
     }
@@ -1376,48 +1236,6 @@ int Decoder::InstructionDecode(byte* instr_ptr) {
     }
   }
 
-
-#if 0
-  if (instr->ConditionField() == kSpecialCondition) {
-    Unknown(instr);
-    return Instruction::kInstrSize;
-  }
-  switch (instr->TypeValue()) {
-    case 0:
-    case 1: {
-      DecodeType01(instr);
-      break;
-    }
-    case 2: {
-      DecodeType2(instr);
-      break;
-    }
-    case 3: {
-      DecodeType3(instr);
-      break;
-    }
-    case 4: {
-      DecodeType4(instr);
-      break;
-    }
-    case 5: {
-      DecodeType5(instr);
-      break;
-    }
-    case 6: {
-      DecodeType6(instr);
-      break;
-    }
-    case 7: {
-      return DecodeType7(instr);
-    }
-    default: {
-      // The type field is 3-bits in the ARM encoding.
-      UNREACHABLE();
-      break;
-    }
-  }
-#endif
   return Instruction::kInstrSize;
 }
 
@@ -1446,18 +1264,16 @@ const char* NameConverter::NameOfCPURegister(int reg) const {
   return v8::internal::Registers::Name(reg);
 }
 
-
 const char* NameConverter::NameOfByteCPURegister(int reg) const {
-  UNREACHABLE();  // ARM does not have the concept of a byte register
+  UNREACHABLE();  // PPC does not have the concept of a byte register
   return "nobytereg";
 }
 
 
 const char* NameConverter::NameOfXMMRegister(int reg) const {
-  UNREACHABLE();  // ARM does not have any XMM registers
+  UNREACHABLE();  // PPC does not have any XMM registers
   return "noxmmreg";
 }
-
 
 const char* NameConverter::NameInCode(byte* addr) const {
   // The default name converter is called for unknown code. So we will not try

@@ -41,8 +41,6 @@ const int kNumRegisters = 32;
 const int kNumFPDoubleRegisters = 32;
 const int kNumFPRegisters = kNumFPDoubleRegisters;
 
-// PPC doesn't really have a PC register - assign a fake number for simulation
-const int kPCRegister = -2;
 const int kNoRegister = -1;
 
 // sign-extend the least significant 16-bit of value <imm>
@@ -52,7 +50,7 @@ const int kNoRegister = -1;
 // Conditions.
 
 // Defines constants and accessor classes to assemble, disassemble and
-// simulate ARM instructions.
+// simulate PPC instructions.
 //
 // Section references in the code refer to the "PowerPC Microprocessor
 // Family: The Programmer.s Reference Guide" from 10/95
@@ -190,11 +188,14 @@ enum OpcodeExt2 {
   LWZX = 23 << 1,    // load word zero w/ x-form
   SLWX = 24 << 1,
   CNTLZWX = 26 << 1,
+  SLDX = 27 << 1,
   ANDX = 28 << 1,
   CMPL = 32 << 1,
   SUBFX = 40 << 1,
+  LDUX = 53 << 1,
   DCBST = 54 << 1,
   LWZUX = 55 << 1,   // load word zero w/ update x-form
+  CNTLZDX = 58 << 1,
   ANDCX = 60 << 1,
   MULHWX = 75 << 1,
   DCBF = 86 << 1,
@@ -204,14 +205,14 @@ enum OpcodeExt2 {
   NORX = 124 << 1,
   SUBFEX = 136 << 1,
   ADDEX = 138 << 1,
+  STDX = 149 << 1,
   STWX = 151 << 1,    // store word w/ x-form
+  STDUX = 181 << 1,
   STWUX = 183 << 1,   // store word w/ update x-form
 /*
   MTCRF
   MTMSR
-  STDX
   STWCXx
-  STDUX
   SUBFZEX
 */
   ADDZEX = 202 << 1,  // Add to Zero Extended
@@ -236,7 +237,8 @@ enum OpcodeExt2 {
 
   // Below represent bits 10-1  (any value >= 512)
   LFSX = 535 << 1,    // load float-single w/ x-form
-  SRWX = 536 <<1,     // Shift Right Word
+  SRWX = 536 << 1,    // Shift Right Word
+  SRDX = 539 << 1,    // Shift Right Double Word
   LFSUX = 567 << 1,   // load float-single w/ update x-form
   SYNC = 598 << 1,    // Synchronize
   LFDX = 599 << 1,    // load float-double w/ x-form
@@ -246,10 +248,13 @@ enum OpcodeExt2 {
   STFDX = 727 << 1,   // store float-double w/ x-form
   STFDUX = 759 << 1,  // store float-double w/ update x-form
   SRAW = 792 << 1,    // Shift Right Algebraic Word
+  SRAD = 794 << 1,    // Shift Right Algebraic Double Word
   SRAWIX = 824 << 1,  // Shift Right Algebraic Word Immediate
+  SRADIX = 413 << 2,  // Shift Right Algebraic Double Word Immediate
   EXTSH = 922 << 1,   // Extend Sign Halfword
   EXTSB = 954 << 1,   // Extend Sign Byte
-  ICBI = 982 << 1     // Instruction Cache Block Invalidate
+  ICBI = 982 << 1,    // Instruction Cache Block Invalidate
+  EXTSW = 986 << 1    // Extend Sign Word
 };
 
 // Some use Bits 10-1 and other only 5-1 for the opcode
@@ -282,12 +287,15 @@ enum OpcodeExt4 {
 
 // Bits 4-2
 enum OpcodeExt5 {
-  RLDICL = 0          // Rotate Left Double Word Immediate then Clear Left
+  RLDICL = 0 << 2,    // Rotate Left Double Word Immediate then Clear Left
+  RLDICR = 1 << 2,    // Rotate Left Double Word Immediate then Clear Right
+  RLDIC  = 2 << 2     // Rotate Left Double Word Immediate then Clear
 };
 
 // Instruction encoding bits and masks.
 enum {
   // Instruction encoding bit
+  B1  = 1 << 1,
   B4  = 1 << 4,
   B5  = 1 << 5,
   B7  = 1 << 7,
@@ -322,6 +330,7 @@ enum {
   kBOfieldMask = 0x1f << 21,
   kOpcodeMask = 0x3f << 26,
   kExt2OpcodeMask = 0x1f << 1,
+  kExt5OpcodeMask = 0x3 << 2,
   kBOMask = 0x1f << 21,
   kBIMask = 0x1F << 16,
   kBDMask = 0x14 << 2,
@@ -331,7 +340,7 @@ enum {
   kTOMask = 0x1f << 21
 };
 
-// the following is to differentiate different faked ARM opcodes for
+// the following is to differentiate different faked opcodes for
 // the BOGUS PPC instruction we invented (when bit 25 is 0) or to mark
 // different stub code (when bit 25 is 1)
 //   - use primary opcode 1 for undefined instruction
@@ -345,96 +354,20 @@ enum {
 #define FAKER_SUBOPCODE 0 << MARKER_SUBOPCODE_BIT
 
 enum FAKE_OPCODE_T {
-  fMRS = 0,
-  fMSR = 1,
-  fLDR = 2,
-  fSTR = 3,
-  fLDRB = 4,
-  fSTRB = 5,
-  fLDRH = 6,
-  fSTRH = 7,
-  fLDRSH = 8,
-  fLDRD = 9,
-  fSTRD = 10,
-  fLDM = 11,
-  fSTM = 12,
-  // fSTOP = 13,
   fBKPT = 14,
-  fSVC = 15,
-  fVLDR = 16,
-  fVSTR = 17,
-  fVMOV = 18,
-  fVNEG = 19,
-  fVABS = 20,
-  fVADD = 21,
-  fVSUB = 22,
-  fVMUL = 23,
-  fVDIV = 24,
-  fVCMP = 25,
-  fVMSR = 26,
-  fVMRS = 27,
-  fVSQRT = 28,
-  fAND = 29,
-  fEOR = 30,
-  fRSB = 31,
-  fADC = 32,
-  fSBC = 33,
-  fRSC = 34,
-  fTST = 35,
-  fTEQ = 36,
-  fCMP = 37,
-  fCMN = 38,
-  fORR = 39,
-  fBIC = 40,
-  fMVN = 41,
-  fLDRSB = 42,
-  fADD = 43,
   fBranch = 44,
   // the following is the marker for ARM instruction sequences outside
   // assembler.cc that we have removed (marked by PPCPORT_UNIMPLEMENTED)
   fMASM1 = 60,
   fMASM3 = 61,
-  fMASM4 = 62,
-  fMASM5 = 63,
-  fMASM6 = 64,
-  fMASM7 = 65,
-  fMASM8 = 66,
-  fMASM12 = 67,
   fMASM13 = 68,
   fMASM16 = 69,
-  fMASM17 = 70,
-  fMASM18 = 71,
-  fMASM19 = 72,
-  fMASM20 = 73,
-  fMASM21 = 74,
   fMASM22 = 75,
   fMASM23 = 76,
   fMASM26 = 79,
-  fMASM27 = 80,
   fMASM28 = 81,
-  fMASM29 = 82,
 
-  fLITHIUM90 = 90,
   fLITHIUM91 = 91,
-  fLITHIUM92 = 92,
-  fLITHIUM93 = 93,
-  fLITHIUM94 = 94,
-  fLITHIUM95 = 95,
-  fLITHIUM96 = 96,
-  fLITHIUM97 = 97,
-  fLITHIUM98 = 98,
-  fLITHIUM99 = 99,
-  fLITHIUM100 = 100,
-  fLITHIUM101 = 101,
-  fLITHIUM102 = 102,
-  fLITHIUM103 = 103,
-  fLITHIUM104 = 104,
-  fLITHIUM105 = 105,
-  fLITHIUM106 = 106,
-  fLITHIUM107 = 107,
-  fLITHIUM108 = 108,
-  fLITHIUM109 = 109,
-  fLITHIUM110 = 110,
   fLITHIUM111 = 111,
   fLastFaker  // can't be more than 128 (2^^7)
 };
@@ -494,7 +427,7 @@ enum CRBit {
 // -----------------------------------------------------------------------------
 // Supervisor Call (svc) specific support.
 
-// Special Software Interrupt codes when used in the presence of the ARM
+// Special Software Interrupt codes when used in the presence of the PPC
 // simulator.
 // svc (formerly swi) provides a 24bit immediate value. Use bits 22:0 for
 // standard SoftwareInterrupCode. Bit 23 is reserved for the stop feature.
@@ -512,7 +445,7 @@ const uint32_t kStopCodeMask = kStopCode - 1;
 const uint32_t kMaxStopCode = kStopCode - 1;
 const int32_t  kDefaultStopCode = -1;
 
-// VFP rounding modes.
+// FP rounding modes.
 enum VFPRoundingMode {
   RN = 0,   // Round to Nearest.
   RZ = 1,   // Round towards zero.
@@ -568,8 +501,8 @@ const Instr rtCallRedirInstr = TWI;
 // -----------------------------------------------------------------------------
 // Instruction abstraction.
 
-// The class Instruction enables access to individual fields defined in the ARM
-// architecture instruction set encoding as described in figure A3-1.
+// The class Instruction enables access to individual fields defined in the PPC
+// architecture instruction set encoding.
 // Note that the Assembler uses typedef int32_t Instr.
 //
 // Example: Test whether the instruction at ptr does set the condition code
