@@ -47,7 +47,6 @@
 
 namespace v8 {
 namespace internal {
-#define INCLUDE_ARM 1
 
 #ifdef DEBUG
 bool CpuFeatures::initialized_ = false;
@@ -105,7 +104,7 @@ const int RelocInfo::kApplyMask = 1 << RelocInfo::INTERNAL_REFERENCE;
 
 bool RelocInfo::IsCodedSpecially() {
   // The deserializer needs to know whether a pointer is specially
-  // coded.  Being specially coded on PPC means that it is a lis/addic
+  // coded.  Being specially coded on PPC means that it is a lis/ori
   // instruction sequence, and that is always the case inside code
   // objects.
   return true;
@@ -135,7 +134,7 @@ void RelocInfo::PatchCodeWithCall(Address target, int guard_bytes) {
 
 // -----------------------------------------------------------------------------
 // Implementation of Operand and MemOperand
-// See assembler-arm-inl.h for inlined constructors
+// See assembler-ppc-inl.h for inlined constructors
 
 Operand::Operand(Handle<Object> handle) {
   rm_ = no_reg;
@@ -143,11 +142,11 @@ Operand::Operand(Handle<Object> handle) {
   Object* obj = *handle;
   ASSERT(!HEAP->InNewSpace(obj));
   if (obj->IsHeapObject()) {
-    imm32_ = reinterpret_cast<intptr_t>(handle.location());
+    imm_ = reinterpret_cast<intptr_t>(handle.location());
     rmode_ = RelocInfo::EMBEDDED_OBJECT;
   } else {
     // no relocation needed
-    imm32_ =  reinterpret_cast<intptr_t>(obj);
+    imm_ =  reinterpret_cast<intptr_t>(obj);
     rmode_ = RelocInfo::NONE;
   }
 }
@@ -156,14 +155,12 @@ MemOperand::MemOperand(Register rn, int32_t offset) {
   ra_ = rn;
   rb_ = no_reg;
   offset_ = offset;
-  validPPCAddressing_ = true;
 }
 
 MemOperand::MemOperand(Register ra, Register rb) {
   ra_ = ra;
   rb_ = rb;
   offset_ = 0;
-  validPPCAddressing_ = true;
 }
 
 // -----------------------------------------------------------------------------
@@ -255,7 +252,6 @@ void Assembler::Align(int m) {
 
 
 void Assembler::CodeTargetAlign() {
-  // Preferred alignment of jump targets on some ARM chips.
   Align(8);
 }
 
@@ -275,13 +271,16 @@ Condition Assembler::GetCondition(Instr instr) {
 // PowerPC
 
 bool Assembler::IsLis(Instr instr) {
-  return (instr & ADDIS) == ADDIS;
+  return (instr & kOpcodeMask) == ADDIS;
 }
 
 bool Assembler::IsAddic(Instr instr) {
-  return (instr & ADDIC) == ADDIC;
+  return (instr & kOpcodeMask) == ADDIC;
 }
 
+bool Assembler::IsOri(Instr instr) {
+  return (instr & kOpcodeMask) == ORI;
+}
 
 
 bool Assembler::IsBranch(Instr instr) {
@@ -302,12 +301,29 @@ Register Assembler::GetRB(Instr instr) {
   return reg;
 }
 
+#if V8_TARGET_ARCH_PPC64
+// This code assumes a FIXED_SEQUENCE for 64bit loads (lis/ori)
+bool Assembler::Is64BitLoadIntoR12(Instr instr1, Instr instr2,
+                             Instr instr3, Instr instr4, Instr instr5) {
+  // Check the instructions are indeed a five part load (into r12)
+  // 3d800000       lis     r12, 0
+  // 618c0000       ori     r12, r12, 0
+  // 798c07c6       rldicr  r12, r12, 32, 31
+  // 658c00c3       oris    r12, r12, 195
+  // 618ccd40       ori     r12, r12, 52544
+  return(((instr1 >> 16) == 0x3d80) && ((instr2 >> 16) == 0x618c) &&
+         (instr3 == 0x798c07c6) &&
+         ((instr4 >> 16) == 0x658c) && ((instr5 >> 16) == 0x618c));
+}
+#else
+// This code assumes a FIXED_SEQUENCE for 32bit loads (lis/ori)
 bool Assembler::Is32BitLoadIntoR12(Instr instr1, Instr instr2) {
   // Check the instruction is indeed a two part load (into r12)
   // 3d802553       lis     r12, 9555
-  // 318c5000       addic   r12, r12, 20480
-  return(((instr1 >> 16) == 0x3d80) && ((instr2 >> 16) == 0x318c));
+  // 618c5000       ori   r12, r12, 20480
+  return(((instr1 >> 16) == 0x3d80) && ((instr2 >> 16) == 0x618c));
 }
+#endif
 
 bool Assembler::IsCmpRegister(Instr instr) {
   return (((instr & kOpcodeMask) == EXT2) &&
@@ -317,6 +333,13 @@ bool Assembler::IsCmpRegister(Instr instr) {
 bool Assembler::IsRlwinm(Instr instr) {
   return ((instr & kOpcodeMask) == RLWINMX);
 }
+
+#if V8_TARGET_ARCH_PPC64
+bool Assembler::IsRldicl(Instr instr) {
+  return (((instr & kOpcodeMask) == EXT5) &&
+          ((instr & kExt5OpcodeMask) == RLDICL));
+}
+#endif
 
 bool Assembler::IsCmpImmediate(Instr instr) {
   return ((instr & kOpcodeMask) == CMPI);
@@ -486,14 +509,6 @@ bool Assembler::is_near(Label* L, Condition cond) {
   return is_intn(offset, maxReach);
 }
 
-// We have to use a temporary register for things that can be relocated even
-// if they can be encoded in the 16 bits of immediate-offset instruction
-// space.  There is no guarantee that the relocated location can be similarly
-// encoded.
-bool Assembler::MustUseReg(RelocInfo::Mode rmode) {
-  return rmode != RelocInfo::NONE;
-}
-
 void Assembler::a_form(Instr instr,
                        DwVfpRegister frt,
                        DwVfpRegister fra,
@@ -505,16 +520,17 @@ void Assembler::a_form(Instr instr,
 void Assembler::d_form(Instr instr,
                         Register rt,
                         Register ra,
-                        const int val,
+                        const intptr_t val,
                         bool signed_disp) {
   if (signed_disp) {
     if (!is_int16(val)) {
-      PrintF("val = %d, 0x%x\n", val, val);
+      PrintF("val = %" V8PRIdPTR ", 0x%" V8PRIxPTR "\n", val, val);
     }
     ASSERT(is_int16(val));
   } else {
     if (!is_uint16(val)) {
-      PrintF("val = %d, 0x%x, is_unsigned_imm16(val)=%d, kImm16Mask=0x%x\n",
+      PrintF("val = %" V8PRIdPTR ", 0x%" V8PRIxPTR
+             ", is_unsigned_imm16(val)=%d, kImm16Mask=0x%x\n",
              val, val, is_uint16(val), kImm16Mask);
     }
     ASSERT(is_uint16(val));
@@ -537,6 +553,21 @@ void Assembler::xo_form(Instr instr,
                          OEBit o,
                          RCBit r) {
   emit(instr | rt.code()*B21 | ra.code()*B16 | rb.code()*B11 | o | r);
+}
+
+void Assembler::md_form(Instr instr,
+                        Register ra,
+                        Register rs,
+                        int shift,
+                        int maskbit,
+                        RCBit r) {
+  int sh0_4 = shift & 0x1f;
+  int sh5   = (shift >> 5) & 0x1;
+  int m0_4  = maskbit & 0x1f;
+  int m5    = (maskbit >> 5) & 0x1;
+
+  emit(instr | rs.code()*B21 | ra.code()*B16 |
+       sh0_4*B11 | m0_4*B6 | m5*B5 | sh5*B1 | r);
 }
 
 // Returns the next free trampoline entry.
@@ -645,11 +676,11 @@ void Assembler::b(int branch_offset, LKBit lk) {
 }
 
 void Assembler::xori(Register dst, Register src, const Operand& imm) {
-  d_form(XORI, src, dst, imm.imm32_, false);
+  d_form(XORI, src, dst, imm.imm_, false);
 }
 
 void Assembler::xoris(Register ra, Register rs, const Operand& imm) {
-  d_form(XORIS, rs, ra, imm.imm32_, false);
+  d_form(XORIS, rs, ra, imm.imm_, false);
 }
 
 void Assembler::xor_(Register dst, Register src1, Register src2, RCBit rc) {
@@ -683,23 +714,23 @@ void Assembler::rlwimi(Register ra, Register rs,
 
 void Assembler::slwi(Register dst, Register src, const Operand& val,
                      RCBit rc) {
-  ASSERT((32 > val.imm32_)&&(val.imm32_ >= 0));
-  rlwinm(dst, src, val.imm32_, 0, 31-val.imm32_, rc);
+  ASSERT((32 > val.imm_)&&(val.imm_ >= 0));
+  rlwinm(dst, src, val.imm_, 0, 31-val.imm_, rc);
 }
 void Assembler::srwi(Register dst, Register src, const Operand& val,
                      RCBit rc) {
-  ASSERT((32 > val.imm32_)&&(val.imm32_ >= 0));
-  rlwinm(dst, src, 32-val.imm32_, val.imm32_, 31, rc);
+  ASSERT((32 > val.imm_)&&(val.imm_ >= 0));
+  rlwinm(dst, src, 32-val.imm_, val.imm_, 31, rc);
 }
 void Assembler::clrrwi(Register dst, Register src, const Operand& val,
                        RCBit rc) {
-  ASSERT((32 > val.imm32_)&&(val.imm32_ >= 0));
-  rlwinm(dst, src, 0, 0, 31-val.imm32_, rc);
+  ASSERT((32 > val.imm_)&&(val.imm_ >= 0));
+  rlwinm(dst, src, 0, 0, 31-val.imm_, rc);
 }
 void Assembler::clrlwi(Register dst, Register src, const Operand& val,
                        RCBit rc) {
-  ASSERT((32 > val.imm32_)&&(val.imm32_ >= 0));
-  rlwinm(dst, src, 0, val.imm32_, 31, rc);
+  ASSERT((32 > val.imm_)&&(val.imm_ >= 0));
+  rlwinm(dst, src, 0, val.imm_, 31, rc);
 }
 
 
@@ -719,14 +750,8 @@ void Assembler::sraw(Register ra, Register rs, Register rb, RCBit r) {
   x_form(EXT2 | SRAW, ra, rs, rb, r);
 }
 
-void Assembler::rldicl(Register ra, Register rs, int sh, int mb, RCBit r) {
-  // MD format instruction
-  emit(EXT5 | RLDICL | rs.code()*B21 | ra.code()*B16 | sh*B11 | mb*B5 | r);
-}
-
-// TODO(penguin): rename sub to subi to be consistent w/ addi
-void Assembler::sub(Register dst, Register src, const Operand& imm) {
-  addi(dst, src, Operand(-(imm.imm32_)));
+void Assembler::subi(Register dst, Register src, const Operand& imm) {
+  addi(dst, src, Operand(-(imm.imm_)));
 }
 
 void Assembler::addc(Register dst, Register src1, Register src2,
@@ -750,7 +775,7 @@ void Assembler::subfc(Register dst, Register src1, Register src2,
 }
 
 void Assembler::subfic(Register dst, Register src, const Operand& imm) {
-  d_form(SUBFIC, dst, src, imm.imm32_, true);
+  d_form(SUBFIC, dst, src, imm.imm_, true);
 }
 
 void Assembler::add(Register dst, Register src1, Register src2,
@@ -778,24 +803,24 @@ void Assembler::divw(Register dst, Register src1, Register src2,
 
 void Assembler::addi(Register dst, Register src, const Operand& imm) {
   ASSERT(!src.is(r0));  // use li instead to show intent
-  d_form(ADDI, dst, src, imm.imm32_, true);
+  d_form(ADDI, dst, src, imm.imm_, true);
 }
 
 void  Assembler::addis(Register dst, Register src, const Operand& imm) {
   ASSERT(!src.is(r0));  // use lis instead to show intent
-  d_form(ADDIS, dst, src, imm.imm32_, true);
+  d_form(ADDIS, dst, src, imm.imm_, true);
 }
 
 void Assembler::addic(Register dst, Register src, const Operand& imm) {
-  d_form(ADDIC, dst, src, imm.imm32_, true);
+  d_form(ADDIC, dst, src, imm.imm_, true);
 }
 
 void  Assembler::andi(Register ra, Register rs, const Operand& imm) {
-  d_form(ANDIx, rs, ra, imm.imm32_, false);
+  d_form(ANDIx, rs, ra, imm.imm_, false);
 }
 
 void Assembler::andis(Register ra, Register rs, const Operand& imm) {
-  d_form(ANDISx, rs, ra, imm.imm32_, false);
+  d_form(ANDISx, rs, ra, imm.imm_, false);
 }
 
 void Assembler::nor(Register dst, Register src1, Register src2, RCBit r) {
@@ -807,11 +832,11 @@ void Assembler::notx(Register dst, Register src, RCBit r) {
 }
 
 void Assembler::ori(Register ra, Register rs, const Operand& imm) {
-  d_form(ORI, rs, ra, imm.imm32_, false);
+  d_form(ORI, rs, ra, imm.imm_, false);
 }
 
 void Assembler::oris(Register dst, Register src, const Operand& imm) {
-  d_form(ORIS, src, dst, imm.imm32_, false);
+  d_form(ORIS, src, dst, imm.imm_, false);
 }
 
 void Assembler::orx(Register dst, Register src1, Register src2, RCBit rc) {
@@ -819,38 +844,60 @@ void Assembler::orx(Register dst, Register src1, Register src2, RCBit rc) {
 }
 
 void Assembler::cmpi(Register src1, const Operand& src2, CRegister cr) {
-  int imm16 = src2.imm32_;
+  intptr_t imm16 = src2.imm_;
+#if V8_TARGET_ARCH_PPC64
+  int L = 1;
+#else
+  int L = 0;
+#endif
   ASSERT(is_int16(imm16));
   ASSERT(cr.code() >= 0 && cr.code() <= 7);
   imm16 &= kImm16Mask;
-  emit(CMPI | cr.code()*B23 | src1.code()*B16 | imm16);
+  emit(CMPI | cr.code()*B23 | L*B21 | src1.code()*B16 | imm16);
 }
 
 void Assembler::cmpli(Register src1, const Operand& src2, CRegister cr) {
-  uint uimm16 = src2.imm32_;
+  uintptr_t uimm16 = src2.imm_;
+#if V8_TARGET_ARCH_PPC64
+  int L = 1;
+#else
+  int L = 0;
+#endif
   ASSERT(is_uint16(uimm16));
   ASSERT(cr.code() >= 0 && cr.code() <= 7);
   uimm16 &= kImm16Mask;
-  emit(CMPLI | cr.code()*B23 | src1.code()*B16 | uimm16);
+  emit(CMPLI | cr.code()*B23 | L*B21 | src1.code()*B16 | uimm16);
 }
 
 void Assembler::cmp(Register src1, Register src2, CRegister cr) {
+#if V8_TARGET_ARCH_PPC64
+  int L = 1;
+#else
+  int L = 0;
+#endif
   ASSERT(cr.code() >= 0 && cr.code() <= 7);
-  emit(EXT2 | CMP | cr.code()*B23 | src1.code()*B16 | src2.code()*B11);
+  emit(EXT2 | CMP | cr.code()*B23 | L*B21 | src1.code()*B16 |
+       src2.code()*B11);
 }
 
 void Assembler::cmpl(Register src1, Register src2, CRegister cr) {
+#if V8_TARGET_ARCH_PPC64
+  int L = 1;
+#else
+  int L = 0;
+#endif
   ASSERT(cr.code() >= 0 && cr.code() <= 7);
-  emit(EXT2 | CMPL | cr.code()*B23 | src1.code()*B16 | src2.code()*B11);
+  emit(EXT2 | CMPL | cr.code()*B23 | L*B21 | src1.code()*B16 |
+       src2.code()*B11);
 }
 
 // Pseudo op - load immediate
 void Assembler::li(Register dst, const Operand &imm) {
-  d_form(ADDI, dst, r0, imm.imm32_, true);
+  d_form(ADDI, dst, r0, imm.imm_, true);
 }
 
 void  Assembler::lis(Register dst, const Operand& imm) {
-  d_form(ADDIS, dst, r0, imm.imm32_, true);
+  d_form(ADDIS, dst, r0, imm.imm_, true);
 }
 
 // Pseudo op - move register
@@ -860,7 +907,7 @@ void Assembler::mr(Register dst, Register src) {
 }
 
 void Assembler::lbz(Register dst, const MemOperand &src) {
-  ASSERT(!src.ra_.is(r0) && src.isPPCAddressing());
+  ASSERT(!src.ra_.is(r0));
   d_form(LBZ, dst, src.ra(), src.offset(), true);
 }
 
@@ -879,7 +926,7 @@ void Assembler::lbzux(Register rt, const MemOperand & src) {
 }
 
 void Assembler::lhz(Register dst, const MemOperand &src) {
-  ASSERT(!src.ra_.is(r0) && src.isPPCAddressing());
+  ASSERT(!src.ra_.is(r0));
   d_form(LHZ, dst, src.ra(), src.offset(), true);
 }
 
@@ -898,12 +945,12 @@ void Assembler::lhzux(Register rt, const MemOperand & src) {
 }
 
 void Assembler::lwz(Register dst, const MemOperand &src) {
-  ASSERT(!src.ra_.is(r0) && src.isPPCAddressing());
+  ASSERT(!src.ra_.is(r0));
   d_form(LWZ, dst, src.ra(), src.offset(), true);
 }
 
 void Assembler::lwzu(Register dst, const MemOperand &src) {
-  ASSERT(!src.ra_.is(r0) && src.isPPCAddressing());
+  ASSERT(!src.ra_.is(r0));
   d_form(LWZU, dst, src.ra(), src.offset(), true);
 }
 
@@ -921,8 +968,20 @@ void Assembler::lwzux(Register rt, const MemOperand & src) {
   emit(EXT2 | LWZUX | rt.code()*B21 | ra.code()*B16 | rb.code()*B11 | LeaveRC);
 }
 
+void Assembler::lwa(Register dst, const MemOperand &src) {
+#if V8_TARGET_ARCH_PPC64
+  int offset = src.offset();
+  ASSERT(!src.ra_.is(r0));
+  ASSERT(!(offset & 3) && is_int16(offset));
+  offset = kImm16Mask & offset;
+  emit(LD | dst.code()*B21 | src.ra().code()*B16 | offset | 2);
+#else
+  lwz(dst, src);
+#endif
+}
+
 void Assembler::stb(Register dst, const MemOperand &src) {
-  ASSERT(!src.ra_.is(r0) && src.isPPCAddressing());
+  ASSERT(!src.ra_.is(r0));
   d_form(STB, dst, src.ra(), src.offset(), true);
 }
 
@@ -941,7 +1000,7 @@ void Assembler::stbux(Register rs, const MemOperand &src) {
 }
 
 void Assembler::sth(Register dst, const MemOperand &src) {
-  ASSERT(!src.ra_.is(r0) && src.isPPCAddressing());
+  ASSERT(!src.ra_.is(r0));
   d_form(STH, dst, src.ra(), src.offset(), true);
 }
 
@@ -960,12 +1019,12 @@ void Assembler::sthux(Register rs, const MemOperand &src) {
 }
 
 void Assembler::stw(Register dst, const MemOperand &src) {
-  ASSERT(!src.ra_.is(r0) && src.isPPCAddressing());
+  ASSERT(!src.ra_.is(r0));
   d_form(STW, dst, src.ra(), src.offset(), true);
 }
 
 void Assembler::stwu(Register dst, const MemOperand &src) {
-  ASSERT(!src.ra_.is(r0) && src.isPPCAddressing());
+  ASSERT(!src.ra_.is(r0));
   d_form(STWU, dst, src.ra(), src.offset(), true);
 }
 
@@ -1002,23 +1061,123 @@ void Assembler::andc(Register dst, Register src1, Register src2, RCBit rc) {
 #if V8_TARGET_ARCH_PPC64
 // 64bit specific instructions
 void Assembler::ld(Register rd, const MemOperand &src) {
-  ASSERT(!src.ra_.is(r0) && src.isPPCAddressing());
-  // todo - need to do range check on offset
-  emit(LD | rd.code()*B21 | src.ra().code()*B16 | src.offset() << 2);
+  int offset = src.offset();
+  ASSERT(!src.ra_.is(r0));
+  ASSERT(!(offset & 3) && is_int16(offset));
+  offset = kImm16Mask & offset;
+  emit(LD | rd.code()*B21 | src.ra().code()*B16 | offset);
+}
+
+void Assembler::ldx(Register rd, const MemOperand &src) {
+  Register ra = src.ra();
+  Register rb = src.rb();
+  ASSERT(!ra.is(r0));
+  emit(EXT2 | LDX | rd.code()*B21 | ra.code()*B16 | rb.code()*B11);
+}
+
+void Assembler::ldu(Register rd, const MemOperand &src) {
+  int offset = src.offset();
+  ASSERT(!src.ra_.is(r0));
+  ASSERT(!(offset & 3) && is_int16(offset));
+  offset = kImm16Mask & offset;
+  emit(LD | rd.code()*B21 | src.ra().code()*B16 | offset | 1);
+}
+
+void Assembler::ldux(Register rd, const MemOperand &src) {
+  Register ra = src.ra();
+  Register rb = src.rb();
+  ASSERT(!ra.is(r0));
+  emit(EXT2 | LDUX | rd.code()*B21 | ra.code()*B16 | rb.code()*B11);
 }
 
 void Assembler::std(Register rs, const MemOperand &src) {
-  ASSERT(!src.ra_.is(r0) && src.isPPCAddressing());
-  // todo - need to do range check on offset
-  int offset = kImm16Mask & src.offset();
-  emit(STD | rs.code()*B21 | src.ra().code()*B16 | offset << 2);
+  int offset = src.offset();
+  ASSERT(!src.ra_.is(r0));
+  ASSERT(!(offset & 3) && is_int16(offset));
+  offset = kImm16Mask & offset;
+  emit(STD | rs.code()*B21 | src.ra().code()*B16 | offset);
+}
+
+void Assembler::stdx(Register rs, const MemOperand &src) {
+  Register ra = src.ra();
+  Register rb = src.rb();
+  ASSERT(!ra.is(r0));
+  emit(EXT2 | STDX | rs.code()*B21 | ra.code()*B16 | rb.code()*B11);
 }
 
 void Assembler::stdu(Register rs, const MemOperand &src) {
-  ASSERT(!src.ra_.is(r0) && src.isPPCAddressing());
-  // todo - need to do range check on offset
-  int offset = kImm16Mask & src.offset();
-  emit(STD | rs.code()*B21 | src.ra().code()*B16 | offset << 2 | 1);
+  int offset = src.offset();
+  ASSERT(!src.ra_.is(r0));
+  ASSERT(!(offset & 3) && is_int16(offset));
+  offset = kImm16Mask & offset;
+  emit(STD | rs.code()*B21 | src.ra().code()*B16 | offset | 1);
+}
+
+void Assembler::stdux(Register rs, const MemOperand &src) {
+  Register ra = src.ra();
+  Register rb = src.rb();
+  ASSERT(!ra.is(r0));
+  emit(EXT2 | STDUX | rs.code()*B21 | ra.code()*B16 | rb.code()*B11);
+}
+
+void Assembler::rldic(Register ra, Register rs, int sh, int mb, RCBit r) {
+  md_form(EXT5 | RLDIC, ra, rs, sh, mb, r);
+}
+
+void Assembler::rldicl(Register ra, Register rs, int sh, int mb, RCBit r) {
+  md_form(EXT5 | RLDICL, ra, rs, sh, mb, r);
+}
+
+void Assembler::rldicr(Register ra, Register rs, int sh, int me, RCBit r) {
+  md_form(EXT5 | RLDICR, ra, rs, sh, me, r);
+}
+
+void Assembler::sldi(Register dst, Register src, const Operand& val,
+                     RCBit rc) {
+  ASSERT((64 > val.imm_)&&(val.imm_ >= 0));
+  rldicr(dst, src, val.imm_, 63-val.imm_, rc);
+}
+void Assembler::srdi(Register dst, Register src, const Operand& val,
+                     RCBit rc) {
+  ASSERT((64 > val.imm_)&&(val.imm_ >= 0));
+  rldicl(dst, src, 64-val.imm_, val.imm_, rc);
+}
+void Assembler::clrrdi(Register dst, Register src, const Operand& val,
+                       RCBit rc) {
+  ASSERT((64 > val.imm_)&&(val.imm_ >= 0));
+  rldicr(dst, src, 0, 63-val.imm_, rc);
+}
+void Assembler::clrldi(Register dst, Register src, const Operand& val,
+                       RCBit rc) {
+  ASSERT((64 > val.imm_)&&(val.imm_ >= 0));
+  rldicl(dst, src, 0, val.imm_, rc);
+}
+
+void Assembler::sradi(Register ra, Register rs, int sh, RCBit r) {
+  int sh0_4 = sh & 0x1f;
+  int sh5   = (sh >> 5) & 0x1;
+
+  emit(EXT2 | SRADIX | rs.code()*B21 | ra.code()*B16 | sh0_4*B11 | sh5*B1 | r);
+}
+
+void Assembler::srd(Register dst, Register src1, Register src2, RCBit r) {
+  x_form(EXT2 | SRDX, dst, src1, src2, r);
+}
+
+void Assembler::sld(Register dst, Register src1, Register src2, RCBit r) {
+  x_form(EXT2 | SLDX, dst, src1, src2, r);
+}
+
+void Assembler::srad(Register ra, Register rs, Register rb, RCBit r) {
+  x_form(EXT2 | SRAD, ra, rs, rb, r);
+}
+
+void Assembler::cntlzd_(Register ra, Register rs, RCBit rc) {
+  x_form(EXT2 | CNTLZDX, ra, rs, r0, rc);
+}
+
+void Assembler::extsw(Register rs, Register ra, RCBit rc) {
+  emit(EXT2 | EXTSW | rs.code()*B21 | ra.code()*B16 | rc);
 }
 #endif
 
@@ -1042,9 +1201,13 @@ void Assembler::function_descriptor() {
   RecordRelocInfo(RelocInfo::INTERNAL_REFERENCE);
 #if V8_TARGET_ARCH_PPC64
   uint64_t value = reinterpret_cast<uint64_t>(pc_) + 3 * kPointerSize;
-  // Possible endian issue here
+#if __BYTE_ORDER == __LITTLE_ENDIAN
+  emit(static_cast<uint32_t>(value & 0xFFFFFFFF));
+  emit(static_cast<uint32_t>(value >> 32));
+#else
   emit(static_cast<uint32_t>(value >> 32));
   emit(static_cast<uint32_t>(value & 0xFFFFFFFF));
+#endif
   emit(static_cast<Instr>(0));
   emit(static_cast<Instr>(0));
   emit(static_cast<Instr>(0));
@@ -1057,36 +1220,49 @@ void Assembler::function_descriptor() {
 }
 // end PowerPC
 
-void Assembler::cmp(Register src1, const Operand& src2, Condition cond) {
-  PPCPORT_CHECK(false);
-  EMIT_FAKE_ARM_INSTR(fCMP);
-}
-
-void Assembler::cmn(Register src1, const Operand& src2, Condition cond) {
-  PPCPORT_CHECK(false);
-  EMIT_FAKE_ARM_INSTR(fCMN);
-}
-
 // Primarily used for loading constants
 // This should really move to be in macro-assembler as it
 // is really a pseudo instruction
+// Some usages of this intend for a FIXED_SEQUENCE to be used
+// Todo - break this dependency so we can optimize mov() in general
+// and only use the generic version when we require a fixed sequence
 void Assembler::mov(Register dst, const Operand& src) {
   BlockTrampolinePoolScope block_trampoline_pool(this);
-  if (MustUseReg(src.rmode_)) {
+  if (src.rmode_ != RelocInfo::NONE) {
     // some form of relocation needed
-    RecordRelocInfo(src.rmode_, src.imm32_);
+    RecordRelocInfo(src.rmode_, src.imm_);
   }
 
+#if V8_TARGET_ARCH_PPC64
+  int64_t value = src.immediate();
+  int32_t hi_32 = static_cast<int64_t>(value) >> 32;
+  int32_t lo_32 = static_cast<int32_t>(value);
+  int hi_word = static_cast<int>(hi_32) >> 16;
+  int lo_word = static_cast<int>(hi_32) & 0xFFFF;
+  lis(dst, Operand(SIGN_EXT_IMM16(hi_word)));
+  ori(dst, dst, Operand(lo_word));
+  sldi(dst, dst, Operand(32));
+  hi_word = (static_cast<int>(lo_32) >> 16) & 0xFFFF;
+  lo_word = static_cast<int>(lo_32) & 0xFFFF;
+  oris(dst, dst, Operand(hi_word));
+  ori(dst, dst, Operand(lo_word));
+#else
   int value = src.immediate();
-  int hi_word = static_cast<int>(value) >> 16;
-  int lo_word = SIGN_EXT_IMM16(value);
-  if (lo_word & 0x8000) {
-    // lo word is signed, so increment hi word by one
-    hi_word++;
+  if (!is_trampoline_pool_blocked()) {
+    if (is_int16(value)) {
+      li(dst, Operand(value));
+      return;
+    }
   }
+  int hi_word = static_cast<int>(value) >> 16;
+  int lo_word = static_cast<int>(value) & 0XFFFF;
 
   lis(dst, Operand(SIGN_EXT_IMM16(hi_word)));
-  addic(dst, dst, Operand(lo_word));
+  if ((!is_trampoline_pool_blocked()) && (lo_word == 0)) {
+    return;
+  }
+  ori(dst, dst, Operand(lo_word));
+#endif
 }
 
 // PowerPC
@@ -1127,11 +1303,9 @@ void Assembler::mfcr(Register dst) {
 
 // Exception-generating instructions and debugging support.
 // Stops with a non-negative code less than kNumOfWatchedStops support
-// enabling/disabling and a counter feature. See simulator-arm.h .
+// enabling/disabling and a counter feature. See simulator-ppc.h .
 void Assembler::stop(const char* msg, Condition cond, int32_t code,
                      CRegister cr) {
-  // PPCPORT_CHECK(false);
-  // EMIT_FAKE_ARM_INSTR(fSTOP);
   if (cond != al) {
     Label skip;
     b(NegateCondition(cond), &skip, cr);
@@ -1167,13 +1341,6 @@ void Assembler::info(const char* msg, Condition cond, int32_t code,
   }
 }
 
-
-void Assembler::svc(uint32_t imm24, Condition cond) {
-  PPCPORT_CHECK(false);
-  EMIT_FAKE_ARM_INSTR(fSVC);
-}
-
-
 void Assembler::dcbf(Register ra, Register rb) {
     emit(EXT2 | DCBF | ra.code()*B16 | rb.code()*B11);
 }
@@ -1195,7 +1362,7 @@ void Assembler::isync() {
 void Assembler::lfd(const DwVfpRegister frt, const MemOperand &src) {
   int offset = src.offset();
   Register ra = src.ra();
-  ASSERT(is_int16(offset) && src.isPPCAddressing());
+  ASSERT(is_int16(offset));
   int imm16 = offset & kImm16Mask;
   // could be x_form instruction with some casting magic
   emit(LFD | frt.code()*B21 | ra.code()*B16 | imm16);
@@ -1204,7 +1371,7 @@ void Assembler::lfd(const DwVfpRegister frt, const MemOperand &src) {
 void Assembler::lfdu(const DwVfpRegister frt, const MemOperand &src) {
   int offset = src.offset();
   Register ra = src.ra();
-  ASSERT(is_int16(offset) && src.isPPCAddressing());
+  ASSERT(is_int16(offset));
   int imm16 = offset & kImm16Mask;
   // could be x_form instruction with some casting magic
   emit(LFDU | frt.code()*B21 | ra.code()*B16 | imm16);
@@ -1227,7 +1394,7 @@ void Assembler::lfdux(const DwVfpRegister frt, const MemOperand & src) {
 void Assembler::lfs(const DwVfpRegister frt, const MemOperand &src) {
   int offset = src.offset();
   Register ra = src.ra();
-  ASSERT(is_int16(offset) && src.isPPCAddressing());
+  ASSERT(is_int16(offset));
   ASSERT(!ra.is(r0));
   int imm16 = offset & kImm16Mask;
   // could be x_form instruction with some casting magic
@@ -1237,7 +1404,7 @@ void Assembler::lfs(const DwVfpRegister frt, const MemOperand &src) {
 void Assembler::lfsu(const DwVfpRegister frt, const MemOperand &src) {
   int offset = src.offset();
   Register ra = src.ra();
-  ASSERT(is_int16(offset) && src.isPPCAddressing());
+  ASSERT(is_int16(offset));
   ASSERT(!ra.is(r0));
   int imm16 = offset & kImm16Mask;
   // could be x_form instruction with some casting magic
@@ -1261,7 +1428,7 @@ void Assembler::lfsux(const DwVfpRegister frt, const MemOperand & src) {
 void Assembler::stfd(const DwVfpRegister frs, const MemOperand &src) {
   int offset = src.offset();
   Register ra = src.ra();
-  ASSERT(is_int16(offset) && src.isPPCAddressing());
+  ASSERT(is_int16(offset));
   ASSERT(!ra.is(r0));
   int imm16 = offset & kImm16Mask;
   // could be x_form instruction with some casting magic
@@ -1271,7 +1438,7 @@ void Assembler::stfd(const DwVfpRegister frs, const MemOperand &src) {
 void Assembler::stfdu(const DwVfpRegister frs, const MemOperand &src) {
   int offset = src.offset();
   Register ra = src.ra();
-  ASSERT(is_int16(offset) && src.isPPCAddressing());
+  ASSERT(is_int16(offset));
   ASSERT(!ra.is(r0));
   int imm16 = offset & kImm16Mask;
   // could be x_form instruction with some casting magic
@@ -1295,7 +1462,7 @@ void Assembler::stfdux(const DwVfpRegister frs, const MemOperand &src) {
 void Assembler::stfs(const DwVfpRegister frs, const MemOperand &src) {
   int offset = src.offset();
   Register ra = src.ra();
-  ASSERT(is_int16(offset) && src.isPPCAddressing());
+  ASSERT(is_int16(offset));
   ASSERT(!ra.is(r0));
   int imm16 = offset & kImm16Mask;
   // could be x_form instruction with some casting magic
@@ -1305,7 +1472,7 @@ void Assembler::stfs(const DwVfpRegister frs, const MemOperand &src) {
 void Assembler::stfsu(const DwVfpRegister frs, const MemOperand &src) {
   int offset = src.offset();
   Register ra = src.ra();
-  ASSERT(is_int16(offset) && src.isPPCAddressing());
+  ASSERT(is_int16(offset));
   ASSERT(!ra.is(r0));
   int imm16 = offset & kImm16Mask;
   // could be x_form instruction with some casting magic
@@ -1441,165 +1608,6 @@ void Assembler::fabs(const DwVfpRegister frt,
                      RCBit rc) {
   emit(EXT4 | FABS | frt.code()*B21 | frb.code()*B11 | rc);
 }
-
-// Support for VFP.
-
-void Assembler::vldr(const DwVfpRegister dst,
-                     const Register base,
-                     int offset,
-                     const Condition cond) {
-  PPCPORT_CHECK(false);
-  EMIT_FAKE_ARM_INSTR(fVLDR);
-}
-
-
-void Assembler::vldr(const DwVfpRegister dst,
-                     const MemOperand& operand,
-                     const Condition cond) {
-  PPCPORT_CHECK(false);
-  EMIT_FAKE_ARM_INSTR(fVLDR);
-}
-
-void Assembler::vstr(const DwVfpRegister src,
-                     const Register base,
-                     int offset,
-                     const Condition cond) {
-  PPCPORT_CHECK(false);
-  EMIT_FAKE_ARM_INSTR(fVSTR);
-}
-
-
-void Assembler::vstr(const DwVfpRegister src,
-                     const MemOperand& operand,
-                     const Condition cond) {
-  PPCPORT_CHECK(false);
-  EMIT_FAKE_ARM_INSTR(fVSTR);
-}
-
-void Assembler::vmov(const DwVfpRegister dst,
-                     double imm,
-                     const Register scratch,
-                     const Condition cond) {
-  PPCPORT_CHECK(false);
-  EMIT_FAKE_ARM_INSTR(fVMOV);
-}
-
-void Assembler::vmov(const DwVfpRegister dst,
-                     const DwVfpRegister src,
-                     const Condition cond) {
-  PPCPORT_CHECK(false);
-  EMIT_FAKE_ARM_INSTR(fVMOV);
-}
-
-
-void Assembler::vmov(const DwVfpRegister dst,
-                     const Register src1,
-                     const Register src2,
-                     const Condition cond) {
-  PPCPORT_CHECK(false);
-  EMIT_FAKE_ARM_INSTR(fVMOV);
-}
-
-
-void Assembler::vmov(const Register dst1,
-                     const Register dst2,
-                     const DwVfpRegister src,
-                     const Condition cond) {
-  PPCPORT_CHECK(false);
-  EMIT_FAKE_ARM_INSTR(fVMOV);
-}
-
-// Type of data to read from or write to VFP register.
-// Used as specifier in generic vcvt instruction.
-enum VFPType { S32, U32, F32, F64 };
-
-void Assembler::vneg(const DwVfpRegister dst,
-                     const DwVfpRegister src,
-                     const Condition cond) {
-  PPCPORT_CHECK(false);
-  EMIT_FAKE_ARM_INSTR(fVNEG);
-}
-
-
-void Assembler::vabs(const DwVfpRegister dst,
-                     const DwVfpRegister src,
-                     const Condition cond) {
-  PPCPORT_CHECK(false);
-  EMIT_FAKE_ARM_INSTR(fVABS);
-}
-
-
-void Assembler::vadd(const DwVfpRegister dst,
-                     const DwVfpRegister src1,
-                     const DwVfpRegister src2,
-                     const Condition cond) {
-  PPCPORT_CHECK(false);
-  EMIT_FAKE_ARM_INSTR(fVADD);
-}
-
-
-void Assembler::vsub(const DwVfpRegister dst,
-                     const DwVfpRegister src1,
-                     const DwVfpRegister src2,
-                     const Condition cond) {
-  PPCPORT_CHECK(false);
-  EMIT_FAKE_ARM_INSTR(fVSUB);
-}
-
-
-void Assembler::vmul(const DwVfpRegister dst,
-                     const DwVfpRegister src1,
-                     const DwVfpRegister src2,
-                     const Condition cond) {
-  PPCPORT_CHECK(false);
-  EMIT_FAKE_ARM_INSTR(fVMUL);
-}
-
-
-void Assembler::vdiv(const DwVfpRegister dst,
-                     const DwVfpRegister src1,
-                     const DwVfpRegister src2,
-                     const Condition cond) {
-  PPCPORT_CHECK(false);
-  EMIT_FAKE_ARM_INSTR(fVDIV);
-}
-
-
-void Assembler::vcmp(const DwVfpRegister src1,
-                     const DwVfpRegister src2,
-                     const Condition cond) {
-  PPCPORT_CHECK(false);
-  EMIT_FAKE_ARM_INSTR(fVCMP);
-}
-
-
-void Assembler::vcmp(const DwVfpRegister src1,
-                     const double src2,
-                     const Condition cond) {
-  PPCPORT_CHECK(false);
-  EMIT_FAKE_ARM_INSTR(fVCMP);
-}
-
-
-void Assembler::vmsr(Register dst, Condition cond) {
-  PPCPORT_CHECK(false);
-  EMIT_FAKE_ARM_INSTR(fVMSR);
-}
-
-
-void Assembler::vmrs(Register dst, Condition cond) {
-  PPCPORT_CHECK(false);
-  EMIT_FAKE_ARM_INSTR(fVMRS);
-}
-
-
-void Assembler::vsqrt(const DwVfpRegister dst,
-                      const DwVfpRegister src,
-                      const Condition cond) {
-  PPCPORT_CHECK(false);
-  EMIT_FAKE_ARM_INSTR(fVSQRT);
-}
-
 
 // Pseudo instructions.
 void Assembler::nop(int type) {
@@ -1803,8 +1811,6 @@ void Assembler::CheckTrampolinePool() {
   }
   return;
 }
-
-#undef INCLUDE_ARM
 
 } }  // namespace v8::internal
 
