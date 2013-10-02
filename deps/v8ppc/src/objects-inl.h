@@ -1061,7 +1061,7 @@ bool Smi::IsValid(intptr_t value) {
   bool in_range = (value >= kMinValue) && (value <= kMaxValue);
 #endif
 
-#ifdef V8_TARGET_ARCH_X64
+#if defined(V8_TARGET_ARCH_X64) || defined(V8_TARGET_ARCH_PPC64)
   // To be representable as a long smi, the value must be a 32-bit integer.
   bool result = (value == static_cast<int32_t>(value));
 #else
@@ -3976,25 +3976,33 @@ SMI_ACCESSORS(SharedFunctionInfo,
               kStressDeoptCounterOffset)
 #else
 
-#define PSEUDO_SMI_ACCESSORS_LO(holder, name, offset)             \
-  STATIC_ASSERT(holder::offset % kPointerSize == 0);              \
-  int holder::name() {                                            \
-    int value = READ_INT_FIELD(this, offset);                     \
-    ASSERT(kHeapObjectTag == 1);                                  \
-    ASSERT((value & kHeapObjectTag) == 0);                        \
-    return value >> 1;                                            \
-  }                                                               \
-  void holder::set_##name(int value) {                            \
-    ASSERT(kHeapObjectTag == 1);                                  \
-    ASSERT((value & 0xC0000000) == 0xC0000000 ||                  \
-           (value & 0xC0000000) == 0x000000000);                  \
-    WRITE_INT_FIELD(this,                                         \
-                    offset,                                       \
-                    (value << 1) & ~kHeapObjectTag);              \
+#if __BYTE_ORDER == __LITTLE_ENDIAN
+#define PSEUDO_SMI_LO_ALIGN 0
+#define PSEUDO_SMI_HI_ALIGN kIntSize
+#else
+#define PSEUDO_SMI_LO_ALIGN kIntSize
+#define PSEUDO_SMI_HI_ALIGN 0
+#endif
+
+#define PSEUDO_SMI_ACCESSORS_LO(holder, name, offset)                   \
+  STATIC_ASSERT(holder::offset % kPointerSize == PSEUDO_SMI_LO_ALIGN);  \
+  int holder::name() {                                                  \
+    int value = READ_INT_FIELD(this, offset);                           \
+    ASSERT(kHeapObjectTag == 1);                                        \
+    ASSERT((value & kHeapObjectTag) == 0);                              \
+    return value >> 1;                                                  \
+  }                                                                     \
+  void holder::set_##name(int value) {                                  \
+    ASSERT(kHeapObjectTag == 1);                                        \
+    ASSERT((value & 0xC0000000) == 0xC0000000 ||                        \
+           (value & 0xC0000000) == 0x000000000);                        \
+    WRITE_INT_FIELD(this,                                               \
+                    offset,                                             \
+                    (value << 1) & ~kHeapObjectTag);                    \
   }
 
-#define PSEUDO_SMI_ACCESSORS_HI(holder, name, offset)             \
-  STATIC_ASSERT(holder::offset % kPointerSize == kIntSize);       \
+#define PSEUDO_SMI_ACCESSORS_HI(holder, name, offset)                   \
+  STATIC_ASSERT(holder::offset % kPointerSize == PSEUDO_SMI_HI_ALIGN);  \
   INT_ACCESSORS(holder, name, offset)
 
 

@@ -38,8 +38,8 @@
 // Copyright IBM Corp. 2012, 2013. All rights reserved.
 //
 
-// A light-weight ARM Assembler
-// Generates user mode instructions for the ARM architecture up to version 5
+// A light-weight PPC Assembler
+// Generates user mode instructions for the PPC architecture up
 
 #ifndef V8_PPC_ASSEMBLER_PPC_H_
 #define V8_PPC_ASSEMBLER_PPC_H_
@@ -50,8 +50,6 @@
 
 namespace v8 {
 namespace internal {
-
-#define INCLUDE_ARM 1
 
 // CPU Registers.
 //
@@ -226,7 +224,7 @@ const Register r29  = { kRegister_r29_Code };
 const Register r30  = { kRegister_r30_Code };
 const Register fp = { kRegister_fp_Code };
 
-// Double word VFP register.
+// Double word FP register.
 struct DwVfpRegister {
   static const int kNumRegisters = 32;
   static const int kNumAllocatableRegisters = 12;  // d1-d12
@@ -374,19 +372,11 @@ const CRegister cr15 = { 15 };
 class Operand BASE_EMBEDDED {
  public:
   // immediate
-#if V8_TARGET_ARCH_PPC64
-  INLINE(explicit Operand(int64_t immediate,
+  INLINE(explicit Operand(intptr_t immediate,
          RelocInfo::Mode rmode = RelocInfo::NONE));
   INLINE(static Operand Zero()) {
-    return Operand(static_cast<int64_t>(0));
+    return Operand(static_cast<intptr_t>(0));
   }
-#else
-  INLINE(explicit Operand(int32_t immediate,
-         RelocInfo::Mode rmode = RelocInfo::NONE));
-  INLINE(static Operand Zero()) {
-    return Operand(static_cast<int32_t>(0));
-  }
-#endif
   INLINE(explicit Operand(const ExternalReference& f));
   explicit Operand(Handle<Object> handle);
   INLINE(explicit Operand(Smi* value));
@@ -397,16 +387,16 @@ class Operand BASE_EMBEDDED {
   // Return true if this is a register operand.
   INLINE(bool is_reg() const);
 
-  inline int32_t immediate() const {
+  inline intptr_t immediate() const {
     ASSERT(!rm_.is_valid());
-    return imm32_;
+    return imm_;
   }
 
   Register rm() const { return rm_; }
 
  private:
   Register rm_;
-  int32_t imm32_;  // valid if rm_ == no_reg
+  intptr_t imm_;  // valid if rm_ == no_reg
   RelocInfo::Mode rmode_;
 
   friend class Assembler;
@@ -419,35 +409,30 @@ class Operand BASE_EMBEDDED {
 // Alternatively we can have a 16bit signed value immediate
 class MemOperand BASE_EMBEDDED {
  public:
-  // Contains cruft left to allow ARM to continue to work
-
   explicit MemOperand(Register rn, int32_t offset = 0);
 
   explicit MemOperand(Register ra, Register rb);
 
   uint32_t offset() const {
-    ASSERT(validPPCAddressing_ && rb_.is(no_reg));
+    ASSERT(rb_.is(no_reg));
     return offset_;
   }
 
   // PowerPC - base register
   Register ra() const {
-    ASSERT(validPPCAddressing_ && !ra_.is(no_reg));
+    ASSERT(!ra_.is(no_reg));
     return ra_;
   }
 
   Register rb() const {
-    ASSERT(validPPCAddressing_ && offset_ == 0 && !rb_.is(no_reg));
+    ASSERT(offset_ == 0 && !rb_.is(no_reg));
     return rb_;
   }
-
-  bool isPPCAddressing() const { return validPPCAddressing_;}
 
  private:
   Register ra_;  // base
   int32_t offset_;  // offset
   Register rb_;  // index
-  bool validPPCAddressing_;
 
   friend class Assembler;
 };
@@ -636,34 +621,43 @@ class Assembler : public AssemblerBase {
   // a target is resolved and written.
   static const int kSpecialTargetSize = 0;
 
-  // Number of consecutive instructions used to store 32bit constant.
-  static const int kInstructionsFor32BitConstant = 2;
+  // Number of consecutive instructions used to store pointer sized constant.
+#if V8_TARGET_ARCH_PPC64
+  static const int kInstructionsForPtrConstant = 5;
+#else
+  static const int kInstructionsForPtrConstant = 2;
+#endif
 
   // Distance between the instruction referring to the address of the call
   // target and the return address.
 
-  // Call sequence is:
+  // Call sequence is a FIXED_SEQUENCE:
   // lis     r8, 2148      @ call address hi
-  // addic   r8, r8, 5728  @ call address lo
+  // ori     r8, r8, 5728  @ call address lo
   // mtlr    r8
   // blrl
   //                      @ return address
+  // in 64bit mode, the addres load is a 5 instruction sequence
+#if V8_TARGET_ARCH_PPC64
+  static const int kCallTargetAddressOffset = 7 * kInstrSize;
+#else
   static const int kCallTargetAddressOffset = 4 * kInstrSize;
+#endif
 
   // Distance between start of patched return sequence and the emitted address
   // to jump to.
-  // Patched return sequence is:
+  // Patched return sequence is a FIXED_SEQUENCE:
   //   lis r0, <address hi>
-  //   addic r0, r0, <address lo>
+  //   ori r0, r0, <address lo>
   //   mtlr r0
   //   blrl
   static const int kPatchReturnSequenceAddressOffset =  0 * kInstrSize;
 
   // Distance between start of patched debug break slot and the emitted address
   // to jump to.
-  // Patched debug break slot code is:
+  // Patched debug break slot code is a FIXED_SEQUENCE:
   //   lis r0, <address hi>
-  //   addic r0, r0, <address lo>
+  //   ori r0, r0, <address lo>
   //   mtlr r0
   //   blrl
   static const int kPatchDebugBreakSlotAddressOffset =  0 * kInstrSize;
@@ -672,10 +666,27 @@ class Assembler : public AssemblerBase {
   // register.
   static const int kPcLoadDelta = 0;  // Todo: remove
 
+#if V8_TARGET_ARCH_PPC64
+  static const int kPatchDebugBreakSlotReturnOffset = 7 * kInstrSize;
+#else
   static const int kPatchDebugBreakSlotReturnOffset = 4 * kInstrSize;
+#endif
 
+  // This is the length of the BreakLocationIterator::SetDebugBreakAtReturn()
+  // code patch FIXED_SEQUENCE
+#if V8_TARGET_ARCH_PPC64
+  static const int kJSReturnSequenceInstructions = 8;
+#else
   static const int kJSReturnSequenceInstructions = 5;
+#endif
+
+  // This is the length of the code sequence from SetDebugBreakAtSlot()
+  // FIXED_SEQUENCE
+#if V8_TARGET_ARCH_PPC64
+  static const int kDebugBreakSlotInstructions = 7;
+#else
   static const int kDebugBreakSlotInstructions = 4;
+#endif
   static const int kDebugBreakSlotLength =
       kDebugBreakSlotInstructions * kInstrSize;
 
@@ -853,6 +864,7 @@ class Assembler : public AssemblerBase {
   void lwzu(Register dst, const MemOperand& src);
   void lwzx(Register dst, const MemOperand& src);
   void lwzux(Register dst, const MemOperand& src);
+  void lwa(Register dst, const MemOperand& src);
   void stb(Register dst, const MemOperand& src);
   void stbx(Register dst, const MemOperand& src);
   void stbux(Register dst, const MemOperand& src);
@@ -871,8 +883,28 @@ class Assembler : public AssemblerBase {
 
 #if V8_TARGET_ARCH_PPC64
   void ld(Register rd, const MemOperand &src);
+  void ldx(Register rd, const MemOperand &src);
+  void ldu(Register rd, const MemOperand &src);
+  void ldux(Register rd, const MemOperand &src);
   void std(Register rs, const MemOperand &src);
+  void stdx(Register rs, const MemOperand &src);
   void stdu(Register rs, const MemOperand &src);
+  void stdux(Register rs, const MemOperand &src);
+  void rldic(Register dst, Register src, int sh, int mb, RCBit r = LeaveRC);
+  void rldicl(Register dst, Register src, int sh, int mb, RCBit r = LeaveRC);
+  void rldicr(Register dst, Register src, int sh, int me, RCBit r = LeaveRC);
+  void sldi(Register dst, Register src, const Operand& val, RCBit rc = LeaveRC);
+  void srdi(Register dst, Register src, const Operand& val, RCBit rc = LeaveRC);
+  void clrrdi(Register dst, Register src, const Operand& val,
+              RCBit rc = LeaveRC);
+  void clrldi(Register dst, Register src, const Operand& val,
+              RCBit rc = LeaveRC);
+  void sradi(Register ra, Register rs, int sh, RCBit r = LeaveRC);
+  void srd(Register dst, Register src1, Register src2, RCBit r = LeaveRC);
+  void sld(Register dst, Register src1, Register src2, RCBit r = LeaveRC);
+  void srad(Register dst, Register src1, Register src2, RCBit r = LeaveRC);
+  void cntlzd_(Register dst, Register src, RCBit rc = LeaveRC);
+  void extsw(Register rs, Register ra, RCBit r = LeaveRC);
 #endif
 
   void rlwinm(Register ra, Register rs, int sh, int mb, int me,
@@ -889,19 +921,14 @@ class Assembler : public AssemblerBase {
   void srw(Register dst, Register src1, Register src2, RCBit r = LeaveRC);
   void slw(Register dst, Register src1, Register src2, RCBit r = LeaveRC);
   void sraw(Register dst, Register src1, Register src2, RCBit r = LeaveRC);
-  // 64bit PowerPC
-  void rldicl(Register dst, Register src, int sh, int mb, RCBit r = LeaveRC);
 
   void cntlzw_(Register dst, Register src, RCBit rc = LeaveRC);
   // end PowerPC
 
-  void sub(Register dst, Register src1, const Operand& src2);
+  void subi(Register dst, Register src1, const Operand& src2);
 
-  void cmp(Register src1, const Operand& src2, Condition cond = al);
   void cmp(Register src1, Register src2, CRegister cr = cr7);
   void cmpl(Register src1, Register src2, CRegister cr = cr7);
-
-  void cmn(Register src1, const Operand& src2, Condition cond = al);
 
   void mov(Register dst, const Operand& src);
 
@@ -941,8 +968,6 @@ class Assembler : public AssemblerBase {
             Condition cond = al,
             int32_t code = kDefaultStopCode,
             CRegister cr = cr7);
-
-  void svc(uint32_t imm24, Condition cond = al);
 
   void dcbf(Register ra, Register rb);
   void sync();
@@ -1004,77 +1029,6 @@ class Assembler : public AssemblerBase {
   void fabs(const DwVfpRegister frt, const DwVfpRegister frb,
             RCBit rc = LeaveRC);
 
-  // Support for VFP.
-  // All these APIs support S0 to S31 and D0 to D15.
-  // Currently these APIs do not support extended D registers, i.e, D16 to D31.
-  // However, some simple modifications can allow
-  // these APIs to support D16 to D31.
-
-  void vldr(const DwVfpRegister dst,
-            const Register base,
-            int offset,
-            const Condition cond = al);
-  void vldr(const DwVfpRegister dst,
-            const MemOperand& src,
-            const Condition cond = al);
-  void vstr(const DwVfpRegister src,
-            const Register base,
-            int offset,
-            const Condition cond = al);
-  void vstr(const DwVfpRegister src,
-            const MemOperand& dst,
-            const Condition cond = al);
-  void vmov(const DwVfpRegister dst,
-            double imm,
-            const Register scratch = no_reg,
-            const Condition cond = al);
-  void vmov(const DwVfpRegister dst,
-            const DwVfpRegister src,
-            const Condition cond = al);
-  void vmov(const DwVfpRegister dst,
-            const Register src1,
-            const Register src2,
-            const Condition cond = al);
-  void vmov(const Register dst1,
-            const Register dst2,
-            const DwVfpRegister src,
-            const Condition cond = al);
-  void vneg(const DwVfpRegister dst,
-            const DwVfpRegister src,
-            const Condition cond = al);
-  void vabs(const DwVfpRegister dst,
-            const DwVfpRegister src,
-            const Condition cond = al);
-  void vadd(const DwVfpRegister dst,
-            const DwVfpRegister src1,
-            const DwVfpRegister src2,
-            const Condition cond = al);
-  void vsub(const DwVfpRegister dst,
-            const DwVfpRegister src1,
-            const DwVfpRegister src2,
-            const Condition cond = al);
-  void vmul(const DwVfpRegister dst,
-            const DwVfpRegister src1,
-            const DwVfpRegister src2,
-            const Condition cond = al);
-  void vdiv(const DwVfpRegister dst,
-            const DwVfpRegister src1,
-            const DwVfpRegister src2,
-            const Condition cond = al);
-  void vcmp(const DwVfpRegister src1,
-            const DwVfpRegister src2,
-            const Condition cond = al);
-  void vcmp(const DwVfpRegister src1,
-            const double src2,
-            const Condition cond = al);
-  void vmrs(const Register dst,
-            const Condition cond = al);
-  void vmsr(const Register dst,
-            const Condition cond = al);
-  void vsqrt(const DwVfpRegister dst,
-             const DwVfpRegister src,
-             const Condition cond = al);
-
   // Pseudo instructions
 
   // Different nop operations are used by the code generator to detect certain
@@ -1093,7 +1047,7 @@ class Assembler : public AssemblerBase {
 
   void nop(int type = 0);   // 0 is the default non-marking type.
 
-  void push(Register src, Condition cond = al) {
+  void push(Register src) {
 #if V8_TARGET_ARCH_PPC64
     stdu(src, MemOperand(sp, -8));
 #else
@@ -1101,7 +1055,7 @@ class Assembler : public AssemblerBase {
 #endif
   }
 
-  void pop(Register dst, Condition cond = al) {
+  void pop(Register dst) {
 #if V8_TARGET_ARCH_PPC64
     ld(dst, MemOperand(sp));
     addi(sp, sp, Operand(8));
@@ -1194,14 +1148,24 @@ class Assembler : public AssemblerBase {
 
   static bool IsLis(Instr instr);
   static bool IsAddic(Instr instr);
+  static bool IsOri(Instr instr);
 
   static bool IsBranch(Instr instr);
   static Register GetRA(Instr instr);
   static Register GetRB(Instr instr);
+#if V8_TARGET_ARCH_PPC64
+  static bool Is64BitLoadIntoR12(Instr instr1, Instr instr2,
+                                 Instr instr3, Instr instr4, Instr instr5);
+#else
   static bool Is32BitLoadIntoR12(Instr instr1, Instr instr2);
+#endif
+
   static bool IsCmpRegister(Instr instr);
   static bool IsCmpImmediate(Instr instr);
   static bool IsRlwinm(Instr instr);
+#if V8_TARGET_ARCH_PPC64
+  static bool IsRldicl(Instr instr);
+#endif
   static Register GetCmpImmediateRegister(Instr instr);
   static int GetCmpImmediateRawImmediate(Instr instr);
   static bool IsNop(Instr instr, int type = NON_MARKING_NOP);
@@ -1226,9 +1190,6 @@ class Assembler : public AssemblerBase {
 
   // Patch branch instruction at pos to branch to given branch target pos
   void target_at_put(int pos, int target_pos);
-
-  // Say if we need to relocate with this mode.
-  bool MustUseReg(RelocInfo::Mode rmode);
 
   // Record reloc info for current pc_
   void RecordRelocInfo(RelocInfo::Mode rmode, intptr_t data = 0);
@@ -1302,11 +1263,13 @@ class Assembler : public AssemblerBase {
   // Instruction generation
   void a_form(Instr instr, DwVfpRegister frt, DwVfpRegister fra,
               DwVfpRegister frb, RCBit r);
-  void d_form(Instr instr, Register rt, Register ra, const int val,
+  void d_form(Instr instr, Register rt, Register ra, const intptr_t val,
               bool signed_disp);
   void x_form(Instr instr, Register ra, Register rs, Register rb, RCBit r);
   void xo_form(Instr instr, Register rt, Register ra, Register rb,
                OEBit o, RCBit r);
+  void md_form(Instr instr, Register ra, Register rs, int shift, int maskbit,
+               RCBit r);
 
   // Labels
   void print(Label* L);
@@ -1383,7 +1346,6 @@ class EnsureSpace BASE_EMBEDDED {
   }
 };
 
-#undef INCLUDE_ARM
 } }  // namespace v8::internal
 
 #endif  // V8_PPC_ASSEMBLER_PPC_H_
