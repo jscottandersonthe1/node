@@ -50,7 +50,7 @@ inline MemOperand FieldMemOperand(Register object, int offset) {
 
 // Give alias names to registers
 const Register cp = { 20 };  // JavaScript context pointer
-const Register kRootRegister = { 13 };  // Roots array pointer.
+const Register kRootRegister = { 21 };  // Roots array pointer.
 
 // Flags used for the AllocateInNewSpace functions.
 enum AllocationFlags {
@@ -97,6 +97,41 @@ bool AreAliased(Register reg1,
                 Register reg4 = no_reg,
                 Register reg5 = no_reg,
                 Register reg6 = no_reg);
+#endif
+
+// These exist to provide portability between 32 and 64bit
+#if V8_TARGET_ARCH_PPC64
+#define LoadPU             ldu
+#define LoadPX             ldx
+#define LoadPUX            ldux
+#define StorePU            stdu
+#define StorePX            stdx
+#define StorePUX           stdux
+#define ShiftLeftImm       sldi
+#define ShiftRightImm      srdi
+#define ClearLeftImm       clrldi
+#define ClearRightImm      clrrdi
+#define ShiftRightArithImm sradi
+#define ShiftLeft          sld
+#define ShiftRight         srd
+#define ShiftRightArith    srad
+#define CountLeadingZeros  cntlzd_
+#else
+#define LoadPU             lwzu
+#define LoadPX             lwzx
+#define LoadPUX            lwzux
+#define StorePU            stwu
+#define StorePX            stwx
+#define StorePUX           stwux
+#define ShiftLeftImm       slwi
+#define ShiftRightImm      srwi
+#define ClearLeftImm       clrlwi
+#define ClearRightImm      clrrwi
+#define ShiftRightArithImm srawi
+#define ShiftLeft          slw
+#define ShiftRight         srw
+#define ShiftRightArith    sraw
+#define CountLeadingZeros  cntlzw_
 #endif
 
 
@@ -148,6 +183,12 @@ class MacroAssembler: public Assembler {
             Condition cond = al);
 
   void Call(Label* target);
+
+  // Emit call to the code we are currently generating.
+  void CallSelf() {
+    Handle<Code> self(reinterpret_cast<Code**>(CodeObject().location()));
+    Call(self, RelocInfo::CODE_TARGET);
+  }
 
   // Register move. May do nothing if the registers are identical.
   void Move(Register dst, Handle<Object> value);
@@ -303,8 +344,8 @@ class MacroAssembler: public Assembler {
   // Push two registers.  Pushes leftmost register first (to highest address).
   void Push(Register src1, Register src2, Condition cond = al) {
     ASSERT(!src1.is(src2));
-    stwu(src1, MemOperand(sp, -4));
-    stwu(src2, MemOperand(sp, -4));
+    StorePU(src1, MemOperand(sp, -kPointerSize));
+    StorePU(src2, MemOperand(sp, -kPointerSize));
   }
 
   // Push three registers.  Pushes leftmost register first (to highest address).
@@ -312,7 +353,7 @@ class MacroAssembler: public Assembler {
     ASSERT(!src1.is(src2));
     ASSERT(!src2.is(src3));
     ASSERT(!src1.is(src3));
-    stwu(src1, MemOperand(sp, -4));
+    StorePU(src1, MemOperand(sp, -kPointerSize));
     Push(src2, src3, cond);
   }
 
@@ -329,7 +370,7 @@ class MacroAssembler: public Assembler {
     ASSERT(!src2.is(src4));
     ASSERT(!src3.is(src4));
 
-    stwu(src1, MemOperand(sp, -4));
+    StorePU(src1, MemOperand(sp, -kPointerSize));
     Push(src2, src3, src4, cond);
   }
 
@@ -337,9 +378,9 @@ class MacroAssembler: public Assembler {
   void Pop(Register src1, Register src2, Condition cond = al) {
     ASSERT(!src1.is(src2));
     ASSERT(cond == al);
-    lwz(src2, MemOperand(sp, 0));
-    lwz(src1, MemOperand(sp, 4));
-    addi(sp, sp, Operand(8));
+    LoadP(src2, MemOperand(sp, 0));
+    LoadP(src1, MemOperand(sp, kPointerSize));
+    addi(sp, sp, Operand(2 * kPointerSize));
   }
 
   // Pop three registers.  Pops rightmost register first (from lower address).
@@ -348,10 +389,10 @@ class MacroAssembler: public Assembler {
     ASSERT(!src2.is(src3));
     ASSERT(!src1.is(src3));
     ASSERT(cond == al);
-    lwz(src3, MemOperand(sp, 0));
-    lwz(src2, MemOperand(sp, 4));
-    lwz(src1, MemOperand(sp, 8));
-    addi(sp, sp, Operand(12));
+    LoadP(src3, MemOperand(sp, 0));
+    LoadP(src2, MemOperand(sp, kPointerSize));
+    LoadP(src1, MemOperand(sp, 2 * kPointerSize));
+    addi(sp, sp, Operand(3 * kPointerSize));
   }
 
   // Pop four registers.  Pops rightmost register first (from lower address).
@@ -367,11 +408,11 @@ class MacroAssembler: public Assembler {
     ASSERT(!src2.is(src4));
     ASSERT(!src3.is(src4));
     ASSERT(cond == al);
-    lwz(src4, MemOperand(sp, 0));
-    lwz(src3, MemOperand(sp, 4));
-    lwz(src2, MemOperand(sp, 8));
-    lwz(src1, MemOperand(sp, 12));
-    addi(sp, sp, Operand(16));
+    LoadP(src4, MemOperand(sp, 0));
+    LoadP(src3, MemOperand(sp, kPointerSize));
+    LoadP(src2, MemOperand(sp, 2 * kPointerSize));
+    LoadP(src1, MemOperand(sp, 3 * kPointerSize));
+    addi(sp, sp, Operand(4 * kPointerSize));
   }
 
   // Push and pop the registers that can hold pointers, as defined by the
@@ -391,11 +432,6 @@ class MacroAssembler: public Assembler {
   // Flush the I-cache from asm code. You should use CPU::FlushICache from C.
   // Does not handle errors.
   void FlushICache(Register address, unsigned instructions);
-
-  void Vmov(const DwVfpRegister dst,
-            const double imm,
-            const Register scratch = no_reg,
-            const Condition cond = al);
 
   // Enter exit frame.
   // stack_space - extra stack space, used for alignment before call to C.
@@ -449,6 +485,9 @@ class MacroAssembler: public Assembler {
   // load a literal signed int value <value> to GPR <dst>
   void LoadIntLiteral(Register dst, int value);
 
+  // load an SMI value <value> to GPR <dst>
+  void LoadSmiLiteral(Register dst, Smi *smi);
+
   // load a literal double value <value> to FPR <result>
   void LoadDoubleLiteral(DwVfpRegister result,
                          double value,
@@ -458,6 +497,10 @@ class MacroAssembler: public Assembler {
                 const MemOperand& mem,
                 Register scratch,
                 bool updateForm = false);
+
+  void LoadWordArith(Register dst,
+                     const MemOperand& mem,
+                     Register scratch = no_reg);
 
   void StoreWord(Register src,
                  const MemOperand& mem,
@@ -495,6 +538,14 @@ class MacroAssembler: public Assembler {
   void Or(Register ra, Register rs, const Operand& rb, RCBit rc = LeaveRC);
   void Xor(Register ra, Register rs, const Operand& rb, RCBit rc = LeaveRC);
 
+  void AddSmiLiteral(Register dst, Register src, Smi *smi, Register scratch);
+  void SubSmiLiteral(Register dst, Register src, Smi *smi, Register scratch);
+  void CmpSmiLiteral(Register src1, Smi *smi, Register scratch,
+                     CRegister cr = cr7);
+  void CmplSmiLiteral(Register src1, Smi *smi, Register scratch,
+                      CRegister cr = cr7);
+  void AndSmiLiteral(Register dst, Register src, Smi *smi, Register scratch,
+                     RCBit rc = LeaveRC);
 
   // Set new rounding mode RN to FPSCR
   void SetRoundingMode(VFPRoundingMode RN);
@@ -503,9 +554,8 @@ class MacroAssembler: public Assembler {
   void ResetRoundingMode();
 
   // These exist to provide portability between 32 and 64bit
-  void LoadP(Register dst, const MemOperand& mem);
-  void StoreP(Register dst, const MemOperand& mem);
-  void StorePU(Register dst, const MemOperand& mem);
+  void LoadP(Register dst, const MemOperand& mem, Register scratch = no_reg);
+  void StoreP(Register src, const MemOperand& mem, Register scratch = no_reg);
 
   // ---------------------------------------------------------------------------
   // JavaScript invokes
@@ -857,7 +907,7 @@ class MacroAssembler: public Assembler {
   // Returns a condition that will be enabled if the object was a string.
   Condition IsObjectStringType(Register obj,
                                Register type) {
-    lwz(type, FieldMemOperand(obj, HeapObject::kMapOffset));
+    LoadP(type, FieldMemOperand(obj, HeapObject::kMapOffset));
     lbz(type, FieldMemOperand(type, Map::kInstanceTypeOffset));
     andi(r0, type, Operand(kIsNotStringMask));
     cmpi(r0, Operand::Zero());
@@ -1140,16 +1190,23 @@ class MacroAssembler: public Assembler {
 
   // ---------------------------------------------------------------------------
   // Bit testing/extraction
+  //
+  // Bit numbering is such that the least significant bit is bit 0
+  // (for consistency between 32/64-bit).
 
   // Extract consecutive bits (defined by rangeStart - rangeEnd) from src
   // and place them into the least significant bits of dst.
   inline void ExtractBitRange(Register dst, Register src,
-                              uint32_t rangeStart, uint32_t rangeEnd,
+                              int rangeStart, int rangeEnd,
                               RCBit rc = LeaveRC) {
-    ASSERT(rangeStart <= rangeEnd && rangeEnd <= 31);
-    int rotate = (rangeEnd == 31) ? 0 : rangeEnd + 1;
-    int width  = rangeEnd - rangeStart + 1;
-    rlwinm(dst, src, rotate, 31 - width + 1, 31, rc);
+    ASSERT(rangeStart >= rangeEnd && rangeStart < kBitsPerPointer);
+    int rotate = (rangeEnd == 0) ? 0 : kBitsPerPointer - rangeEnd;
+    int width  = rangeStart - rangeEnd + 1;
+#if V8_TARGET_ARCH_PPC64
+    rldicl(dst, src, rotate, kBitsPerPointer - width, rc);
+#else
+    rlwinm(dst, src, rotate, kBitsPerPointer - width, kBitsPerPointer - 1, rc);
+#endif
   }
 
   inline void ExtractBit(Register dst, Register src, uint32_t bitNumber,
@@ -1159,21 +1216,21 @@ class MacroAssembler: public Assembler {
 
   // Extract consecutive bits (defined by mask) from src and place them
   // into the least significant bits of dst.
-  inline void ExtractBitMask(Register dst, Register src, uint32_t mask,
+  inline void ExtractBitMask(Register dst, Register src, uintptr_t mask,
                              RCBit rc = LeaveRC) {
-    uint32_t start = 0;
-    uint32_t end;
-    uint32_t bit = (1 << 31);
+    int start = kBitsPerPointer - 1;
+    int end;
+    uintptr_t bit = (1L << start);
 
     while (bit && (mask & bit) == 0) {
-        start++;
+        start--;
         bit >>= 1;
     }
     end = start;
     bit >>= 1;
 
     while (bit && (mask & bit)) {
-        end++;
+        end--;
         bit >>= 1;
     }
 
@@ -1183,8 +1240,8 @@ class MacroAssembler: public Assembler {
     ExtractBitRange(dst, src, start, end, rc);
   }
 
-  // Test single bit in value.  Range is defined by rangeStart - rangeEnd.
-  inline void TestBit(Register value, uint32_t bitNumber,
+  // Test single bit in value.
+  inline void TestBit(Register value, int bitNumber,
                       Register scratch = r0) {
     ExtractBitRange(scratch, value, bitNumber, bitNumber, SetRC);
   }
@@ -1192,15 +1249,27 @@ class MacroAssembler: public Assembler {
   // Test consecutive bit range in value.  Range is defined by
   // rangeStart - rangeEnd.
   inline void TestBitRange(Register value,
-                           uint32_t rangeStart, uint32_t rangeEnd,
+                           int rangeStart, int rangeEnd,
                            Register scratch = r0) {
     ExtractBitRange(scratch, value, rangeStart, rangeEnd, SetRC);
   }
 
   // Test consecutive bit range in value.  Range is defined by mask.
-  inline void TestBitMask(Register value, uint32_t mask,
+  inline void TestBitMask(Register value, uintptr_t mask,
                           Register scratch = r0) {
     ExtractBitMask(scratch, value, mask, SetRC);
+  }
+
+  inline void ExtractSignBit(Register dst, Register src,
+                             RCBit rc = LeaveRC) {
+    int bitNumber = kBitsPerPointer - 1;
+    ExtractBitRange(dst, src, bitNumber, bitNumber, rc);
+  }
+
+  inline void TestSignBit(Register value,
+                          Register scratch = r0) {
+    int bitNumber = kBitsPerPointer - 1;
+    ExtractBitRange(scratch, value, bitNumber, bitNumber, SetRC);
   }
 
 
@@ -1212,20 +1281,88 @@ class MacroAssembler: public Assembler {
     SmiTag(reg, reg);
   }
   void SmiTag(Register dst, Register src) {
-    slwi(dst, src, Operand(1));
+    ShiftLeftImm(dst, src, Operand(kSmiShift));
   }
 
+#if !V8_TARGET_ARCH_PPC64
   // Test for overflow < 0: use BranchOnOverflow() or BranchOnNoOverflow().
   void SmiTagCheckOverflow(Register reg, Register overflow);
   void SmiTagCheckOverflow(Register dst, Register src, Register overflow);
+#endif
 
   void SmiUntag(Register reg, RCBit rc = LeaveRC) {
     SmiUntag(reg, reg, rc);
   }
 
   void SmiUntag(Register dst, Register src, RCBit rc = LeaveRC) {
-    ASSERT(kSmiTagSize == 1);
-    srawi(dst, src, 1, rc);
+    ShiftRightArithImm(dst, src, kSmiShift, rc);
+  }
+
+  void SmiToPtrArrayOffset(Register dst, Register src) {
+#if V8_TARGET_ARCH_PPC64
+    STATIC_ASSERT(kSmiTag == 0 && kSmiShift > kPointerSizeLog2);
+    ShiftRightArithImm(dst, src, kSmiShift - kPointerSizeLog2);
+#else
+    STATIC_ASSERT(kSmiTag == 0 && kSmiShift < kPointerSizeLog2);
+    ShiftLeftImm(dst, src, Operand(kPointerSizeLog2 - kSmiShift));
+#endif
+  }
+
+  void SmiToByteArrayOffset(Register dst, Register src) {
+    SmiUntag(dst, src);
+  }
+
+  void SmiToShortArrayOffset(Register dst, Register src) {
+#if V8_TARGET_ARCH_PPC64
+    STATIC_ASSERT(kSmiTag == 0 && kSmiShift > 1);
+    ShiftRightArithImm(dst, src, kSmiShift - 1);
+#else
+    STATIC_ASSERT(kSmiTag == 0 && kSmiShift == 1);
+    if (!dst.is(src)) {
+      mr(dst, src);
+    }
+#endif
+  }
+
+  void SmiToIntArrayOffset(Register dst, Register src) {
+#if V8_TARGET_ARCH_PPC64
+    STATIC_ASSERT(kSmiTag == 0 && kSmiShift > 2);
+    ShiftRightArithImm(dst, src, kSmiShift - 2);
+#else
+    STATIC_ASSERT(kSmiTag == 0 && kSmiShift < 2);
+    ShiftLeftImm(dst, src, Operand(2 - kSmiShift));
+#endif
+  }
+
+#define SmiToFloatArrayOffset SmiToIntArrayOffset
+
+  void SmiToDoubleArrayOffset(Register dst, Register src) {
+#if V8_TARGET_ARCH_PPC64
+    STATIC_ASSERT(kSmiTag == 0 && kSmiShift > kDoubleSizeLog2);
+    ShiftRightArithImm(dst, src, kSmiShift - kDoubleSizeLog2);
+#else
+    STATIC_ASSERT(kSmiTag == 0 && kSmiShift < kDoubleSizeLog2);
+    ShiftLeftImm(dst, src, Operand(kDoubleSizeLog2 - kSmiShift));
+#endif
+  }
+
+  void SmiToArrayOffset(Register dst, Register src, int elementSizeLog2) {
+    if (kSmiShift < elementSizeLog2) {
+      ShiftLeftImm(dst, src, Operand(elementSizeLog2 - kSmiShift));
+    } else if (kSmiShift > elementSizeLog2) {
+      ShiftRightArithImm(dst, src, kSmiShift - elementSizeLog2);
+    } else if (!dst.is(src)) {
+      mr(dst, src);
+    }
+  }
+
+  void IndexToArrayOffset(Register dst, Register src, int elementSizeLog2,
+                          bool isSmi) {
+    if (isSmi) {
+      SmiToArrayOffset(dst, src, elementSizeLog2);
+    } else {
+      ShiftLeftImm(dst, src, Operand(elementSizeLog2));
+    }
   }
 
   // Untag the source value into destination and jump if source is a smi.
@@ -1237,7 +1374,17 @@ class MacroAssembler: public Assembler {
   void UntagAndJumpIfNotSmi(Register dst, Register src, Label* non_smi_case);
 
   inline void TestIfSmi(Register value, Register scratch) {
-    TestBit(value, 31, scratch);  // tst(value, Operand(kSmiTagMask));
+    TestBit(value, 0, scratch);  // tst(value, Operand(kSmiTagMask));
+  }
+
+  inline void TestIfPositiveSmi(Register value, Register scratch) {
+    STATIC_ASSERT((kSmiTagMask | kSmiSignMask) ==
+                  (intptr_t)(1UL << (kBitsPerPointer - 1) | 1));
+#if V8_TARGET_ARCH_PPC64
+    rldicl(scratch, value, 1, kBitsPerPointer - 2, SetRC);
+#else
+    rlwinm(scratch, value, 1, kBitsPerPointer - 2, kBitsPerPointer - 1, SetRC);
+#endif
   }
 
   // Jump the register contains a smi.
@@ -1313,11 +1460,11 @@ class MacroAssembler: public Assembler {
   // ---------------------------------------------------------------------------
   // Patching helpers.
 
-  // Patch the relocated value (lis/addic pair).
+  // Patch the relocated value (lis/ori pair).
   void PatchRelocatedValue(Register lis_location,
                            Register scratch,
                            Register new_value);
-  // Get the relocatad value (loaded data) from the lis/addic pair.
+  // Get the relocatad value (loaded data) from the lis/ori pair.
   void GetRelocatedValueLocation(Register lis_location,
                                  Register result,
                                  Register scratch);
@@ -1340,11 +1487,9 @@ class MacroAssembler: public Assembler {
 
   template<typename Field>
   void DecodeField(Register reg) {
-    static const int shift = Field::kShift;
-    static const int mask = (Field::kMask >> shift) << kSmiTagSize;
-    STATIC_ASSERT((mask & kImm16Mask) == mask);
-    srwi(reg, reg, Operand(shift));
-    andi(reg, reg, Operand(mask));
+    uintptr_t mask = reinterpret_cast<intptr_t>(Smi::FromInt(Field::kMask));
+    ExtractBitMask(reg, reg, mask);
+    SmiTag(reg);
   }
 
   // Activation support.
@@ -1356,6 +1501,8 @@ class MacroAssembler: public Assembler {
   void CheckEnumCache(Register null_value, Label* call_runtime);
 
  private:
+  static const int kSmiShift = kSmiTagSize + kSmiShiftSize;
+
   void CallCFunctionHelper(Register function,
                            int num_reg_arguments,
                            int num_double_arguments);
