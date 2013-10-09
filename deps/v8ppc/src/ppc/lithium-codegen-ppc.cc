@@ -645,7 +645,7 @@ void LCodeGen::DeoptimizeIf(Condition cond, LEnvironment* environment,
     return;
   }
 
-  ASSERT(FLAG_deopt_every_n_times < 2);  // Other values not supported on ARM.
+  ASSERT(FLAG_deopt_every_n_times < 2);  // Other values not supported on PPC.
 
   if (FLAG_deopt_every_n_times == 1 &&
       info_->shared_info()->opt_count() == id) {
@@ -916,7 +916,7 @@ void LCodeGen::DoModI(LModI* instr) {
         DeoptimizeIf(eq, instr->environment());
     }
 
-    __ mullw(scratch, divisor, scratch);
+    __ Mul(scratch, divisor, scratch);
     __ sub(result, dividend, scratch, LeaveOE, SetRC);
 
     if (instr->hydrogen()->CheckFlag(HValue::kBailoutOnMinusZero)) {
@@ -1011,8 +1011,12 @@ void LCodeGen::EmitSignedIntegerDivisionByConstant(
         const int32_t s = magic_numbers.s + power_of_2_factor;
 
         __ mov(ip, Operand(M));
-        __ mullw(ip, dividend, ip);
+#if V8_TARGET_ARCH_PPC64
+        __ Mul(scratch, dividend, ip);
+        __ ShiftRightArithImm(scratch, scratch, 32);
+#else
         __ mulhw(scratch, dividend, ip);
+#endif
         if (M < 0) {
           __ add(scratch, scratch, dividend);
         }
@@ -1026,7 +1030,7 @@ void LCodeGen::EmitSignedIntegerDivisionByConstant(
         __ mov(ip, Operand(divisor));
         // This sequence could be replaced with 'mls' when
         // it gets implemented.
-        __ mul(scratch, result, ip);
+        __ Mul(scratch, result, ip);
         __ sub(remainder, dividend, scratch);
       }
   }
@@ -1051,7 +1055,9 @@ void LCodeGen::DoDivI(LDivI* instr) {
 
   const Register left = ToRegister(instr->left());
   const Register right = ToRegister(instr->right());
+#ifndef V8_TARGET_ARCH_PPC64
   const Register scratch = scratch0();
+#endif
   const Register result = ToRegister(instr->result());
 
   // Check for x / 0.
@@ -1273,7 +1279,7 @@ void LCodeGen::DoMulI(LMulI* instr) {
         } else {
           // Generate standard code.
           __ mov(ip, Operand(constant));
-          __ mul(result, left, ip);
+          __ Mul(result, left, ip);
         }
     }
 
@@ -1285,13 +1291,18 @@ void LCodeGen::DoMulI(LMulI* instr) {
 
     if (can_overflow) {
       // scratch:result = left * right.
+#if V8_TARGET_ARCH_PPC64
+      __ Mul(result, left, right);
+      __ ShiftRightArithImm(scratch, result, 32);
+#else
       __ mullw(result, left, right);
       __ mulhw(scratch, left, right);
+#endif
       __ srawi(r0, result, 31);
       __ cmp(scratch, r0);
       DeoptimizeIf(ne, instr->environment());
     } else {
-      __ mul(result, left, right);
+      __ Mul(result, left, right);
     }
 
     if (bailout_on_minus_zero) {
@@ -1351,18 +1362,27 @@ void LCodeGen::DoShiftI(LShiftI* instr) {
     __ andi(scratch, ToRegister(right_op), Operand(0x1F));
     switch (instr->op()) {
       case Token::SAR:
-        __ ShiftRightArith(result, left, scratch);
+        __ sraw(result, left, scratch);
+#if V8_TARGET_ARCH_PPC64
+        __ extsw(result, result);
+#endif
         break;
       case Token::SHR:
         if (instr->can_deopt()) {
-          __ ShiftRight(result, left, scratch, SetRC);
+          __ srw(result, left, scratch, SetRC);
+#if V8_TARGET_ARCH_PPC64
+          __ extsw(result, result, SetRC);
+#endif
           DeoptimizeIf(lt, instr->environment(), cr0);
         } else {
-          __ ShiftRight(result, left, scratch);
+          __ srw(result, left, scratch);
         }
         break;
       case Token::SHL:
-        __ ShiftLeft(result, left, scratch);
+        __ slw(result, left, scratch);
+#if V8_TARGET_ARCH_PPC64
+        __ extsw(result, result);
+#endif
         break;
       default:
         UNREACHABLE();
@@ -1375,17 +1395,20 @@ void LCodeGen::DoShiftI(LShiftI* instr) {
     switch (instr->op()) {
       case Token::SAR:
         if (shift_count != 0) {
-          __ ShiftRightArithImm(result, left, shift_count);
+          __ srawi(result, left, shift_count);
+#if V8_TARGET_ARCH_PPC64
+          __ extsw(result, result);
+#endif
         } else {
           __ Move(result, left);
         }
         break;
       case Token::SHR:
         if (shift_count != 0) {
-          __ ShiftRightImm(result, left, Operand(shift_count));
+          __ srwi(result, left, Operand(shift_count));
         } else {
           if (instr->can_deopt()) {
-            __ TestSignBit(left, r0);
+            __ TestSignBit32(left, r0);
             DeoptimizeIf(ne, instr->environment(), cr0);
           }
           __ Move(result, left);
@@ -1393,7 +1416,10 @@ void LCodeGen::DoShiftI(LShiftI* instr) {
         break;
       case Token::SHL:
         if (shift_count != 0) {
-          __ ShiftLeftImm(result, left, Operand(shift_count));
+          __ slwi(result, left, Operand(shift_count));
+#if V8_TARGET_ARCH_PPC64
+          __ extsw(result, result);
+#endif
         } else {
           __ Move(result, left);
         }
@@ -1428,6 +1454,9 @@ void LCodeGen::DoSubI(LSubI* instr) {
                               right_reg,
                               scratch0(), r0);
     // Doptimize on overflow
+#if V8_TARGET_ARCH_PPC64
+    __ extsw(scratch0(), scratch0(), SetRC);
+#endif
     DeoptimizeIf(lt, instr->environment(), cr0);
   }
 }
@@ -1547,7 +1576,7 @@ void LCodeGen::DoDateField(LDateField* instr) {
     }
     __ bind(&runtime);
     __ PrepareCallCFunction(2, scratch);
-    __ mov(r4, Operand(index));
+    __ LoadSmiLiteral(r4, index);
     __ CallCFunction(ExternalReference::get_date_field_function(isolate()), 2);
     __ bind(&done);
   }
@@ -1586,6 +1615,9 @@ void LCodeGen::DoAddI(LAddI* instr) {
                               ToRegister(left),
                               right_reg,
                               scratch0(), r0);
+#if V8_TARGET_ARCH_PPC64
+    __ extsw(scratch0(), scratch0(), SetRC);
+#endif
     // Doptimize on overflow
     DeoptimizeIf(lt, instr->environment(), cr0);
   }
@@ -2375,7 +2407,7 @@ void LCodeGen::DoInstanceOfKnownGlobal(LInstanceOfKnownGlobal* instr) {
 
   // String values is not instance of anything.
   Condition is_string = masm_->IsObjectStringType(object, temp);
-  __ b(is_string, &false_result);
+  __ b(is_string, &false_result, cr0);
 
   // Go to the deferred code.
   __ b(deferred->entry());
@@ -3359,7 +3391,7 @@ void LCodeGen::DoDeferredMathAbsTaggedHeapNumber(LUnaryMathOperation* instr) {
   __ lwz(exponent, FieldMemOperand(input, HeapNumber::kExponentOffset));
   // Check the sign of the argument. If the argument is positive, just
   // return it.
-  __ TestSignBit(exponent, r0);
+  __ TestSignBit32(exponent, r0);
   // Move the input to the result if necessary.
   __ Move(result, input);
   __ beq(&done, cr0);
@@ -3397,7 +3429,7 @@ void LCodeGen::DoDeferredMathAbsTaggedHeapNumber(LUnaryMathOperation* instr) {
     // exponent: floating point exponent value.
     // tmp1: allocated heap number.
     STATIC_ASSERT(HeapNumber::kSignMask == 0x80000000u);
-    __ ClearLeftImm(exponent, exponent, Operand(1));  // clear sign bit
+    __ clrlwi(exponent, exponent, Operand(1));  // clear sign bit
     __ stw(exponent, FieldMemOperand(tmp1, HeapNumber::kExponentOffset));
     __ lwz(tmp2, FieldMemOperand(input, HeapNumber::kMantissaOffset));
     __ stw(tmp2, FieldMemOperand(tmp1, HeapNumber::kMantissaOffset));
@@ -3488,7 +3520,7 @@ void LCodeGen::DoMathFloor(LUnaryMathOperation* instr) {
     __ lwz(scratch, MemOperand(sp, 0));
 #endif
     __ addi(sp, sp, Operand(8));
-    __ TestSignBit(scratch, r0);
+    __ TestSignBit32(scratch, r0);
     DeoptimizeIf(ne, instr->environment(), cr0);
     __ bind(&done);
   }
@@ -3591,7 +3623,7 @@ void LCodeGen::DoMathRound(LUnaryMathOperation* instr) {
     __ lwz(scratch, MemOperand(sp, 0));
 #endif
     __ addi(sp, sp, Operand(8));
-    __ TestSignBit(scratch, r0);
+    __ TestSignBit32(scratch, r0);
     DeoptimizeIf(ne, instr->environment(), cr0);
   }
   __ bind(&done);
@@ -3717,7 +3749,7 @@ void LCodeGen::DoRandom(LRandom* instr) {
   // state[0] = 18273 * (state[0] & 0xFFFF) + (state[0] >> 16)
   __ andi(r6, r4, Operand(0xFFFF));
   __ li(r7, Operand(18273));
-  __ mul(r6, r6, r7);
+  __ Mul(r6, r6, r7);
   __ srwi(r4, r4, Operand(16));
   __ add(r4, r6, r4);
   // Save state[0].
@@ -3726,7 +3758,7 @@ void LCodeGen::DoRandom(LRandom* instr) {
   // state[1] = 36969 * (state[1] & 0xFFFF) + (state[1] >> 16)
   __ andi(r6, r3, Operand(0xFFFF));
   __ mov(r7, Operand(36969));
-  __ mul(r6, r6, r7);
+  __ Mul(r6, r6, r7);
   __ srwi(r3, r3, Operand(16));
   __ add(r3, r6, r3);
   // Save state[1].
@@ -4754,7 +4786,7 @@ void LCodeGen::DoDeferredTaggedToI(LTaggedToI* instr) {
 #else
       __ lwz(scratch1, FieldMemOperand(scratch2, HeapNumber::kValueOffset));
 #endif
-      __ TestSignBit(scratch1, r0);
+      __ TestSignBit32(scratch1, r0);
       DeoptimizeIf(ne, instr->environment(), cr0);
     }
   }
