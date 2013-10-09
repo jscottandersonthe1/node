@@ -220,6 +220,7 @@ enum OpcodeExt2 {
   MTSR
 */
   STBX = 215 << 1,    // store byte w/ x-form
+  MULLD  = 233 << 1,  // Multiply Low Double Word
   MULLW  = 235 << 1,  // Multiply Low Word
   STBUX = 247 << 1,   // store byte w/ update x-form
   ADDX = 266 << 1,    // Add
@@ -356,16 +357,13 @@ enum {
 enum FAKE_OPCODE_T {
   fBKPT = 14,
   fBranch = 44,
-  // the following is the marker for ARM instruction sequences outside
+  // the following is the marker for instruction sequences outside
   // assembler.cc that we have removed (marked by PPCPORT_UNIMPLEMENTED)
-  fMASM1 = 60,
   fMASM3 = 61,
-  fMASM13 = 68,
   fMASM16 = 69,
   fMASM22 = 75,
   fMASM23 = 76,
   fMASM26 = 79,
-  fMASM28 = 81,
 
   fLITHIUM91 = 91,
   fLITHIUM111 = 111,
@@ -465,18 +463,6 @@ enum CheckForInexactConversion {
   kCheckForInexactConversion,
   kDontCheckForInexactConversion
 };
-
-// -----------------------------------------------------------------------------
-// Hints.
-
-// Branch hints are not used on the ARM.  They are defined so that they can
-// appear in shared function signatures, but will be ignored in ARM
-// implementations.
-enum Hint { no_hint };
-
-// Hints are not used on the arm.  Negating is trivial.
-inline Hint NegateHint(Hint ignored) { return no_hint; }
-
 
 // -----------------------------------------------------------------------------
 // Specific instructions, constants, and masks.
