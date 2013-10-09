@@ -1369,7 +1369,9 @@ void Simulator::SoftwareInterrupt(Instruction* instr) {
           PrintF("\n");
         }
         CHECK(stack_aligned);
+#if !(defined(_AIX) || defined(V8_TARGET_ARCH_PPC64))
         arg1 = *(reinterpret_cast<intptr_t *>(arg1));
+#endif
         v8::Handle<v8::Value> result = target(arg1, arg2);
         if (::v8::internal::FLAG_trace_sim) {
           PrintF("Returned %p\n", reinterpret_cast<void *>(*result));
@@ -1711,7 +1713,7 @@ bool Simulator::DecodeExt2_10bit(Instruction *instr) {
       int ra = instr->RAValue();
       int rs = instr->RSValue();
       int sh = instr->Bits(15, 11);
-      intptr_t rs_val = get_register(rs);
+      int32_t rs_val = get_register(rs);
       intptr_t result = rs_val >> sh;
       set_register(ra, result);
       if (instr->Bit(0)) {  // RC bit set
@@ -2132,6 +2134,22 @@ void Simulator::DecodeExt2_9bit(Instruction* instr) {
       // todo - handle OE bit
       break;
     }
+#if V8_TARGET_ARCH_PPC64
+    case MULLD: {
+      int rt = instr->RTValue();
+      int ra = instr->RAValue();
+      int rb = instr->RBValue();
+      int64_t ra_val = get_register(ra);
+      int64_t rb_val = get_register(rb);
+      int64_t alu_out = ra_val * rb_val;
+      set_register(rt, alu_out);
+      if (instr->Bit(0)) {  // RC bit set
+        SetCR0(alu_out);
+      }
+      // todo - handle OE bit
+      break;
+    }
+#endif
     case DIVW: {
       int rt = instr->RTValue();
       int ra = instr->RAValue();

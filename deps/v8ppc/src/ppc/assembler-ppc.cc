@@ -54,14 +54,11 @@ bool CpuFeatures::initialized_ = false;
 unsigned CpuFeatures::supported_ = 0;
 unsigned CpuFeatures::found_by_runtime_probing_ = 0;
 
-#define EMIT_FAKE_ARM_INSTR(arm_opcode) fake_asm(arm_opcode);
-
 // Get the CPU features enabled by the build.
 static unsigned CpuFeaturesImpliedByCompiler() {
   unsigned answer = 0;
   return answer;
 }
-
 
 void CpuFeatures::Probe() {
   unsigned standard_features = static_cast<unsigned>(
@@ -1043,11 +1040,11 @@ void Assembler::stwux(Register rs, const MemOperand &src) {
 }
 
 void Assembler::extsb(Register rs, Register ra, RCBit rc) {
-  emit(EXT2 | EXTSB | rs.code()*B21 | ra.code()*B16 | rc);
+  emit(EXT2 | EXTSB | ra.code()*B21 | rs.code()*B16 | rc);
 }
 
 void Assembler::extsh(Register rs, Register ra, RCBit rc) {
-  emit(EXT2 | EXTSH | rs.code()*B21 | ra.code()*B16 | rc);
+  emit(EXT2 | EXTSH | ra.code()*B21 | rs.code()*B16 | rc);
 }
 
 void Assembler::neg(Register rt, Register ra, OEBit o, RCBit r) {
@@ -1177,7 +1174,12 @@ void Assembler::cntlzd_(Register ra, Register rs, RCBit rc) {
 }
 
 void Assembler::extsw(Register rs, Register ra, RCBit rc) {
-  emit(EXT2 | EXTSW | rs.code()*B21 | ra.code()*B16 | rc);
+  emit(EXT2 | EXTSW | ra.code()*B21 | rs.code()*B16 | rc);
+}
+
+void Assembler::mulld(Register dst, Register src1, Register src2,
+                      OEBit o, RCBit r) {
+  xo_form(EXT2 | MULLD, dst, src1, src2, o, r);
 }
 #endif
 
@@ -1265,11 +1267,6 @@ void Assembler::mov(Register dst, const Operand& src) {
 #endif
 }
 
-// PowerPC
-void Assembler::mul(Register dst, Register src1, Register src2,
-                    OEBit o, RCBit r) {
-  xo_form(EXT2 | MULLW, dst, src1, src2, o, r);
-}
 // Special register instructions
 void Assembler::crxor(int bt, int ba, int bb) {
   emit(EXT1 | CRXOR | bt*B21 | ba*B16 | bb*B11);
@@ -1318,12 +1315,6 @@ void Assembler::stop(const char* msg, Condition cond, int32_t code,
 
 void Assembler::bkpt(uint32_t imm16) {
   emit(0x7d821008);
-#if 0
-  // PPCPORT_CHECK(false);
-  ASSERT(is_uint16(imm16));
-  // only supported in simulator to trigger debugging
-  EMIT_FAKE_ARM_INSTR(fBKPT);
-#endif
 }
 
 
@@ -1677,8 +1668,9 @@ void Assembler::GrowBuffer() {
   desc.reloc_size = (buffer_ + buffer_size_) - reloc_info_writer.pos();
 
   // Copy the data.
-  int pc_delta = desc.buffer - buffer_;
-  int rc_delta = (desc.buffer + desc.buffer_size) - (buffer_ + buffer_size_);
+  intptr_t pc_delta = desc.buffer - buffer_;
+  intptr_t rc_delta = (desc.buffer + desc.buffer_size) -
+    (buffer_ + buffer_size_);
   memmove(desc.buffer, buffer_, desc.instr_size);
   memmove(reloc_info_writer.pos() + rc_delta,
           reloc_info_writer.pos(), desc.reloc_size);

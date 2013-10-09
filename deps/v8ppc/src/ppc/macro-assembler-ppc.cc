@@ -719,17 +719,11 @@ void MacroAssembler::EnterExitFrame(bool save_doubles, int stack_space) {
   ASSERT_EQ(0 * kPointerSize, ExitFrameConstants::kCallerFPOffset);
   ASSERT(stack_space > 0);
 
-#if 0
   // This is an opportunity to build a frame to wrap
   // all of the pushes that have happened inside of V8
   // since we were called from C code
-  stwu(fp, MemOperand(sp, -8));  // build frame for pushed parameters
-  mflr(r0);
-  stw(r0, MemOperand(fp, 4));
-  mr(fp, sp);
-#endif
 
-  // urgh -- replicate ARM frame for now
+  // replicate ARM frame - TODO make this more closely follow PPC ABI
   mflr(r0);
   Push(r0, fp);
   mr(fp, sp);
@@ -789,7 +783,7 @@ void MacroAssembler::InitializeNewString(Register string,
   StoreP(scratch1, FieldMemOperand(string, String::kLengthOffset), r0);
   li(scratch1, Operand(String::kEmptyHashField));
   StoreP(scratch2, FieldMemOperand(string, HeapObject::kMapOffset), r0);
-  stw(scratch1, FieldMemOperand(string, String::kHashFieldOffset));
+  StoreP(scratch1, FieldMemOperand(string, String::kHashFieldSlot), r0);
 }
 
 
@@ -1881,8 +1875,12 @@ void MacroAssembler::StoreNumberToDoubleElements(Register value_reg,
                                                  Register scratch4,
                                                  Label* fail) {
   Label smi_value, maybe_nan, have_double_value, is_nan, done;
+#if V8_TARGET_ARCH_PPC64
+  Register double_reg = scratch2;
+#else
   Register mantissa_reg = scratch2;
   Register exponent_reg = scratch3;
+#endif
 
   // Handle smi values specially.
   JumpIfSmi(value_reg, &smi_value);
@@ -1896,16 +1894,29 @@ void MacroAssembler::StoreNumberToDoubleElements(Register value_reg,
 
   // Check for nan: all NaN values have a value greater (signed) than 0x7ff00000
   // in the exponent.
+#if V8_TARGET_ARCH_PPC64
+  mov(scratch1, Operand(kLastNonNaNInt64));
+  addi(scratch3, value_reg, Operand(-kHeapObjectTag));
+  ld(double_reg, MemOperand(scratch3, HeapNumber::kValueOffset));
+  cmp(double_reg, scratch1);
+#else
   mov(scratch1, Operand(kNaNOrInfinityLowerBoundUpper32));
   lwz(exponent_reg, FieldMemOperand(value_reg, HeapNumber::kExponentOffset));
   cmp(exponent_reg, scratch1);
+#endif
   bge(&maybe_nan);
 
+#if !V8_TARGET_ARCH_PPC64
   lwz(mantissa_reg, FieldMemOperand(value_reg, HeapNumber::kMantissaOffset));
+#endif
 
   bind(&have_double_value);
   SmiToDoubleArrayOffset(scratch1, key_reg);
   add(scratch1, elements_reg, scratch1);
+#if V8_TARGET_ARCH_PPC64
+  addi(scratch1, scratch1, Operand(-kHeapObjectTag));
+  std(double_reg, MemOperand(scratch1, FixedDoubleArray::kHeaderSize));
+#else
 #if __BYTE_ORDER == __LITTLE_ENDIAN
   stw(mantissa_reg, FieldMemOperand(scratch1, FixedDoubleArray::kHeaderSize));
   uint32_t offset = FixedDoubleArray::kHeaderSize + sizeof(kHoleNanLower32);
@@ -1915,21 +1926,31 @@ void MacroAssembler::StoreNumberToDoubleElements(Register value_reg,
   uint32_t offset = FixedDoubleArray::kHeaderSize + sizeof(kHoleNanLower32);
   stw(mantissa_reg, FieldMemOperand(scratch1, offset));
 #endif
+#endif
   b(&done);
 
   bind(&maybe_nan);
   // Could be NaN or Infinity. If fraction is not zero, it's NaN, otherwise
   // it's an Infinity, and the non-NaN code path applies.
   bgt(&is_nan);
+#if V8_TARGET_ARCH_PPC64
+  clrldi(r0, double_reg, Operand(32), SetRC);
+  beq(&have_double_value, cr0);
+#else
   lwz(mantissa_reg, FieldMemOperand(value_reg, HeapNumber::kMantissaOffset));
   cmpi(mantissa_reg, Operand::Zero());
   beq(&have_double_value);
+#endif
   bind(&is_nan);
   // Load canonical NaN for storing into the double array.
   uint64_t nan_int64 = BitCast<uint64_t>(
       FixedDoubleArray::canonical_not_the_hole_nan_as_double());
+#if V8_TARGET_ARCH_PPC64
+  mov(double_reg, Operand(nan_int64));
+#else
   mov(mantissa_reg, Operand(static_cast<intptr_t>(nan_int64)));
   mov(exponent_reg, Operand(static_cast<intptr_t>(nan_int64 >> 32)));
+#endif
   b(&have_double_value);
 
   bind(&smi_value);
@@ -2199,9 +2220,9 @@ void MacroAssembler::CallApiFunctionAndReturn(ExternalReference function,
   mov(r26, Operand(next_address));
   LoadP(r27, MemOperand(r26, kNextOffset));
   LoadP(r28, MemOperand(r26, kLimitOffset));
-  LoadP(r29, MemOperand(r26, kLevelOffset));
+  lwz(r29, MemOperand(r26, kLevelOffset));
   addi(r29, r29, Operand(1));
-  StoreP(r29, MemOperand(r26, kLevelOffset));
+  stw(r29, MemOperand(r26, kLevelOffset));
 
   // PPC LINUX ABI
   // The return value is pointer-sized non-scalar value.
@@ -2237,12 +2258,12 @@ void MacroAssembler::CallApiFunctionAndReturn(ExternalReference function,
   // previous handle scope.
   StoreP(r27, MemOperand(r26, kNextOffset));
   if (emit_debug_code()) {
-    LoadP(r4, MemOperand(r26, kLevelOffset));
+    lwz(r4, MemOperand(r26, kLevelOffset));
     cmp(r4, r29);
     Check(eq, "Unexpected level after return from api call");
   }
   subi(r29, r29, Operand(1));
-  StoreP(r29, MemOperand(r26, kLevelOffset));
+  stw(r29, MemOperand(r26, kLevelOffset));
   LoadP(ip, MemOperand(r26, kLimitOffset));
   cmp(r28, ip);
   bne(&delete_allocated_handles);
@@ -2302,11 +2323,18 @@ void MacroAssembler::IndexFromHash(Register hash, Register index) {
          (1 << String::kArrayIndexValueBits));
   // We want the smi-tagged index in key.  kArrayIndexValueMask has zeros in
   // the low kHashShift bits.
-  STATIC_ASSERT(kSmiTag == 0);
   STATIC_ASSERT(String::kHashShift == 2);
   STATIC_ASSERT(String::kArrayIndexValueBits == 24);
-  // This function is performing the logic: index = (hash & 0x03FFFFFC) >> 1;
+  // index = SmiTag((hash >> 2) & 0x00FFFFFF);
+#if V8_TARGET_ARCH_PPC64
+  ExtractBitRange(index, hash, 25, 2);
+  SmiTag(index);
+#else
+  STATIC_ASSERT(kSmiShift == 1);
+  // 32-bit can do this in one instruction:
+  //    index = (hash & 0x03FFFFFC) >> 1;
   rlwinm(index, hash, 31, 7, 30);
+#endif
 }
 
 void MacroAssembler::SmiToDoubleFPRegister(Register smi,
@@ -2334,6 +2362,9 @@ void MacroAssembler::ConvertToInt32(Register source,
 
   addi(sp, sp, Operand(-kDoubleSize));
   stfd(double_scratch, MemOperand(sp, 0));
+#if V8_TARGET_ARCH_PPC64
+  ld(dest, MemOperand(sp, 0));
+#else
 #if __FLOAT_WORD_ORDER == __LITTLE_ENDIAN
   lwz(scratch, MemOperand(sp, 4));
   lwz(dest, MemOperand(sp, 0));
@@ -2341,11 +2372,15 @@ void MacroAssembler::ConvertToInt32(Register source,
   lwz(scratch, MemOperand(sp, 0));
   lwz(dest, MemOperand(sp, 4));
 #endif
+#endif
   addi(sp, sp, Operand(kDoubleSize));
 
   // The result is not a 32-bit integer when the high 33 bits of the
   // result are not identical.
   srawi(scratch2, dest, 31);
+#if V8_TARGET_ARCH_PPC64
+  sradi(scratch, dest, 32);
+#endif
   cmp(scratch2, scratch);
   bne(not_int32);
 }
@@ -2368,6 +2403,9 @@ void MacroAssembler::EmitVFPTruncate(VFPRoundingMode rounding_mode,
 
   addi(sp, sp, Operand(-kDoubleSize));
   stfd(double_scratch, MemOperand(sp, 0));
+#if V8_TARGET_ARCH_PPC64
+  ld(result, MemOperand(sp, 0));
+#else
 #if __FLOAT_WORD_ORDER == __LITTLE_ENDIAN
   lwz(scratch, MemOperand(sp, 4));
   lwz(result, MemOperand(sp, 0));
@@ -2375,11 +2413,15 @@ void MacroAssembler::EmitVFPTruncate(VFPRoundingMode rounding_mode,
   lwz(scratch, MemOperand(sp, 0));
   lwz(result, MemOperand(sp, 4));
 #endif
+#endif
   addi(sp, sp, Operand(kDoubleSize));
 
   // The result is not a 32-bit integer when the high 33 bits of the
   // result are not identical.
   srawi(r0, result, 31);
+#if V8_TARGET_ARCH_PPC64
+  sradi(scratch, result, 32);
+#endif
   cmp(r0, scratch);
 
   if (check_inexact == kCheckForInexactConversion) {
@@ -2427,7 +2469,7 @@ void MacroAssembler::EmitOutOfInt32RangeTruncate(Register result,
   STATIC_ASSERT(HeapNumber::kSignMask == 0x80000000u);
   Register sign = result;
   result = no_reg;
-  ExtractSignBit(sign, input_high);
+  ExtractSignBit32(sign, input_high);
 
   // Shifts >= 32 bits should result in zero.
   // slw extracts only the 6 most significant bits of the shift value.
@@ -2495,6 +2537,9 @@ void MacroAssembler::EmitECMATruncate(Register result,
 
   // reserve a slot on the stack
   stfdu(double_scratch, MemOperand(sp, -8));
+#if V8_TARGET_ARCH_PPC64
+  ld(result, MemOperand(sp, 0));
+#else
 #if __FLOAT_WORD_ORDER == __LITTLE_ENDIAN
   lwz(scratch, MemOperand(sp, 4));
   lwz(result, MemOperand(sp));
@@ -2502,10 +2547,14 @@ void MacroAssembler::EmitECMATruncate(Register result,
   lwz(scratch, MemOperand(sp, 0));
   lwz(result, MemOperand(sp, 4));
 #endif
+#endif
 
   // The result is not a 32-bit integer when the high 33 bits of the
   // result are not identical.
   srawi(r0, result, 31);
+#if V8_TARGET_ARCH_PPC64
+  sradi(scratch, result, 32);
+#endif
   cmp(r0, scratch);
   bne(&truncate);
 
@@ -3405,22 +3454,6 @@ void MacroAssembler::CallCFunctionHelper(Register function,
   // Make sure that the stack is aligned before calling a C function unless
   // running in the simulator. The simulator has its own alignment check which
   // provides more information.
-#if defined(V8_HOST_ARCH_ARM)  // never used on PPC
-  if (emit_debug_code()) {
-    int frame_alignment = OS::ActivationFrameAlignment();
-    int frame_alignment_mask = frame_alignment - 1;
-    if (frame_alignment > kPointerSize) {
-      ASSERT(IsPowerOf2(frame_alignment));
-      Label alignment_as_expected;
-      tst(sp, Operand(frame_alignment_mask));
-      beq(&alignment_as_expected);
-      // Don't use Check here, as it will call Runtime_Abort possibly
-      // re-entering here.
-      stop("Unexpected alignment");
-      bind(&alignment_as_expected);
-    }
-  }
-#endif
 
   // Just call directly. The function called cannot cause a GC, or
   // allow preemption, so the return address in the link register
@@ -3640,19 +3673,22 @@ void MacroAssembler::HasColor(Register object,
   GetMarkBits(object, bitmap_scratch, mask_scratch);
 
   Label other_color, word_boundary;
-  LoadP(ip, MemOperand(bitmap_scratch, MemoryChunk::kHeaderSize));
+  lwz(ip, MemOperand(bitmap_scratch, MemoryChunk::kHeaderSize));
+  // Test the first bit
   and_(r0, ip, mask_scratch, SetRC);
   b(first_bit == 1 ? eq : ne, &other_color, cr0);
   // Shift left 1
+  // May need to load the next cell
   slwi(mask_scratch, mask_scratch, Operand(1), SetRC);
   beq(&word_boundary, cr0);
+  // Test the second bit
   and_(r0, ip, mask_scratch, SetRC);
   b(second_bit == 1 ? ne : eq, has_color, cr0);
   b(&other_color);
 
   bind(&word_boundary);
-  LoadP(ip, MemOperand(bitmap_scratch,
-                       MemoryChunk::kHeaderSize + kPointerSize));
+  lwz(ip, MemOperand(bitmap_scratch,
+                     MemoryChunk::kHeaderSize + kIntSize));
   andi(r0, ip, Operand(1));
   b(second_bit == 1 ? ne : eq, has_color, cr0);
   bind(&other_color);
@@ -3695,7 +3731,7 @@ void MacroAssembler::GetMarkBits(Register addr_reg,
   ExtractBitRange(ip, addr_reg,
                   kPageSizeBits - 1,
                   kLowBits);
-  slwi(ip, ip, Operand(kPointerSizeLog2));
+  ShiftLeftImm(ip, ip, Operand(Bitmap::kBytesPerCellLog2));
   add(bitmap_reg, bitmap_reg, ip);
   li(ip, Operand(1));
   slw(mask_reg, ip, mask_reg);
@@ -3721,7 +3757,7 @@ void MacroAssembler::EnsureNotWhite(
 
   // Since both black and grey have a 1 in the first position and white does
   // not have a 1 there we only need to check one bit.
-  LoadP(load_scratch, MemOperand(bitmap_scratch, MemoryChunk::kHeaderSize));
+  lwz(load_scratch, MemOperand(bitmap_scratch, MemoryChunk::kHeaderSize));
   and_(r0, mask_scratch, load_scratch, SetRC);
   bne(&done, cr0);
 
@@ -3804,9 +3840,9 @@ void MacroAssembler::EnsureNotWhite(
   bind(&is_data_object);
   // Value is a data object, and it is white.  Mark it black.  Since we know
   // that the object is white we can make it black by flipping one bit.
-  LoadP(ip, MemOperand(bitmap_scratch, MemoryChunk::kHeaderSize));
+  lwz(ip, MemOperand(bitmap_scratch, MemoryChunk::kHeaderSize));
   orx(ip, ip, mask_scratch);
-  StoreP(ip, MemOperand(bitmap_scratch, MemoryChunk::kHeaderSize));
+  stw(ip, MemOperand(bitmap_scratch, MemoryChunk::kHeaderSize));
 
   mov(ip, Operand(~Page::kPageAlignmentMask));
   and_(bitmap_scratch, bitmap_scratch, ip);
