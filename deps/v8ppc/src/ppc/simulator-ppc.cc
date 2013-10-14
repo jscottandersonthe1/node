@@ -1035,9 +1035,7 @@ void Simulator::SetFpResult(const double& result) {
 
 void Simulator::TrashCallerSaveRegisters() {
   // We don't trash the registers with the return value.
-#if 0
--- roohack
-A good idea to trash volatile registers, needs to be done
+#if 0  // A good idea to trash volatile registers, needs to be done
   registers_[2] = 0x50Bad4U;
   registers_[3] = 0x50Bad4U;
   registers_[12] = 0x50Bad4U;
@@ -2154,9 +2152,10 @@ void Simulator::DecodeExt2_9bit(Instruction* instr) {
       int rt = instr->RTValue();
       int ra = instr->RAValue();
       int rb = instr->RBValue();
-      intptr_t ra_val = get_register(ra);
-      intptr_t rb_val = get_register(rb);
-      intptr_t alu_out = ra_val / rb_val;
+      int32_t ra_val = get_register(ra);
+      int32_t rb_val = get_register(rb);
+      // result is undefined if divisor is zero.
+      int32_t alu_out = rb_val ? ra_val / rb_val : -1;
       set_register(rt, alu_out);
       if (instr->Bit(0)) {  // RC bit set
         SetCR0(alu_out);
@@ -2164,6 +2163,23 @@ void Simulator::DecodeExt2_9bit(Instruction* instr) {
       // todo - handle OE bit
       break;
     }
+#if V8_TARGET_ARCH_PPC64
+    case DIVD: {
+      int rt = instr->RTValue();
+      int ra = instr->RAValue();
+      int rb = instr->RBValue();
+      int64_t ra_val = get_register(ra);
+      int64_t rb_val = get_register(rb);
+      // result is undefined if divisor is zero.
+      int64_t alu_out = rb_val ? ra_val / rb_val : -1;
+      set_register(rt, alu_out);
+      if (instr->Bit(0)) {  // RC bit set
+        SetCR0(alu_out);
+      }
+      // todo - handle OE bit
+      break;
+    }
+#endif
     case ADDX: {
       int rt = instr->RTValue();
       int ra = instr->RAValue();
