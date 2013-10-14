@@ -116,10 +116,6 @@ class LCodeGen BASE_EMBEDDED {
   void FinishCode(Handle<Code> code);
 
   // Deferred code support.
-  void DoDeferredBinaryOpStub(LPointerMap* pointer_map,
-                              LOperand* left_argument,
-                              LOperand* right_argument,
-                              Token::Value op);
   void DoDeferredNumberTagD(LNumberTagD* instr);
 
   enum IntegerSignedness { SIGNED_INT32, UNSIGNED_INT32 };
@@ -302,9 +298,6 @@ class LCodeGen BASE_EMBEDDED {
   void RecordSafepointWithRegisters(LPointerMap* pointers,
                                     int arguments,
                                     Safepoint::DeoptMode mode);
-  void RecordSafepointWithRegistersAndDoubles(LPointerMap* pointers,
-                                              int arguments,
-                                              Safepoint::DeoptMode mode);
   void RecordPosition(int position);
 
   static Condition TokenToCondition(Token::Value op);
@@ -422,9 +415,6 @@ class LCodeGen BASE_EMBEDDED {
         case Safepoint::kWithRegisters:
           codegen_->masm_->PushSafepointRegisters();
           break;
-        case Safepoint::kWithRegistersAndDoubles:
-          codegen_->masm_->PushSafepointRegistersAndDoubles();
-          break;
         default:
           UNREACHABLE();
       }
@@ -436,9 +426,6 @@ class LCodeGen BASE_EMBEDDED {
       switch (kind) {
         case Safepoint::kWithRegisters:
           codegen_->masm_->PopSafepointRegisters();
-          break;
-        case Safepoint::kWithRegistersAndDoubles:
-          codegen_->masm_->PopSafepointRegistersAndDoubles();
           break;
         default:
           UNREACHABLE();

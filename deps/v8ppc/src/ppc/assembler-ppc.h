@@ -227,6 +227,7 @@ const Register fp = { kRegister_fp_Code };
 // Double word FP register.
 struct DwVfpRegister {
   static const int kNumRegisters = 32;
+  static const int kNumVolatileRegisters = 14;     // d0-d13
   static const int kNumAllocatableRegisters = 12;  // d1-d12
 
   inline static int ToAllocationIndex(DwVfpRegister reg);
@@ -745,8 +746,7 @@ class Assembler : public AssemblerBase {
         bc(b_offset, BF, encode_crbit(cr, CR_LT), lk);
         break;
       default:
-        fake_asm(fBranch);
-        // UNIMPLEMENTED();
+        UNIMPLEMENTED();
     }
   }
 
@@ -907,6 +907,8 @@ class Assembler : public AssemblerBase {
   void extsw(Register rs, Register ra, RCBit r = LeaveRC);
   void mulld(Register dst, Register src1, Register src2,
              OEBit o = LeaveOE, RCBit r = LeaveRC);
+  void divd(Register dst, Register src1, Register src2,
+            OEBit o = LeaveOE, RCBit r = LeaveRC);
 #endif
 
   void rlwinm(Register ra, Register rs, int sh, int mb, int me,
