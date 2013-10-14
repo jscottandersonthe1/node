@@ -52,9 +52,6 @@ static void EmitSmiNonsmiComparison(MacroAssembler* masm,
                                     Label* lhs_not_nan,
                                     Label* slow,
                                     bool strict);
-#if 0
-static void EmitTwoNonNanDoubleComparison(MacroAssembler* masm, Condition cond);
-#endif
 static void EmitStrictTwoHeapObjectCompare(MacroAssembler* masm,
                                            Register lhs,
                                            Register rhs);
@@ -1256,41 +1253,32 @@ void NumberToStringStub::GenerateLookupNumberStringCache(MacroAssembler* masm,
   Label load_result_from_cache;
   if (!object_is_smi) {
     __ JumpIfSmi(object, &is_smi);
-#if 0
-    if (CpuFeatures::IsSupported(VFP2)) {
-      CpuFeatures::Scope scope(VFP2);
-      __ CheckMap(object,
-                  scratch1,
-                  Heap::kHeapNumberMapRootIndex,
-                  not_found,
-                  DONT_DO_SMI_CHECK);
 
-      STATIC_ASSERT(8 == kDoubleSize);
-      __ addi(scratch1,
-              object,
-              Operand(HeapNumber::kValueOffset - kHeapObjectTag));
-      __ ldm(ia, scratch1, scratch1.bit() | scratch2.bit());
-      __ eor(scratch1, scratch1, Operand(scratch2));
-      __ and_(scratch1, scratch1, mask);
+    __ CheckMap(object,
+                scratch1,
+                Heap::kHeapNumberMapRootIndex,
+                not_found,
+                DONT_DO_SMI_CHECK);
 
-      // Calculate address of entry in string cache: each entry consists
-      // of two pointer sized fields.
-      __ ShiftLeftImm(scratch1, scratch1, Operand(kPointerSizeLog2 + 1));
-      __ add(scratch1, number_string_cache, scratch1);
+    STATIC_ASSERT(8 == kDoubleSize);
+    __ lwz(scratch1, FieldMemOperand(object, HeapNumber::kExponentOffset));
+    __ lwz(scratch2, FieldMemOperand(object, HeapNumber::kMantissaOffset));
+    __ xor_(scratch1, scratch1, scratch2);
+    __ and_(scratch1, scratch1, mask);
 
-      Register probe = mask;
-      __ LoadP(probe,
-             FieldMemOperand(scratch1, FixedArray::kHeaderSize));
-      __ JumpIfSmi(probe, not_found);
-      __ lfd(d0, FieldMemOperand(object, HeapNumber::kValueOffset));
-      __ lfd(d1, FieldMemOperand(probe, HeapNumber::kValueOffset));
-      __ VFPCompareAndSetFlags(d0, d1);
-      __ bne(not_found);  // The cache did not contain this value.
-      __ b(&load_result_from_cache);
-    } else {
-#endif
-      __ b(not_found);
-//  }
+    // Calculate address of entry in string cache: each entry consists
+    // of two pointer sized fields.
+    __ ShiftLeftImm(scratch1, scratch1, Operand(kPointerSizeLog2 + 1));
+    __ add(scratch1, number_string_cache, scratch1);
+
+    Register probe = mask;
+    __ LoadP(probe, FieldMemOperand(scratch1, FixedArray::kHeaderSize));
+    __ JumpIfSmi(probe, not_found);
+    __ lfd(d0, FieldMemOperand(object, HeapNumber::kValueOffset));
+    __ lfd(d1, FieldMemOperand(probe, HeapNumber::kValueOffset));
+    __ fcmpu(d0, d1);
+    __ bne(not_found);  // The cache did not contain this value.
+    __ b(&load_result_from_cache);
   }
 
   __ bind(&is_smi);
@@ -1642,8 +1630,9 @@ void StoreBufferOverflowStub::Generate(MacroAssembler* masm) {
   __ mflr(r0);
   __ MultiPush(kJSCallerSaved | r0.bit());
   if (save_doubles_ == kSaveFPRegs) {
-    __ subi(sp, sp, Operand(kDoubleSize * DwVfpRegister::kNumRegisters));
-    for (int i = 0; i < DwVfpRegister::kNumRegisters; i++) {
+    const int kNumRegs = DwVfpRegister::kNumVolatileRegisters;
+    __ subi(sp, sp, Operand(kDoubleSize * kNumRegs));
+    for (int i = 0; i < kNumRegs; i++) {
       DwVfpRegister reg = DwVfpRegister::from_code(i);
       __ stfd(reg, MemOperand(sp, i * kDoubleSize));
     }
@@ -1659,11 +1648,12 @@ void StoreBufferOverflowStub::Generate(MacroAssembler* masm) {
       ExternalReference::store_buffer_overflow_function(masm->isolate()),
       argument_count);
   if (save_doubles_ == kSaveFPRegs) {
-    for (int i = 0; i < DwVfpRegister::kNumRegisters; i++) {
+    const int kNumRegs = DwVfpRegister::kNumVolatileRegisters;
+    for (int i = 0; i < kNumRegs; i++) {
       DwVfpRegister reg = DwVfpRegister::from_code(i);
       __ lfd(reg, MemOperand(sp, i * kDoubleSize));
     }
-    __ addi(sp, sp, Operand(kDoubleSize * DwVfpRegister::kNumRegisters));
+    __ addi(sp, sp, Operand(kDoubleSize * kNumRegs));
   }
   __ MultiPop(kJSCallerSaved | r0.bit());
   __ mtlr(r0);
@@ -1855,20 +1845,18 @@ void UnaryOpStub::GenerateHeapNumberCodeBitNot(
   __ ConvertToInt32(r3, r4, r5, r6, d0, slow);
 
   // Do the bitwise operation and check if the result fits in a smi.
-  Label try_float;
   __ notx(r4, r4);
 
 #if !V8_TARGET_ARCH_PPC64
-  __ lis(r5, Operand(0x40000000 >> 16));
-  __ add(r5, r4, r5);
-  __ cmpi(r5, Operand::Zero());
-  __ blt(&try_float);
+  Label try_float;
+  __ JumpIfNotSmiCandidate(r4, r5, &try_float);
 #endif
 
   // Tag the result as a smi and we're done.
   __ SmiTag(r3, r4);
   __ Ret();
 
+#if !V8_TARGET_ARCH_PPC64
   // Try to store the result in a heap number.
   __ bind(&try_float);
   if (mode_ == UNARY_NO_OVERWRITE) {
@@ -1907,6 +1895,7 @@ void UnaryOpStub::GenerateHeapNumberCodeBitNot(
   if (FLAG_debug_code) {
     __ stop("Incorrect assumption in bit-not stub");
   }
+#endif
 }
 
 
@@ -2092,7 +2081,10 @@ void BinaryOpStub::GenerateSmiSmiOperation(MacroAssembler* masm) {
       // scratch1 = product (untagged)
       // scratch2 = sign-extended higher 32 bits of product.
       __ Mul(scratch1, r0, ip);
-      __ ShiftRightArithImm(scratch2, scratch1, 32);
+      // Check for overflowing the smi range - no overflow if higher 33 bits of
+      // the result are identical.
+      __ TestIfInt32(scratch1, scratch2, ip);
+      __ bne(&not_smi_result);
 #else
       // Remove tag from one of the operands. This way the multiplication result
       // will be a smi if it fits the smi range.
@@ -2102,12 +2094,11 @@ void BinaryOpStub::GenerateSmiSmiOperation(MacroAssembler* masm) {
       // scratch2 = higher 32 bits of product.
       __ mullw(scratch1, left, ip);
       __ mulhw(scratch2, left, ip);
-#endif
       // Check for overflowing the smi range - no overflow if higher 33 bits of
       // the result are identical.
-      __ srawi(ip, scratch1, 31);
-      __ cmp(ip, scratch2);
+      __ TestIfInt32(scratch2, scratch1, ip);
       __ bne(&not_smi_result);
+#endif
       // Go slow on zero result to handle -0.
       __ cmpi(scratch1, Operand::Zero());
       __ beq(&mul_zero);
@@ -2130,37 +2121,60 @@ void BinaryOpStub::GenerateSmiSmiOperation(MacroAssembler* masm) {
       // that would mean we should produce -0.
       break;
     }
-    case Token::DIV:
-      // Check for power of two on the right hand side.
-      __ JumpIfNotPowerOfTwoOrZero(right, scratch1, &not_smi_result);
-      // Check for positive and no remainder (scratch1 contains right - 1).
-      __ lis(r0, Operand(SIGN_EXT_IMM16(0x8000)));
-#if V8_TARGET_ARCH_PPC64
-      __ ShiftLeftImm(r0, r0, Operand(32));
+    case Token::DIV: {
+      Label check_neg_zero;
+      __ SmiUntag(ip, left);
+      __ SmiUntag(scratch2, right, SetRC);
+      __ Div(scratch1, ip, scratch2);
+      // Check for zero on the right hand side.
+      __ beq(&not_smi_result, cr0);
+      // Not Smi if remainder is non-zero.
+      __ Mul(scratch2, scratch2, scratch1);
+      __ cmp(ip, scratch2);
+      __ bne(&not_smi_result);
+      // If the result is 0, we need to check for the -0 case.
+      __ SmiTag(scratch2, scratch1, SetRC);
+      __ beq(&check_neg_zero, cr0);
+      // Check for Smi overflow
+      __ xor_(scratch1, scratch2, scratch1, SetRC);
+      __ blt(&not_smi_result, cr0);
+      __ mr(right, scratch2);
+      __ Ret();
+
+      // If divisor (right) is negative, we must produce -0.
+      __ bind(&check_neg_zero);
+      __ cmpi(right, Operand::Zero());
+      __ blt(&not_smi_result);
+      __ mr(right, scratch2);
+      __ Ret();
+      break;
+    }
+    case Token::MOD: {
+      Label check_neg_zero;
+      __ SmiUntag(ip, left);
+      __ SmiUntag(scratch2, right, SetRC);
+      __ Div(scratch1, ip, scratch2);
+      // Check for zero on the right hand side.
+      __ beq(&not_smi_result, cr0);
+      __ Mul(scratch1, scratch2, scratch1);
+      __ sub(scratch1, ip, scratch1, LeaveOE, SetRC);
+      // If the result is 0, we need to check for the -0 case.
+      __ beq(&check_neg_zero, cr0);
+#if !V8_TARGET_ARCH_PPC64
+      // Check that the signed result fits in a Smi.
+      __ JumpIfNotSmiCandidate(scratch1, scratch2, &not_smi_result);
 #endif
-      __ orx(scratch2, scratch1, r0);
-      __ and_(r0, left, scratch2, SetRC);
-      __ bne(&not_smi_result, cr0);
+      __ SmiTag(right, scratch1);
+      __ Ret();
 
-      // Perform division by shifting.
-      __ CountLeadingZeros(scratch1, scratch1);
-      __ subfic(scratch1, scratch1, Operand(kSmiValueSize));
-      __ ShiftRightArith(right, left, scratch1);
+      // If dividend (left) is negative, we must produce -0.
+      __ bind(&check_neg_zero);
+      __ cmpi(left, Operand::Zero());
+      __ blt(&not_smi_result);
+      __ LoadSmiLiteral(right, Smi::FromInt(0));
       __ Ret();
       break;
-    case Token::MOD:
-      // Check for two positive smis.
-      __ orx(scratch1, left, right);
-      __ TestIfPositiveSmi(scratch1, r0);
-      __ bne(&not_smi_result, cr0);
-
-      // Check for power of two on the right hand side.
-      __ JumpIfNotPowerOfTwoOrZero(right, scratch1, &not_smi_result);
-
-      // Perform modulus by masking (scratch1 contains right - 1).
-      __ and_(right, left, scratch1);
-      __ Ret();
-      break;
+    }
     case Token::BIT_OR:
       __ orx(right, left, right);
       __ Ret();
@@ -2187,16 +2201,8 @@ void BinaryOpStub::GenerateSmiSmiOperation(MacroAssembler* masm) {
       __ SmiUntag(scratch1, left);
       __ GetLeastBitsFromSmi(scratch2, right, 5);
       __ srw(scratch1, scratch1, scratch2);
-      // Unsigned shift is not allowed to produce a negative number, so
-      // check the sign bit and, for 32-bit, the sign bit after Smi tagging.
-      __ TestBitRange(scratch1, 31,
-#if V8_TARGET_ARCH_PPC64
-                      31,
-#else
-                      30,
-#endif
-                      r0);
-      __ bne(&not_smi_result, cr0);
+      // Unsigned shift is not allowed to produce a negative number.
+      __ JumpIfNotUnsignedSmiCandidate(scratch1, r0, &not_smi_result);
       // Smi tag result.
       __ SmiTag(right, scratch1);
       __ Ret();
@@ -2208,9 +2214,7 @@ void BinaryOpStub::GenerateSmiSmiOperation(MacroAssembler* masm) {
       __ ShiftLeft(scratch1, scratch1, scratch2);
 #if !V8_TARGET_ARCH_PPC64
       // Check that the signed result fits in a Smi.
-      __ addis(scratch2, scratch1, Operand(0x4000));
-      __ cmpi(scratch2, Operand::Zero());
-      __ blt(&not_smi_result);
+      __ JumpIfNotSmiCandidate(scratch1, scratch2, &not_smi_result);
 #endif
       __ SmiTag(right, scratch1);
       __ Ret();
@@ -2376,9 +2380,7 @@ void BinaryOpStub::GenerateFPOperation(MacroAssembler* masm,
 
 #if !V8_TARGET_ARCH_PPC64
       // Check that the *signed* result fits in a smi.
-      __ addis(r6, r5, Operand(0x40000000u >> 16));
-      __ cmpi(r6, Operand::Zero());
-      __ blt(&result_not_a_smi);
+      __ JumpIfNotSmiCandidate(r5, r6, &result_not_a_smi);
 #endif
       __ SmiTag(r3, r5);
       __ Ret();
@@ -2631,10 +2633,8 @@ void BinaryOpStub::GenerateInt32Stub(MacroAssembler* masm) {
 
 #if !V8_TARGET_ARCH_PPC64
         // Check if the result fits in a smi.
-        __ addis(scratch2, scratch1, Operand(0x40000000u >> 16));
-        __ cmpi(scratch2, Operand::Zero());
         // If not try to return a heap number.
-        __ blt(&return_heap_number);
+        __ JumpIfNotSmiCandidate(scratch1, scratch2, &return_heap_number);
 #endif
         // Check for minus zero. Return heap number for minus zero.
         Label not_zero;
@@ -2766,10 +2766,8 @@ void BinaryOpStub::GenerateInt32Stub(MacroAssembler* masm) {
 
 #if !V8_TARGET_ARCH_PPC64
       // Check if the result fits in a smi.
-      __ addis(scratch1, r5, Operand(0x40000000u >> 16));
-      __ cmpi(scratch1, Operand::Zero());
       // If not try to return a heap number. (We know the result is an int32.)
-      __ blt(&return_heap_number);
+      __ JumpIfNotSmiCandidate(r5, scratch1, &return_heap_number);
 #endif
       // Tag the result and return.
       __ SmiTag(r3, r5);
@@ -3319,51 +3317,50 @@ void MathPowStub::Generate(MacroAssembler* masm) {
     __ beq(&int_exponent);
 
     if (exponent_type_ == ON_STACK) {
-#ifdef PENGUIN_CLEANUP
       // Detect square root case.  Crankshaft detects constant +/-0.5 at
       // compile time and uses DoMathPowHalf instead.  We then skip this check
       // for non-constant cases of +/-0.5 as these hardly occur.
-      Label not_plus_half;
+      Label not_plus_half, not_minus_inf1, not_minus_inf2;
 
       // Test for 0.5.
-      __ vmov(double_scratch, 0.5, scratch);
-      __ VFPCompareAndSetFlags(double_exponent, double_scratch);
+      __ LoadDoubleLiteral(double_scratch, 0.5, scratch);
+      __ fcmpu(double_exponent, double_scratch);
       __ bne(&not_plus_half);
 
       // Calculates square root of base.  Check for the special case of
       // Math.pow(-Infinity, 0.5) == Infinity (ECMA spec, 15.8.2.13).
-      __ vmov(double_scratch, -V8_INFINITY, scratch);
-      __ VFPCompareAndSetFlags(double_base, double_scratch);
-      __ vneg(double_result, double_scratch, eq);
-      __ beq(&done);
+      __ LoadDoubleLiteral(double_scratch, -V8_INFINITY, scratch);
+      __ fcmpu(double_base, double_scratch);
+      __ bne(&not_minus_inf1);
+      __ fneg(double_result, double_scratch);
+      __ b(&done);
+      __ bind(&not_minus_inf1);
 
       // Add +0 to convert -0 to +0.
-      __ vadd(double_scratch, double_base, kDoubleRegZero);
+      __ fadd(double_scratch, double_base, kDoubleRegZero);
       __ fsqrt(double_result, double_scratch);
       __ b(&done);
 
       __ bind(&not_plus_half);
-      __ vmov(double_scratch, -0.5, scratch);
-      __ VFPCompareAndSetFlags(double_exponent, double_scratch);
+      __ LoadDoubleLiteral(double_scratch, -0.5, scratch);
+      __ fcmpu(double_exponent, double_scratch);
       __ bne(&call_runtime);
 
       // Calculates square root of base.  Check for the special case of
       // Math.pow(-Infinity, -0.5) == 0 (ECMA spec, 15.8.2.13).
-      __ vmov(double_scratch, -V8_INFINITY, scratch);
-      __ VFPCompareAndSetFlags(double_base, double_scratch);
-      __ vmov(double_result, kDoubleRegZero, eq);
-      __ beq(&done);
+      __ LoadDoubleLiteral(double_scratch, -V8_INFINITY, scratch);
+      __ fcmpu(double_base, double_scratch);
+      __ bne(&not_minus_inf2);
+      __ fmr(double_result, kDoubleRegZero);
+      __ b(&done);
+      __ bind(&not_minus_inf2);
 
       // Add +0 to convert -0 to +0.
-      __ vadd(double_scratch, double_base, kDoubleRegZero);
-      __ vmov(double_result, 1.0, scratch);
+      __ fadd(double_scratch, double_base, kDoubleRegZero);
+      __ LoadDoubleLiteral(double_result, 1.0, scratch);
       __ fsqrt(double_scratch, double_scratch);
-      __ vdiv(double_result, double_result, double_scratch);
+      __ fdiv(double_result, double_result, double_scratch);
       __ b(&done);
-#else
-      PPCPORT_UNIMPLEMENTED();
-      __ fake_asm(fMASM3);
-#endif
     }
 
     __ mflr(r0);
@@ -7184,13 +7181,7 @@ void RecordWriteStub::Generate(MacroAssembler* masm) {
 
   // Initial mode of the stub is expected to be STORE_BUFFER_ONLY.
   // Will be checked in IncrementalMarking::ActivateGeneratedStub.
-#if 0
-  ASSERT(Assembler::GetBranchOffset(masm->instr_at(0)) < (1 << 12));
-  ASSERT(Assembler::GetBranchOffset(masm->instr_at(4)) < (1 << 12));
-  PatchBranchIntoNop(masm, 0);
-  PatchBranchIntoNop(masm, Assembler::kInstrSize);
   // patching not required on PPC as the initial path is effectively NOP
-#endif
 }
 
 
