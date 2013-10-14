@@ -234,6 +234,7 @@ enum OpcodeExt2 {
   STHUX = 439 << 1,   // store half-word w/ update x-form
   ORX = 444 << 1,     // Or
   MTSPR = 467 <<1,    // Move to Special-Purpose-Register
+  DIVD  = 489 << 1,   // Divide Double Word
   DIVW  = 491 << 1,   // Divide Word
 
   // Below represent bits 10-1  (any value >= 512)
@@ -356,17 +357,6 @@ enum {
 
 enum FAKE_OPCODE_T {
   fBKPT = 14,
-  fBranch = 44,
-  // the following is the marker for instruction sequences outside
-  // assembler.cc that we have removed (marked by PPCPORT_UNIMPLEMENTED)
-  fMASM3 = 61,
-  fMASM16 = 69,
-  fMASM22 = 75,
-  fMASM23 = 76,
-  fMASM26 = 79,
-
-  fLITHIUM91 = 91,
-  fLITHIUM111 = 111,
   fLastFaker  // can't be more than 128 (2^^7)
 };
 #define FAKE_OPCODE_HIGH_BIT 7  // fake opcode has to fall into bit 0~7
