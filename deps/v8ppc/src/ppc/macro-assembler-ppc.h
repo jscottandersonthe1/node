@@ -115,8 +115,8 @@ bool AreAliased(Register reg1,
 #define ShiftLeft          sld
 #define ShiftRight         srd
 #define ShiftRightArith    srad
-#define CountLeadingZeros  cntlzd_
 #define Mul                mulld
+#define Div                divd
 #else
 #define LoadPU             lwzu
 #define LoadPX             lwzx
@@ -132,8 +132,8 @@ bool AreAliased(Register reg1,
 #define ShiftLeft          slw
 #define ShiftRight         srw
 #define ShiftRightArith    sraw
-#define CountLeadingZeros  cntlzw_
 #define Mul                mullw
+#define Div                divw
 #endif
 
 
@@ -173,16 +173,6 @@ class MacroAssembler: public Assembler {
   void Drop(int count, Condition cond = al);
 
   void Ret(int drop, Condition cond = al);
-
-  // Swap two registers.  If the scratch register is omitted then a slightly
-  // less efficient form using xor instead of mov is emitted.
-  void Swap(Register reg1,
-            Register reg2,
-            Register scratch = no_reg,
-            Condition cond = al);
-
-  void Sbfx(Register dst, Register src, int lsb, int width,
-            Condition cond = al);
 
   void Call(Label* target);
 
@@ -421,12 +411,10 @@ class MacroAssembler: public Assembler {
   // RegList constant kSafepointSavedRegisters.
   void PushSafepointRegisters();
   void PopSafepointRegisters();
-  void PushSafepointRegistersAndDoubles();
-  void PopSafepointRegistersAndDoubles();
+
   // Store value in register src in the safepoint stack slot for
   // register dst.
   void StoreToSafepointRegisterSlot(Register src, Register dst);
-  void StoreToSafepointRegistersAndDoublesSlot(Register src, Register dst);
   // Load the value of the src register from its safepoint stack slot
   // into register dst.
   void LoadFromSafepointRegisterSlot(Register dst, Register src);
@@ -1290,18 +1278,37 @@ class MacroAssembler: public Assembler {
   // Smi utilities
 
   // Shift left by 1
-  void SmiTag(Register reg) {
-    SmiTag(reg, reg);
+  void SmiTag(Register reg, RCBit rc = LeaveRC) {
+    SmiTag(reg, reg, rc);
   }
-  void SmiTag(Register dst, Register src) {
-    ShiftLeftImm(dst, src, Operand(kSmiShift));
+  void SmiTag(Register dst, Register src, RCBit rc = LeaveRC) {
+    ShiftLeftImm(dst, src, Operand(kSmiShift), rc);
   }
 
 #if !V8_TARGET_ARCH_PPC64
   // Test for overflow < 0: use BranchOnOverflow() or BranchOnNoOverflow().
   void SmiTagCheckOverflow(Register reg, Register overflow);
   void SmiTagCheckOverflow(Register dst, Register src, Register overflow);
+
+  inline void JumpIfNotSmiCandidate(Register value, Register scratch,
+                                    Label* not_smi_label) {
+    // High bits must be identical to fit into an Smi
+    addis(scratch, value, Operand(0x40000000u >> 16));
+    cmpi(scratch, Operand::Zero());
+    blt(not_smi_label);
+  }
 #endif
+  inline void JumpIfNotUnsignedSmiCandidate(Register value, Register scratch,
+                                            Label* not_smi_label) {
+    // The test is different for unsigned int values. Since we need
+    // the value to be in the range of a positive smi, we can't
+    // handle any of the high bits being set in the value.
+    TestBitRange(value,
+                 kBitsPerPointer - 1,
+                 kBitsPerPointer - 1 - kSmiShift,
+                 scratch);
+    bne(not_smi_label, cr0);
+  }
 
   void SmiUntag(Register reg, RCBit rc = LeaveRC) {
     SmiUntag(reg, reg, rc);
@@ -1418,6 +1425,25 @@ class MacroAssembler: public Assembler {
   // Abort execution if argument is a smi, enabled via --debug-code.
   void AssertNotSmi(Register object);
   void AssertSmi(Register object);
+
+
+#if V8_TARGET_ARCH_PPC64
+  inline void TestIfInt32(Register value,
+                          Register scratch1, Register scratch2,
+                          CRegister cr = cr7) {
+    // High bits must be identical to fit into an 32-bit integer
+    srawi(scratch1, value, 31);
+    sradi(scratch2, value, 32);
+    cmp(scratch1, scratch2, cr);
+  }
+#else
+  inline void TestIfInt32(Register hi_word, Register lo_word,
+                          Register scratch, CRegister cr = cr7) {
+    // High bits must be identical to fit into an 32-bit integer
+    srawi(scratch, lo_word, 31);
+    cmp(scratch, hi_word, cr);
+  }
+#endif
 
   // Abort execution if argument is not a string, enabled via --debug-code.
   void AssertString(Register object);
