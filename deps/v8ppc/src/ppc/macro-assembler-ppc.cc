@@ -123,8 +123,7 @@ int MacroAssembler::CallSize(
   int size;
   int movSize;
 
-#if 0
-  // Account for variable length Assembler::mov sequence.
+#if 0  // Account for variable length Assembler::mov sequence.
   intptr_t value = reinterpret_cast<intptr_t>(target);
   if (is_int16(value) || (((value >> 16) << 16) == value)) {
     movSize = 1;
@@ -152,8 +151,7 @@ int MacroAssembler::CallSizeNotPredictableCodeSize(
   int size;
   int movSize;
 
-#if 0
-  // Account for variable length Assembler::mov sequence.
+#if 0  // Account for variable length Assembler::mov sequence.
   intptr_t value = reinterpret_cast<intptr_t>(target);
   if (is_int16(value) || (((value >> 16) << 16) == value)) {
     movSize = 1;
@@ -252,30 +250,6 @@ void MacroAssembler::Ret(int drop, Condition cond) {
   Ret(cond);
 }
 
-
-void MacroAssembler::Swap(Register reg1,
-                          Register reg2,
-                          Register scratch,
-                          Condition cond) {
-#ifdef PENGUIN_CLEANUP
-  // Bogus instruction, inserted so we can trap here if we execute
-  ldr(r0, MemOperand(r0));
-  if (scratch.is(no_reg)) {
-    eor(reg1, reg1, Operand(reg2), LeaveCC, cond);
-    eor(reg2, reg2, Operand(reg1), LeaveCC, cond);
-    eor(reg1, reg1, Operand(reg2), LeaveCC, cond);
-  } else {
-    mov(scratch, reg1, LeaveCC, cond);
-    mov(reg1, reg2, LeaveCC, cond);
-    mov(reg2, scratch, LeaveCC, cond);
-  }
-#else
-  PPCPORT_UNIMPLEMENTED();
-  fake_asm(fMASM16);
-#endif
-}
-
-
 void MacroAssembler::Call(Label* target) {
   b(target, SetLK);
 }
@@ -306,23 +280,6 @@ void MacroAssembler::Move(DoubleRegister dst, DoubleRegister src) {
   }
 }
 
-
-void MacroAssembler::Sbfx(Register dst, Register src1, int lsb, int width,
-                          Condition cond) {
-  ASSERT(cond == al);
-  ASSERT(lsb < 32);
-  int mask = (1 << (width + lsb)) - 1 - ((1 << lsb) - 1);
-  mov(r0, Operand(mask));
-  and_(dst, src1, r0);
-  int shift_up = 32 - lsb - width;
-  int shift_down = lsb + shift_up;
-  if (shift_up != 0) {
-    slwi(dst, dst, Operand(shift_up));
-  }
-  if (shift_down != 0) {
-    srawi(dst, dst, shift_down);
-  }
-}
 
 void MacroAssembler::MultiPush(RegList regs) {
   int16_t num_to_push = NumberOfBitsSet(regs);
@@ -574,46 +531,6 @@ void MacroAssembler::PopSafepointRegisters() {
 }
 
 
-void MacroAssembler::PushSafepointRegistersAndDoubles() {
-#ifdef PENGUIN_CLEANUP
-  PushSafepointRegisters();
-  sub(sp, sp, Operand(DwVfpRegister::kNumAllocatableRegisters *
-                      kDoubleSize));
-  for (int i = 0; i < DwVfpRegister::kNumAllocatableRegisters; i++) {
-    vstr(DwVfpRegister::FromAllocationIndex(i), sp, i * kDoubleSize);
-  }
-#else
-  PPCPORT_UNIMPLEMENTED();
-  fake_asm(fMASM22);
-#endif
-}
-
-
-void MacroAssembler::PopSafepointRegistersAndDoubles() {
-#ifdef PENGUIN_CLEANUP
-  for (int i = 0; i < DwVfpRegister::kNumAllocatableRegisters; i++) {
-    vldr(DwVfpRegister::FromAllocationIndex(i), sp, i * kDoubleSize);
-  }
-  addi(sp, sp, Operand(DwVfpRegister::kNumAllocatableRegisters *
-                      kDoubleSize));
-  PopSafepointRegisters();
-#else
-  PPCPORT_UNIMPLEMENTED();
-  fake_asm(fMASM23);
-#endif
-}
-
-void MacroAssembler::StoreToSafepointRegistersAndDoublesSlot(Register src,
-                                                             Register dst) {
-#ifdef PENGUIN_CLEANUP
-  StoreP(src, SafepointRegistersAndDoublesSlot(dst));
-#else
-  PPCPORT_UNIMPLEMENTED();
-  fake_asm(fMASM26);
-#endif
-}
-
-
 void MacroAssembler::StoreToSafepointRegisterSlot(Register src, Register dst) {
   StoreP(src, SafepointRegisterSlot(dst));
 }
@@ -668,32 +585,13 @@ void MacroAssembler::EnterFrame(StackFrame::Type type) {
 
 
 void MacroAssembler::LeaveFrame(StackFrame::Type type) {
-  // clean things up but don't perform return
+  // Drop the execution stack down to the frame pointer and restore
+  // the caller frame pointer and return address.
   mr(sp, fp);
   LoadP(fp, MemOperand(sp));
   LoadP(r0, MemOperand(sp, kPointerSize));
   mtlr(r0);
   addi(sp, sp, Operand(2*kPointerSize));
-
-/*
-  // this destroys r11
-  addi(r11,fp,Operand(16));
-  lwz(r0, MemOperand(r11, 4));
-  mtlr(r0);
-  lwz(fp, MemOperand(r11,-4));
-  mr(sp, r11);
-*/
-
-#if 0
-  // r0: preserved
-  // r1: preserved
-  // r2: preserved
-
-  // Drop the execution stack down to the frame pointer and restore
-  // the caller frame pointer and return address.
-  mr(sp, fp);
-  ldm(ia_w, sp, fp.bit() | lr.bit());
-#endif
 }
 
 // ExitFrame layout (probably wrongish.. needs updating)
@@ -743,16 +641,16 @@ void MacroAssembler::EnterExitFrame(bool save_doubles, int stack_space) {
   mov(r8, Operand(ExternalReference(Isolate::kContextAddress, isolate())));
   StoreP(cp, MemOperand(r8));
 
-  // Optionally save all double registers.
+  // Optionally save all volatile double registers.
   if (save_doubles) {
-    int space = DwVfpRegister::kNumRegisters * kDoubleSize;
-    addi(sp, sp, Operand(-space));
-    for (int i = 0; i < DwVfpRegister::kNumRegisters; i++) {
+    const int kNumRegs = DwVfpRegister::kNumVolatileRegisters;
+    subi(sp, sp, Operand(kNumRegs * kDoubleSize));
+    for (int i = 0; i < kNumRegs; i++) {
       DwVfpRegister reg = DwVfpRegister::from_code(i);
       stfd(reg, MemOperand(sp, i * kDoubleSize));
     }
     // Note that d0 will be accessible at
-    //   fp - 2 * kPointerSize - DwVfpRegister::kNumRegisters * kDoubleSize,
+    //   fp - 2 * kPointerSize - kNumVolatileRegisters * kDoubleSize,
     // since the sp slot and code slot were pushed after the fp.
   }
 
@@ -809,10 +707,10 @@ void MacroAssembler::LeaveExitFrame(bool save_doubles,
   // Optionally restore all double registers.
   if (save_doubles) {
     // Calculate the stack location of the saved doubles and restore them.
-    const int offset = (2 * kPointerSize +
-                        DwVfpRegister::kNumRegisters * kDoubleSize);
+    const int kNumRegs = DwVfpRegister::kNumVolatileRegisters;
+    const int offset = (2 * kPointerSize + kNumRegs * kDoubleSize);
     addi(r6, fp, Operand(-offset));
-    for (int i = 0; i < DwVfpRegister::kNumRegisters; i++) {
+    for (int i = 0; i < kNumRegs; i++) {
       DwVfpRegister reg = DwVfpRegister::from_code(i);
       lfd(reg, MemOperand(r6, i * kDoubleSize));
     }
@@ -2377,11 +2275,11 @@ void MacroAssembler::ConvertToInt32(Register source,
 
   // The result is not a 32-bit integer when the high 33 bits of the
   // result are not identical.
-  srawi(scratch2, dest, 31);
 #if V8_TARGET_ARCH_PPC64
-  sradi(scratch, dest, 32);
+  TestIfInt32(dest, scratch, scratch2);
+#else
+  TestIfInt32(scratch, dest, scratch2);
 #endif
-  cmp(scratch2, scratch);
   bne(not_int32);
 }
 
@@ -2416,13 +2314,13 @@ void MacroAssembler::EmitVFPTruncate(VFPRoundingMode rounding_mode,
 #endif
   addi(sp, sp, Operand(kDoubleSize));
 
-  // The result is not a 32-bit integer when the high 33 bits of the
-  // result are not identical.
-  srawi(r0, result, 31);
+  // The result is a 32-bit integer when the high 33 bits of the
+  // result are identical.
 #if V8_TARGET_ARCH_PPC64
-  sradi(scratch, result, 32);
+  TestIfInt32(result, scratch, r0);
+#else
+  TestIfInt32(scratch, result, r0);
 #endif
-  cmp(r0, scratch);
 
   if (check_inexact == kCheckForInexactConversion) {
     Label done;
@@ -2531,7 +2429,7 @@ void MacroAssembler::EmitECMATruncate(Register result,
          !scratch.is(input_low));
   ASSERT(!double_scratch.is(double_input));
 
-  Label done, truncate;
+  Label done;
 
   fctidz(double_scratch, double_input);
 
@@ -2549,19 +2447,15 @@ void MacroAssembler::EmitECMATruncate(Register result,
 #endif
 #endif
 
-  // The result is not a 32-bit integer when the high 33 bits of the
-  // result are not identical.
-  srawi(r0, result, 31);
+  // The result is a 32-bit integer when the high 33 bits of the
+  // result are identical.
 #if V8_TARGET_ARCH_PPC64
-  sradi(scratch, result, 32);
+  TestIfInt32(result, scratch, r0);
+#else
+  TestIfInt32(scratch, result, r0);
 #endif
-  cmp(r0, scratch);
-  bne(&truncate);
+  beq(&done);
 
-  // If we had no exceptions we are done
-  b(&done);
-
-  bind(&truncate);
   // Load the double value and perform a manual truncation.
   stfd(double_input, MemOperand(sp));
 #if __FLOAT_WORD_ORDER == __LITTLE_ENDIAN
@@ -4027,15 +3921,24 @@ void MacroAssembler::LoadDoubleLiteral(DwVfpRegister result,
 
   // avoid gcc strict aliasing error using union cast
   union {
-     double dval;
-     int ival[2];
+    double dval;
+#if V8_TARGET_ARCH_PPC64
+    intptr_t ival;
+#else
+    intptr_t ival[2];
+#endif
   } litVal;
 
   litVal.dval = value;
+#if V8_TARGET_ARCH_PPC64
+  mov(scratch, Operand(litVal.ival));
+  std(scratch, MemOperand(sp));
+#else
   LoadIntLiteral(scratch, litVal.ival[0]);
   stw(scratch, MemOperand(sp, 0));
   LoadIntLiteral(scratch, litVal.ival[1]);
   stw(scratch, MemOperand(sp, 4));
+#endif
   lfd(result, MemOperand(sp, 0));
 
   addi(sp, sp, Operand(8));  // restore the stack ptr
@@ -4349,7 +4252,7 @@ void MacroAssembler::LoadHalfWord(Register dst, const MemOperand& mem,
     // If updateForm is ever true, then lhzu will
     // need to be implemented
     assert(0);
-#if 0
+#if 0  // LoadHalfWord w\ update not yet needed
     if (use_dform) {
       lhzu(dst, mem);
     } else {
@@ -4382,7 +4285,7 @@ void MacroAssembler::StoreHalfWord(Register src, const MemOperand& mem,
     // If updateForm is ever true, then sthu will
     // need to be implemented
     assert(0);
-#if 0
+#if 0  // StoreHalfWord w\ update not yet needed
     if (use_dform) {
       sthu(src, mem);
     } else {
@@ -4415,7 +4318,7 @@ void MacroAssembler::LoadByte(Register dst, const MemOperand& mem,
     // If updateForm is ever true, then lbzu will
     // need to be implemented
     assert(0);
-#if 0
+#if 0  // LoadByte w\ update not yet needed
     if (use_dform) {
       lbzu(dst, mem);
     } else {
@@ -4448,7 +4351,7 @@ void MacroAssembler::StoreByte(Register src, const MemOperand& mem,
     // If updateForm is ever true, then stbu will
     // need to be implemented
     assert(0);
-#if 0
+#if 0  // StoreByte w\ update not yet needed
     if (use_dform) {
       stbu(src, mem);
     } else {

@@ -2166,11 +2166,7 @@ Handle<Code> CallStubCompiler::CompileMathFloorCall(
   __ bind(&positive);
 
   // if any of the high bits are set, fail to generic
-  __ TestBitRange(r0,
-                  kBitsPerPointer - 1,
-                  kBitsPerPointer - 1 - (kSmiTagSize + kSmiShiftSize),
-                  r0);
-  __ bne(&slow, cr0);
+  __ JumpIfNotUnsignedSmiCandidate(r0, r0, &slow);
 
   // Tag the result.
   STATIC_ASSERT(kSmiTag == 0);
@@ -3574,38 +3570,6 @@ void KeyedLoadStubCompiler::GenerateLoadDictionaryElement(
 }
 
 
-#if 0  // never used roohack
-static bool IsElementTypeSigned(ElementsKind elements_kind) {
-  switch (elements_kind) {
-    case EXTERNAL_BYTE_ELEMENTS:
-    case EXTERNAL_SHORT_ELEMENTS:
-    case EXTERNAL_INT_ELEMENTS:
-      return true;
-
-    case EXTERNAL_UNSIGNED_BYTE_ELEMENTS:
-    case EXTERNAL_UNSIGNED_SHORT_ELEMENTS:
-    case EXTERNAL_UNSIGNED_INT_ELEMENTS:
-    case EXTERNAL_PIXEL_ELEMENTS:
-      return false;
-
-    case EXTERNAL_FLOAT_ELEMENTS:
-    case EXTERNAL_DOUBLE_ELEMENTS:
-    case FAST_ELEMENTS:
-    case FAST_SMI_ELEMENTS:
-    case FAST_DOUBLE_ELEMENTS:
-    case FAST_HOLEY_ELEMENTS:
-    case FAST_HOLEY_SMI_ELEMENTS:
-    case FAST_HOLEY_DOUBLE_ELEMENTS:
-    case DICTIONARY_ELEMENTS:
-    case NON_STRICT_ARGUMENTS_ELEMENTS:
-      UNREACHABLE();
-      return false;
-  }
-  return false;
-}
-#endif
-
-
 static void GenerateSmiKeyCheck(MacroAssembler* masm,
                                 Register key,
                                 Register scratch0,
@@ -3698,6 +3662,12 @@ void KeyedLoadStubCompiler::GenerateLoadExternalArray(
       __ lhzx(value, MemOperand(r6, value));
       break;
     case EXTERNAL_INT_ELEMENTS:
+      __ SmiToIntArrayOffset(value, key);
+      __ lwzx(value, MemOperand(r6, value));
+#if V8_TARGET_ARCH_PPC64
+      __ extsw(value, value);
+#endif
+      break;
     case EXTERNAL_UNSIGNED_INT_ELEMENTS:
       __ SmiToIntArrayOffset(value, key);
       __ lwzx(value, MemOperand(r6, value));
@@ -3733,19 +3703,16 @@ void KeyedLoadStubCompiler::GenerateLoadExternalArray(
     // For the Int and UnsignedInt array types, we need to see whether
     // the value can be represented in a Smi. If not, we need to convert
     // it to a HeapNumber.
-    Label box_int, smi_ok;
-    __ TestBitRange(value,
-                    kBitsPerPointer - 1,
-                    kBitsPerPointer - 1 - (kSmiTagSize + kSmiShiftSize),
-                    r3);
-    __ beq(&smi_ok, cr0);     // If all high bits are clear smi is ok
-    __ Cmpi(r3, Operand((1L << (kSmiTagSize + kSmiShiftSize + 1)) - 1), r0);
-    __ bne(&box_int);         // If all high bits are not set, we box it
-    __ bind(&smi_ok);
+#if !V8_TARGET_ARCH_PPC64
+    Label box_int;
+    // Check that the value fits in a smi.
+    __ JumpIfNotSmiCandidate(value, r0, &box_int);
+#endif
     // Tag integer as smi and return it.
     __ SmiTag(r3, value);
     __ Ret();
 
+#if !V8_TARGET_ARCH_PPC64
     __ bind(&box_int);
     // Allocate a HeapNumber for the result and perform int-to-double
     // conversion.  Don't touch r3 or r4 as they are needed if allocation
@@ -3759,17 +3726,13 @@ void KeyedLoadStubCompiler::GenerateLoadExternalArray(
       masm, value, d0);
     __ stfd(d0, FieldMemOperand(r3, HeapNumber::kValueOffset));
     __ Ret();
-
+#endif
   } else if (elements_kind == EXTERNAL_UNSIGNED_INT_ELEMENTS) {
     // The test is different for unsigned int values. Since we need
     // the value to be in the range of a positive smi, we can't
     // handle any of the high bits being set in the value.
     Label box_int;
-    __ TestBitRange(value,
-                    kBitsPerPointer - 1,
-                    kBitsPerPointer - 1 - (kSmiTagSize + kSmiShiftSize),
-                    r0);
-    __ bne(&box_int, cr0);   // If any high bits are set, box
+    __ JumpIfNotUnsignedSmiCandidate(value, r0, &box_int);
 
     // Tag integer as smi and return it.
     __ SmiTag(r3, value);
