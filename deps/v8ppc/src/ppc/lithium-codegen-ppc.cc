@@ -79,9 +79,7 @@ bool LCodeGen::GenerateCode() {
   return GeneratePrologue() &&
       GenerateBody() &&
       GenerateDeferredCode() &&
-#if 0  // not used on PPC
       GenerateDeoptJumpTable() &&
-#endif
       GenerateSafepointTable();
 }
 
@@ -249,16 +247,22 @@ bool LCodeGen::GenerateDeferredCode() {
     }
   }
 
-  // Deferred code is the last part of the instruction sequence. Mark
-  // the generated code as done unless we bailed out.
-  if (!is_aborted()) status_ = DONE;
   return !is_aborted();
 }
 
-// Currently unused on PPC
 bool LCodeGen::GenerateDeoptJumpTable() {
-  Abort("Unimplemented: GenerateDeoptJumpTable");
-  return false;
+  __ RecordComment("[ Deoptimisation jump table");
+  for (int i = 0; i < deopt_jump_table_.length(); i++) {
+    Assembler::BlockTrampolinePoolScope block_trampoline_pool(masm_);
+    __ bind(&deopt_jump_table_[i].label);
+    __ Jump(deopt_jump_table_[i].address, RelocInfo::RUNTIME_ENTRY);
+  }
+  __ RecordComment("]");
+
+  // The deoptimization jump table is the last part of the instruction
+  // sequence. Mark the generated code as done unless we bailed out.
+  if (!is_aborted()) status_ = DONE;
+  return !is_aborted();
 }
 
 
@@ -655,7 +659,17 @@ void LCodeGen::DeoptimizeIf(Condition cond, LEnvironment* environment,
 
   if (FLAG_trap_on_deopt) __ stop("trap_on_deopt", cond, kDefaultStopCode, cr);
 
-  __ Jump(entry, RelocInfo::RUNTIME_ENTRY, cond, cr);
+  if (cond == al) {
+    __ Jump(entry, RelocInfo::RUNTIME_ENTRY);
+  } else {
+    // We often have several deopts to the same entry, reuse the last
+    // jump entry if this is the case.
+    if (deopt_jump_table_.is_empty() ||
+        (deopt_jump_table_.last().address != entry)) {
+      deopt_jump_table_.Add(JumpTableEntry(entry), zone());
+    }
+    __ b(cond, &deopt_jump_table_.last().label, cr);
+  }
 }
 
 
@@ -986,7 +1000,6 @@ void LCodeGen::DoMathFloorOfDiv(LMathFloorOfDiv* instr) {
       return;
 
     case -1: {
-      Label skip;
       OEBit oe;
       if (instr->hydrogen()->CheckFlag(HValue::kCanOverflow)) {
         __ li(r0, Operand::Zero());  // clear xer
@@ -1000,9 +1013,7 @@ void LCodeGen::DoMathFloorOfDiv(LMathFloorOfDiv* instr) {
         DeoptimizeIf(eq, instr->environment(), cr0);
       }
       if (instr->hydrogen()->CheckFlag(HValue::kCanOverflow)) {
-        __ bnotoverflow(&skip, cr0);
-        DeoptimizeIf(al, instr->environment());
-        __ bind(&skip);
+        DeoptimizeIf(overflow, instr->environment(), cr0);
       }
       return;
     }
@@ -1137,12 +1148,12 @@ void LCodeGen::DoMulI(LMulI* instr) {
             __ ShiftLeftImm(result, left, Operand(shift));
           } else if (IsPowerOf2(constant_abs - 1)) {
             int32_t shift = WhichPowerOf2(constant_abs - 1);
-            __ ShiftLeftImm(result, left, Operand(shift));
-            __ add(result, result, left);
+            __ ShiftLeftImm(scratch, left, Operand(shift));
+            __ add(result, scratch, left);
           } else if (IsPowerOf2(constant_abs + 1)) {
             int32_t shift = WhichPowerOf2(constant_abs + 1);
-            __ ShiftLeftImm(result, left, Operand(shift));
-            __ sub(result, result, left);
+            __ ShiftLeftImm(scratch, left, Operand(shift));
+            __ sub(result, scratch, left);
           }
 
           // Correct the sign of the result is the constant is negative.
@@ -1156,7 +1167,7 @@ void LCodeGen::DoMulI(LMulI* instr) {
     }
 
   } else {
-    Register right = EmitLoadRegister(right_op, scratch);
+    Register right = EmitLoadRegister(right_op, ip);
     if (bailout_on_minus_zero) {
       __ orx(ToRegister(instr->temp()), left, right);
     }
@@ -1168,8 +1179,8 @@ void LCodeGen::DoMulI(LMulI* instr) {
       __ TestIfInt32(result, scratch, r0);
       DeoptimizeIf(ne, instr->environment());
 #else
-      __ mullw(result, left, right);
       __ mulhw(scratch, left, right);
+      __ mullw(result, left, right);
       __ TestIfInt32(scratch, result, r0);
       DeoptimizeIf(ne, instr->environment());
 #endif
@@ -3324,8 +3335,7 @@ void LCodeGen::EmitIntegerMathAbs(LUnaryMathOperation* instr) {
   __ mtxer(r0);
   __ neg(result, result, SetOE, SetRC);
   // Deoptimize on overflow.
-  __ bnotoverflow(&done, cr0);
-  DeoptimizeIf(al, instr->environment());
+  DeoptimizeIf(overflow, instr->environment(), cr0);
   __ bind(&done);
 }
 
@@ -5103,7 +5113,6 @@ void LCodeGen::EmitDeepCopy(Handle<JSObject> object,
           Handle<FixedDoubleArray>::cast(elements);
       for (int i = 0; i < elements_length; i++) {
         int64_t value = double_array->get_representation(i);
-        // We only support little endian mode...
         int32_t value_low = static_cast<int32_t>(value & 0xFFFFFFFF);
         int32_t value_high = static_cast<int32_t>(value >> 32);
         int total_offset =
