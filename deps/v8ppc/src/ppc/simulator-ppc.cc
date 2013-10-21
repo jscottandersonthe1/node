@@ -349,11 +349,7 @@ void PPCDebugger::Debug() {
           if (strcmp(arg1, "all") == 0) {
             for (int i = 0; i < kNumRegisters; i++) {
               value = GetRegisterValue(i);
-#if V8_TARGET_ARCH_PPC64
-              PrintF("    %3s: %016lx", Registers::Name(i), value);
-#else
-              PrintF("    %3s: %08x", Registers::Name(i), value);
-#endif
+              PrintF("    %3s: %08" V8PRIxPTR, Registers::Name(i), value);
               if ((argc == 3 && strcmp(arg2, "fp") == 0) &&
                   i < 8 &&
                   (i % 2) == 0) {
@@ -371,11 +367,7 @@ void PPCDebugger::Debug() {
           } else if (strcmp(arg1, "alld") == 0) {
             for (int i = 0; i < kNumRegisters; i++) {
               value = GetRegisterValue(i);
-#if V8_TARGET_ARCH_PPC64
-              PrintF("     %3s: %016lx"
-#else
-              PrintF("     %3s: %08x"
-#endif
+              PrintF("     %3s: %08" V8PRIxPTR
                      " %11" V8PRIdPTR, Registers::Name(i), value, value);
               if ((argc == 3 && strcmp(arg2, "fp") == 0) &&
                   i < 8 &&
@@ -409,21 +401,15 @@ void PPCDebugger::Debug() {
               int regnum = strtoul(&arg1[1], 0, 10);
               if (regnum != kNoRegister) {
                 value = GetRegisterValue(regnum);
-#if V8_TARGET_ARCH_PPC64
-                PrintF("%s: 0x%016lx %ld\n", arg1, value, value);
-#else
-                PrintF("%s: 0x%08x %d\n", arg1, value, value);
-#endif
+                PrintF("%s: 0x%08" V8PRIxPTR " %" V8PRIdPTR "\n",
+                       arg1, value, value);
               } else {
                 PrintF("%s unrecognized\n", arg1);
               }
           } else {
             if (GetValue(arg1, &value)) {
-#if V8_TARGET_ARCH_PPC64
-              PrintF("%s: 0x%016lx %ld\n", arg1, value, value);
-#else
-              PrintF("%s: 0x%08x %d\n", arg1, value, value);
-#endif
+              PrintF("%s: 0x%08" V8PRIxPTR " %" V8PRIdPTR "\n",
+                     arg1, value, value);
             } else if (GetFPDoubleValue(arg1, &dvalue)) {
               uint64_t as_words = BitCast<uint64_t>(dvalue);
               PrintF("%s: %f 0x%08x %08x\n",
@@ -1302,7 +1288,7 @@ void Simulator::SoftwareInterrupt(Instruction* instr) {
             if (::v8::internal::FLAG_trace_sim) {
                 PrintF("Returned %08x\n", lo_res);
             }
-#if V8_HOST_ARCH_PPC
+#if __BYTE_ORDER == __BIG_ENDIAN
             set_register(r3, hi_res);
             set_register(r4, lo_res);
 #else
@@ -1407,18 +1393,18 @@ void Simulator::SoftwareInterrupt(Instruction* instr) {
         }
         set_register(r3, result);
 #else
-#if V8_HOST_ARCH_PPC
-        int32_t hi_res = static_cast<int32_t>(result);
-        int32_t lo_res = static_cast<int32_t>(result >> 32);
-#else
         int32_t lo_res = static_cast<int32_t>(result);
         int32_t hi_res = static_cast<int32_t>(result >> 32);
-#endif
         if (::v8::internal::FLAG_trace_sim) {
           PrintF("Returned %08x\n", lo_res);
         }
+#if __BYTE_ORDER == __BIG_ENDIAN
+        set_register(r3, hi_res);
+        set_register(r4, lo_res);
+#else
         set_register(r3, lo_res);
         set_register(r4, hi_res);
+#endif
 #endif
       }
       set_pc(saved_lr);
@@ -1930,9 +1916,9 @@ void Simulator::DecodeExt2_9bit(Instruction* instr) {
       int rt = instr->RTValue();
       int ra = instr->RAValue();
       int rb = instr->RBValue();
-      int64_t ra_val = (get_register(ra) & 0xFFFFFFFF);
-      int64_t rb_val = (get_register(rb) & 0xFFFFFFFF);
-      int64_t alu_out = ra_val * rb_val;
+      int32_t ra_val = (get_register(ra) & 0xFFFFFFFF);
+      int32_t rb_val = (get_register(rb) & 0xFFFFFFFF);
+      int64_t alu_out = (int64_t)ra_val * (int64_t)rb_val;
       alu_out >>= 32;
       set_register(rt, alu_out);
       if (instr->Bit(0)) {  // RC bit set
