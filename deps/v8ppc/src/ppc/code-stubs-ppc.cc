@@ -3012,7 +3012,6 @@ void TranscendentalCacheStub::Generate(MacroAssembler* masm) {
     __ SmiToDoubleFPRegister(r3, d6, scratch0);
     __ subi(sp, sp, Operand(8));
     __ stfd(d6, MemOperand(sp, 0));
-    // ENDIAN issue here
 #if __FLOAT_WORD_ORDER == __LITTLE_ENDIAN
     __ lwz(r5, MemOperand(sp));
     __ lwz(r6, MemOperand(sp, 4));
@@ -3038,7 +3037,6 @@ void TranscendentalCacheStub::Generate(MacroAssembler* masm) {
     // Input is untagged double in d2. Output goes to d2.
     __ subi(sp, sp, Operand(8));
     __ stfd(d2, MemOperand(sp, 0));
-    // ENDIAN issue here
 #if __FLOAT_WORD_ORDER == __LITTLE_ENDIAN
     __ lwz(r5, MemOperand(sp, 4));
     __ lwz(r6, MemOperand(sp));
@@ -3530,7 +3528,7 @@ void CEntryStub::GenerateCore(MacroAssembler* masm,
   }
 
   // PPC LINUX ABI:
-#if defined(V8_HOST_ARCH_PPC)
+#if !defined(USE_SIMULATOR)
   // Call C built-in on native hardware.
 #if defined(V8_TARGET_ARCH_PPC64)
   if (result_size_ < 2) {
@@ -3581,7 +3579,7 @@ void CEntryStub::GenerateCore(MacroAssembler* masm,
 
   __ mov(isolate_reg, Operand(ExternalReference::isolate_address()));
 
-#if defined(V8_HOST_ARCH_PPC) && \
+#if !defined(USE_SIMULATOR) && \
   (defined(_AIX) || defined(V8_TARGET_ARCH_PPC64))
   // Native AIX/PPC64 Linux use a function descriptor.
   __ LoadP(ToRegister(2), MemOperand(r15, kPointerSize));  // TOC
@@ -3623,7 +3621,7 @@ void CEntryStub::GenerateCore(MacroAssembler* masm,
   // check for failure result
   Label failure_returned;
   STATIC_ASSERT(((kFailureTag + 1) & kFailureTagMask) == 0);
-#if defined(V8_HOST_ARCH_PPC) && defined(V8_TARGET_ARCH_PPC64)
+#if defined(V8_TARGET_ARCH_PPC64) && !defined(USE_SIMULATOR)
   // If return value is on the stack, pop it to registers.
   if (result_size_ > 1) {
     ASSERT_EQ(2, result_size_);
@@ -3704,7 +3702,7 @@ void CEntryStub::Generate(MacroAssembler* masm) {
   int arg_stack_space = 1;
 
   // PPC LINUX ABI:
-#if defined(V8_HOST_ARCH_PPC)
+#if !defined(USE_SIMULATOR)
 #if defined(V8_TARGET_ARCH_PPC64)
   // Pass buffer for return value on stack if necessary
   if (result_size_ > 1) {
@@ -4854,7 +4852,7 @@ void RegExpExecStub::Generate(MacroAssembler* masm) {
   __ addi(code, code, Operand(Code::kHeaderSize - kHeapObjectTag));
 
 
-#if !defined(V8_HOST_ARCH_PPC) && \
+#if defined(USE_SIMULATOR) && \
   (defined(_AIX) || defined(V8_TARGET_ARCH_PPC64))
   // Even Simulated AIX/PPC64 Linux uses a function descriptor for the
   // RegExp routine.  Extract the instruction address here since
@@ -5313,10 +5311,10 @@ int CompareStub::MinorKey() {
   // Encode the three parameters in a unique 16 bit value. To avoid duplicate
   // stubs the never NaN NaN condition is only taken into account if the
   // condition is equals.
-  ASSERT((static_cast<unsigned>(cc_) >> 28) < (1 << 12));
+  ASSERT(static_cast<unsigned>(cc_) < (1 << 12));
   ASSERT((lhs_.is(r3) && rhs_.is(r4)) ||
          (lhs_.is(r4) && rhs_.is(r3)));
-  return ConditionField::encode(static_cast<unsigned>(cc_) >> 28)
+  return ConditionField::encode(static_cast<unsigned>(cc_))
          | RegisterField::encode(lhs_.is(r3))
          | StrictField::encode(strict_)
          | NeverNanNanField::encode(cc_ == eq ? never_nan_nan_ : false)
@@ -5530,7 +5528,6 @@ void StringHelper::GenerateCopyCharactersLong(MacroAssembler* masm,
     __ Check(eq, "Destination of copy not aligned.", cr0);
   }
 
-  // Assumes word reads and writes are little endian.
   // Nothing to do for zero characters.
   Label done;
   if (!ascii) {  // for non-ascii, double the length
@@ -5582,8 +5579,13 @@ void StringHelper::GenerateTwoCharacterSymbolTableProbe(MacroAssembler* masm,
   // If check failed combine both characters into single halfword.
   // This is required by the contract of the method: code at the
   // not_found branch expects this combination in c1 register
+#if __BYTE_ORDER == __BIG_ENDIAN
+  __ ShiftLeftImm(c1, c1, Operand(kBitsPerByte));
+  __ orx(c1, c1, c2);
+#else
   __ ShiftLeftImm(r0, c2, Operand(kBitsPerByte));
   __ orx(c1, c1, r0);
+#endif
   __ b(not_found);
 
   __ bind(&not_array_index);
@@ -5595,8 +5597,13 @@ void StringHelper::GenerateTwoCharacterSymbolTableProbe(MacroAssembler* masm,
 
   // Collect the two characters in a register.
   Register chars = c1;
+#if __BYTE_ORDER == __BIG_ENDIAN
+  __ ShiftLeftImm(c1, c1, Operand(kBitsPerByte));
+  __ orx(chars, c1, c2);
+#else
   __ ShiftLeftImm(r0, c2, Operand(kBitsPerByte));
-  __ orx(chars, chars, r0);
+  __ orx(chars, c1, r0);
+#endif
 
   // chars: two character string, char 1 in byte 0 and char 2 in byte 1.
   // hash:  hash of two character string.
@@ -5677,7 +5684,6 @@ void StringHelper::GenerateTwoCharacterSymbolTableProbe(MacroAssembler* masm,
     __ bne(&next_probe[i]);
 
     // Check if the two characters match.
-    // Assumes that word load is little endian.
     __ lhz(scratch, FieldMemOperand(candidate, SeqAsciiString::kHeaderSize));
     __ cmp(chars, scratch);
     __ beq(&found_in_symbol_table);
@@ -6231,17 +6237,10 @@ void StringAddStub::Generate(MacroAssembler* masm) {
   // Resulting string has length 2 and first chars of two strings
   // are combined into single halfword in r5 register.
   // So we can fill resulting string without two loops by a single
-  // halfword store instruction (which assumes that processor is
-  // in a little endian mode)
+  // halfword store instruction
   __ li(r9, Operand(2));
   __ AllocateAsciiString(r3, r9, r7, r8, r22, &call_runtime);
-#if V8_HOST_ARCH_PPC  // Really we mean BIG ENDIAN host
-  __ stb(r5, FieldMemOperand(r3, SeqAsciiString::kHeaderSize));
-  __ srwi(r5, r5, Operand(8));
-  __ stb(r5, FieldMemOperand(r3, SeqAsciiString::kHeaderSize+1));
-#else  // LITTLE ENDIAN host
   __ sth(r5, FieldMemOperand(r3, SeqAsciiString::kHeaderSize));
-#endif
   __ IncrementCounter(counters->string_add_native(), 1, r5, r6);
   __ addi(sp, sp, Operand(2 * kPointerSize));
   __ Ret();
@@ -6755,7 +6754,7 @@ void DirectCEntryStub::GenerateCall(MacroAssembler* masm,
 
 void DirectCEntryStub::GenerateCall(MacroAssembler* masm,
                                     Register target) {
-#if defined(V8_HOST_ARCH_PPC) && \
+#if !defined(USE_SIMULATOR) && \
   (defined(_AIX) || defined(V8_TARGET_ARCH_PPC64))
   // Native AIX/PPC64 Linux use a function descriptor.
   __ LoadP(ToRegister(2), MemOperand(target, kPointerSize));  // TOC
@@ -7454,7 +7453,7 @@ void ProfileEntryHookStub::Generate(MacroAssembler* masm) {
     __ ClearRightImm(sp, sp, Operand(3));
   }
 
-#if defined(V8_HOST_ARCH_PPC)
+#if !defined(USE_SIMULATOR)
   __ mov(ip, Operand(reinterpret_cast<intptr_t>(&entry_hook_)));
   __ LoadP(ip, MemOperand(ip));
 
@@ -7478,7 +7477,7 @@ void ProfileEntryHookStub::Generate(MacroAssembler* masm) {
 #endif
   __ Call(ip);
 
-#if defined(V8_HOST_ARCH_PPC)
+#if !defined(USE_SIMULATOR)
   __ addi(sp, sp, Operand(kNumRequiredStackFrameSlots * kPointerSize));
 #endif
 
