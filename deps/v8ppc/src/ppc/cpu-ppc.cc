@@ -63,15 +63,11 @@ void CPU::FlushICache(void* buffer, size_t size) {
   Simulator::FlushICache(Isolate::Current()->simulator_i_cache(), buffer, size);
 #else
 
-// This constant will be different for other versions of PowerPC
-// It must be a power of 2
-#define CACHELINESIZE 128
-
+  intptr_t mask = kCacheLineSize - 1;
   byte *start = reinterpret_cast<byte *>(
-                 reinterpret_cast<intptr_t>(buffer) & ~(CACHELINESIZE - 1));
+                 reinterpret_cast<intptr_t>(buffer) & ~mask);
   byte *end = static_cast<byte *>(buffer) + size;
-  for (byte *pointer = start; pointer < end;
-        pointer+=CACHELINESIZE ) {
+  for (byte *pointer = start; pointer < end; pointer += kCacheLineSize) {
     __asm__(
       "dcbf 0, %0  \n"  \
       "sync        \n"  \
