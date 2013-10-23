@@ -3185,8 +3185,8 @@ void TranscendentalCacheStub::Generate(MacroAssembler* masm) {
       FrameScope scope(masm, StackFrame::INTERNAL);
 
       // Allocate an aligned object larger than a HeapNumber.
-      ASSERT(4 * kPointerSize >= HeapNumber::kSize);
-      __ mov(scratch0, Operand(4 * kPointerSize));
+      ASSERT(2 * kDoubleSize >= HeapNumber::kSize);
+      __ LoadSmiLiteral(scratch0, Smi::FromInt(2 * kDoubleSize));
       __ push(scratch0);
       __ CallRuntimeSaveDoubles(Runtime::kAllocateInNewSpace);
     }
@@ -3522,9 +3522,9 @@ void CEntryStub::GenerateCore(MacroAssembler* masm,
       ExternalReference::heap_always_allocate_scope_depth(isolate);
   if (always_allocate) {
     __ mov(r3, Operand(scope_depth));
-    __ LoadP(r4, MemOperand(r3));
+    __ lwz(r4, MemOperand(r3));
     __ addi(r4, r4, Operand(1));
-    __ StoreP(r4, MemOperand(r3));
+    __ stw(r4, MemOperand(r3));
   }
 
   // PPC LINUX ABI:
@@ -3572,7 +3572,11 @@ void CEntryStub::GenerateCore(MacroAssembler* masm,
 #else  // Simulated
   // Call C built-in using simulator.
   // r3 = argc, r4 = argv
+#if defined(V8_TARGET_ARCH_PPC64) && __BYTE_ORDER == __BIG_ENDIAN
+  __ ShiftLeftImm(r3, r14, Operand(32));
+#else
   __ mr(r3, r14);
+#endif
   __ mr(r4, r16);
   isolate_reg = r5;
 #endif
@@ -3613,9 +3617,9 @@ void CEntryStub::GenerateCore(MacroAssembler* masm,
     // It's okay to clobber r5 and r6 here. Don't mess with r3 and r4
     // though (contain the result).
     __ mov(r5, Operand(scope_depth));
-    __ LoadP(r6, MemOperand(r5));
+    __ lwz(r6, MemOperand(r5));
     __ subi(r6, r6, Operand(1));
-    __ StoreP(r6, MemOperand(r5));
+    __ stw(r6, MemOperand(r5));
   }
 
   // check for failure result
