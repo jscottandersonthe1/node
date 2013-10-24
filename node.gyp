@@ -224,14 +224,14 @@
           ]
         } ],
         # Conditionally include v8 or v8ppc
-        [ 'node_shared_v8=="false" and target_arch!="ppc"', {
+        [ 'node_shared_v8=="false" and target_arch!="ppc" and target_arch!="ppc64"', {
           'sources': [
             'deps/v8/include/v8.h',
             'deps/v8/include/v8-debug.h',
           ],
           'dependencies': [ 'deps/v8/tools/gyp/v8.gyp:v8' ],
         }],
-        [ 'node_shared_v8=="false" and target_arch=="ppc"', {
+        [ 'node_shared_v8=="false" and (target_arch=="ppc" or target_arch=="ppc64")', {
           'sources': [
             'deps/v8ppc/include/v8.h',
             'deps/v8ppc/include/v8-debug.h',
