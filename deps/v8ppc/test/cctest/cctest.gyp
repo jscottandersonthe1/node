@@ -140,6 +140,11 @@
             'test-platform-macos.cc',
           ],
         }],
+        [ 'OS=="aix" and v8_target_arch=="ppc64"', {
+          'sources': [
+            'test-api2.cc',
+          ],
+        }],
         [ 'OS=="win"', {
           'sources': [
             'test-platform-win32.cc',
