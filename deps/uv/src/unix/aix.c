@@ -85,7 +85,6 @@ void uv__platform_loop_delete(uv_loop_t* loop) {
 void uv__io_poll(uv_loop_t* loop, int timeout) {
   struct pollfd events[1024];
   struct pollfd* pe;
-  struct pollfd e;
   struct poll_ctl pc;
   ngx_queue_t* q;
   uv__io_t* w;
@@ -94,8 +93,6 @@ void uv__io_poll(uv_loop_t* loop, int timeout) {
   int nevents;
   int count;
   int nfds;
-  pollset_t ps;
-  int op;
   int i;
 
   if (loop->nfds == 0) {
@@ -127,7 +124,7 @@ void uv__io_poll(uv_loop_t* loop, int timeout) {
       if (errno != EEXIST)
         abort();
 
-      assert(op == PS_ADD);
+      assert(pc.cmd == PS_ADD);
 
       /* We've reactivated a file descriptor that's been watched before. */
       pc.cmd = PS_MOD;
@@ -176,14 +173,14 @@ void uv__io_poll(uv_loop_t* loop, int timeout) {
     nevents = 0;
 
     for (i = 0; i < nfds; i++) {
+      pe = events + i;
       pc.cmd = PS_DELETE;
-      pc.events = events + i;
-      pc.fd = pe;
+      pc.fd = pe->fd;
 
-      assert(ps >= 0);
-      assert((unsigned) ps < loop->nwatchers);
+      assert(pc.fd >= 0);
+      assert((unsigned) pc.fd < loop->nwatchers);
 
-      w = loop->watchers[ps];
+      w = loop->watchers[pc.fd];
 
       if (w == NULL) {
         /* File descriptor that we've stopped watching, disarm it.
@@ -195,7 +192,7 @@ void uv__io_poll(uv_loop_t* loop, int timeout) {
         continue;
       }
 
-      w->cb(loop, w, pe->events);
+      w->cb(loop, w, pe->revents);
       nevents++;
     }
 
