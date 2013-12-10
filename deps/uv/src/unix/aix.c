@@ -121,7 +121,7 @@ void uv__io_poll(uv_loop_t* loop, int timeout) {
      * events, skip the syscall and squelch the events after epoll_wait().
      */
     if (pollset_ctl(loop->backend_fd, &pc, 1)) {
-      if (errno != EEXIST)
+      if (errno != EINVAL)
         abort();
 
       assert(pc.cmd == PS_ADD);
