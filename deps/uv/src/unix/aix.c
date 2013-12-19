@@ -93,6 +93,7 @@ void uv__io_poll(uv_loop_t* loop, int timeout) {
   int count;
   int nfds;
   int i;
+  int add_failed;
 
   if (loop->nfds == 0) {
     assert(ngx_queue_empty(&loop->watcher_queue));
@@ -112,7 +113,7 @@ void uv__io_poll(uv_loop_t* loop, int timeout) {
     pc.events = w->pevents;
     pc.fd = w->fd;
 
-    int add_failed = 0;
+    add_failed = 0;
     if (w->events == 0) {
       pc.cmd = PS_ADD;
       if (pollset_ctl(loop->backend_fd, &pc, 1)) {
