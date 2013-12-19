@@ -81,7 +81,6 @@ void uv__platform_loop_delete(uv_loop_t* loop) {
   }
 }
 
-
 void uv__io_poll(uv_loop_t* loop, int timeout) {
   struct pollfd events[1024];
   struct pollfd* pe;
@@ -110,24 +109,29 @@ void uv__io_poll(uv_loop_t* loop, int timeout) {
     assert(w->fd >= 0);
     assert(w->fd < (int) loop->nwatchers);
 
-    if (w->events == 0)
-      pc.cmd = PS_ADD;
-    else
-      pc.cmd = PS_MOD;
     pc.events = w->pevents;
     pc.fd = w->fd;
 
-    /* XXX Future optimization: do PS_MOD lazily if we stop watching
-     * events, skip the syscall and squelch the events after epoll_wait().
-     */
-    if (pollset_ctl(loop->backend_fd, &pc, 1)) {
-      if (errno != EINVAL)
+    int add_failed = 0;
+    if (w->events == 0) {
+      pc.cmd = PS_ADD;
+      if (pollset_ctl(loop->backend_fd, &pc, 1)) {
+        if (errno != EINVAL)
+          abort();
+        add_failed = 1;
+      }
+    }
+    if (w->events != 0 || add_failed) {
+      /* Modify, potentially removing events -- need to delete then add */
+      /* Could maybe mod if we knew for sure no events are removed, but
+       * content of w->events is handled above as not reliable (falls back)
+       * so may require a pollset_query() which would have to be pretty cheap
+       * compared to a PS_DELETE to be worth optimising. Altenratively, could
+       * lazily remove events, squelching them in the mean time. */
+      pc.cmd = PS_DELETE;
+      if (pollset_ctl(loop->backend_fd, &pc, 1))
         abort();
-
-      assert(pc.cmd == PS_ADD);
-
-      /* We've reactivated a file descriptor that's been watched before. */
-      pc.cmd = PS_MOD;
+      pc.cmd = PS_ADD;
       if (pollset_ctl(loop->backend_fd, &pc, 1))
         abort();
     }
