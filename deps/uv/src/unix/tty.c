@@ -26,6 +26,9 @@
 #include <unistd.h>
 #include <termios.h>
 #include <errno.h>
+#if defined (_AIX)
+#include <memory.h>
+#endif /* defined(_AIX) */
 #include <sys/ioctl.h>
 
 
@@ -154,6 +157,9 @@ uv_handle_type uv_guess_handle(uv_file file) {
     return UV_UNKNOWN_HANDLE;
 
   len = sizeof(sa);
+#if defined (_AIX)
+  memset(&sa, 0, sizeof(sa));
+#endif /* defined(_AIX) */
   if (getsockname(file, &sa, &len))
     return UV_UNKNOWN_HANDLE;
 
@@ -167,6 +173,16 @@ uv_handle_type uv_guess_handle(uv_file file) {
     if (sa.sa_family == AF_UNIX)
       return UV_NAMED_PIPE;
   }
+#if defined (_AIX)
+  if(len == 0) {
+    len = sizeof(sa);
+    memset(&sa, 0, sizeof(sa));
+    if (getpeername(file, &sa, &len) == -1)
+      return UV_UNKNOWN_HANDLE;
+    if(sa.sa_family == AF_UNIX)
+      return UV_NAMED_PIPE;
+  }
+#endif /* defined(_AIX) */
 
   return UV_UNKNOWN_HANDLE;
 }
