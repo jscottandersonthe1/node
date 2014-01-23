@@ -308,7 +308,7 @@ int uv_exepath(char* buffer, size_t* size) {
     *size = strlen(buffer);
     return 0;
 
-  /* case #2, relative path. */
+  /* case #2, relative path with usage of '.' */
   } else if(argv[0][0] == '.') {
     char *relative = strchr(argv[0], '/');
     if(relative == NULL)
@@ -327,10 +327,29 @@ int uv_exepath(char* buffer, size_t* size) {
     res = readlink(symlink, temp_buffer, PATH_MAX-1);
     if(res < 0)
     strcpy(buffer, symlink);
+    else
     (void) snprintf(buffer, PATH_MAX-1, "%s/%s", dirname(symlink), temp_buffer);
     *size = strlen(buffer);
     return 0;
+  /* case #3, relative path without usage of '.', such as invocations in Node test suite. */
+  } else if (strchr(argv[0], '/') != NULL) {
+    /* Get the current working directory to resolve the relative path. */
+    (void) snprintf(cwd, PATH_MAX-1, "/proc/%lu/cwd", (unsigned long) getpid());
 
+    /* This is always a symlink, resolve it. */
+    res = readlink(cwd, cwdl, sizeof(cwdl) - 1);
+    if (res < 0)
+      return res;
+
+    (void) snprintf(symlink, PATH_MAX-1, "%s%s", cwdl, argv[0]);
+
+    res = readlink(symlink, temp_buffer, PATH_MAX-1);
+    if(res < 0)
+    strcpy(buffer, symlink);
+    else
+    (void) snprintf(buffer, PATH_MAX-1, "%s/%s", dirname(symlink), temp_buffer);
+    *size = strlen(buffer);
+    return 0;
   /* Usgae of absolute filename with location exported in PATH */
   } else {
     char clonedpath[PATH_MAX];
