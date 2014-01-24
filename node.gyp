@@ -330,10 +330,17 @@
             'PLATFORM="sunos"',
           ],
         }],
+        # Conditionally reference v8 or v8ppc
         [
-          'OS in "linux freebsd" and node_shared_v8=="false"', {
+          'OS=="linux freebsd" and node_shared_v8=="false" and target_arch!="ppc" and target_arch!="ppc64"', {
             'ldflags': [
               '-Wl,--whole-archive <(V8_BASE) -Wl,--no-whole-archive',
+            ],
+        }],
+        [
+          'OS=="linux" and node_shared_v8=="false" and (target_arch=="ppc" or target_arch=="ppc64")', {
+            'ldflags': [
+              '-Wl,--whole-archive <(PRODUCT_DIR)/obj.target/deps/v8ppc/tools/gyp/libv8_base.a -Wl,--no-whole-archive',
             ],
         }],
       ],
