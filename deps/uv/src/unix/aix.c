@@ -188,7 +188,7 @@ void uv__io_poll(uv_loop_t* loop, int timeout) {
 
       w = loop->watchers[pc.fd];
 
-      if (w == NULL) {
+      if (w == NULL || pe->revents == POLLNVAL) {
         /* File descriptor that we've stopped watching, disarm it.
          *
          * Ignore all errors because we may be racing with another thread
