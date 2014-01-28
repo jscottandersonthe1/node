@@ -708,3 +708,22 @@ void uv_free_interface_addresses(uv_interface_address_t* addresses,
 
   free(addresses);
 }
+
+void uv__platform_invalidate_fd(uv_loop_t* loop, int fd) {
+  uv__io_t *events;
+  uintptr_t i;
+  uintptr_t nfds;
+
+  assert(loop->watchers != NULL);
+
+  events = (uv__io_t *) loop->watchers[loop->nwatchers];
+  nfds = (uintptr_t) loop->watchers[loop->nwatchers + 1];
+  if (events == NULL)
+    return;
+
+  /* Invalidate events with same file descriptor */
+  for (i = 0; i < nfds; i++)
+    if ((int) events[i].fd == fd)
+      events[i].fd = -1;
+}
+
