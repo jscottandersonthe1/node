@@ -177,8 +177,11 @@ uv_handle_type uv_guess_handle(uv_file file) {
   if(len == 0) {
     len = sizeof(sa);
     memset(&sa, 0, sizeof(sa));
-    if (getpeername(file, &sa, &len) == -1)
+    if (getpeername(file, &sa, &len) == -1) {
+      if(file == 0 || file == 1 || file == 2)
+        return UV_NAMED_PIPE;
       return UV_UNKNOWN_HANDLE;
+    }
     if(sa.sa_family == AF_UNIX)
       return UV_NAMED_PIPE;
   }
