@@ -320,6 +320,16 @@ size_t StringBytes::Write(char* buf,
         memcpy(buf, data, len * 2);
       else
         len = str->Write(reinterpret_cast<uint16_t*>(buf), 0, buflen, flags);
+      if (IsBigEndian()) {
+        // Node's "ucs2" encoding wants LE character data stored in
+        // the Buffer, so we need to reorder on BE platforms.  See
+        // http://nodejs.org/api/buffer.html regarding Node's "ucs2"
+        // encoding specification
+        uint16_t *buf16 = reinterpret_cast<uint16_t*>(buf);
+        for (size_t i=0; i < len; i++) {
+          buf16[i] = (buf16[i] << 8) | (buf16[i] >> 8);
+        }
+      }
       if (chars_written != NULL)
         *chars_written = len;
       len = len * sizeof(uint16_t);
@@ -715,6 +725,18 @@ Local<Value> StringBytes::Encode(const char* buf,
 
     case UCS2: {
       const uint16_t* out = reinterpret_cast<const uint16_t*>(buf);
+      uint16_t* dst = NULL;
+      if (IsBigEndian()) {
+        // Node's "ucs2" encoding expects LE character data inside a
+        // Buffer, so we need to reorder on BE platforms.  See
+        // http://nodejs.org/api/buffer.html regarding Node's "ucs2"
+        // encoding specification
+        dst = new uint16_t[buflen / 2];
+        for (size_t i=0; i < buflen/2; i++) {
+          dst[i] = (out[i] << 8) | (out[i] >> 8);
+        }
+        out = dst;
+      }
       if (buflen < EXTERN_APEX)
         val = String::NewFromTwoByte(node_isolate,
                                      out,
@@ -722,6 +744,8 @@ Local<Value> StringBytes::Encode(const char* buf,
                                      buflen / 2);
       else
         val = ExternTwoByteString::NewFromCopy(out, buflen / 2);
+      if (dst)
+        delete[] dst;
       break;
     }
 
