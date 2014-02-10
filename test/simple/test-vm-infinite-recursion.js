@@ -21,9 +21,35 @@
 
 // Flags: --stack-size=128
 
+function _callstack() {
+  try { capture.error } catch (e) {
+    return e.stack;
+  }
+}
+var replacementPreparer = function (error, trace) {
+  return trace;
+};
+ 
+var callstack = function () {
+  var capture;
+  var oldPreparer = Error.prepareStackTrace;
+  Error.prepareStackTrace = replacementPreparer;
+  try { capture.error } catch (e) {
+    capture = e.stack;
+  }
+  Error.prepareStackTrace = oldPreparer;
+  return capture;
+};
+
+//process.exit(0);
 var assert = require('assert');
 var vm = require('vm');
-var s = 'vm.runInNewContext(s, { vm: vm, s: s })';
+var s;
+
+if (true)
+	s = 'console.error("inscript"); vm.runInNewContext(s, { vm: vm, s: s, console: console, callstack: callstack });';
+else
+	s = 'vm.runInNewContext(s, { vm: vm, s: s });';
 
 assert.throws(function() {
   eval(s);
