@@ -171,6 +171,10 @@
             'cflags': [ '-m64' ],
             'ldflags': [ '-m64' ],
           }],
+          [ 'target_arch=="ppc" and OS!="aix"', {
+            'cflags': [ '-m32' ],
+            'ldflags': [ '-m32' ],
+          }],
           [ 'OS=="solaris"', {
             'cflags': [ '-pthreads' ],
             'ldflags': [ '-pthreads' ],

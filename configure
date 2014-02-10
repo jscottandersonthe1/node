@@ -382,6 +382,8 @@ def host_arch_cc():
     '__i386__'    : 'ia32',
     '__arm__'     : 'arm',
     '__mips__'    : 'mips',
+    '__PPC__'     : 'ppc',
+    '_ARCH_PPC'   : 'ppc',
   }
 
   rtn = 'ia32' # default
@@ -450,6 +452,7 @@ def configure_node(o):
   target_arch = options.dest_cpu or host_arch
   o['variables']['host_arch'] = host_arch
   o['variables']['target_arch'] = target_arch
+  o['variables']['node_byteorder'] = sys.byteorder
 
   if target_arch == 'arm':
     configure_arm(o)
