@@ -1000,12 +1000,14 @@ intptr_t Simulator::get_pc() const {
 }
 
 
-// Runtime FP routines take up to two double arguments (d1, d2) and zero
-// or one integer argument (r3). All are consructed here.
+// Runtime FP routines take:
+// - two double arguments
+// - one double argument and zero or one integer arguments.
+// All are consructed here from d1, d2 and r3.
 void Simulator::GetFpArgs(double* x, double* y, intptr_t* z) {
-  *x = fp_registers_[1];
-  *y = fp_registers_[2];
-  *z = registers_[3];
+  *x = get_double_from_d_register(1);
+  *y = get_double_from_d_register(2);
+  *z = get_register(3);
 }
 
 
@@ -1190,22 +1192,12 @@ typedef double (*SimulatorRuntimeFPIntCall)(double darg0, intptr_t arg0);
 
 // This signature supports direct call in to API function native callback
 // (refer to InvocationCallback in v8.h).
-typedef v8::Handle<v8::Value> (*SimulatorRuntimeDirectApiCall)(intptr_t arg0);
-typedef void (*SimulatorRuntimeDirectApiCallNew)(intptr_t arg0);
-typedef v8::Handle<v8::Value> (*SimulatorRuntimeProfilingApiCall)(
-    intptr_t arg0, intptr_t arg1);
-typedef void (*SimulatorRuntimeProfilingApiCallNew)(intptr_t arg0,
-                                                    intptr_t arg1);
+typedef void (*SimulatorRuntimeDirectApiCall)(intptr_t arg0);
+typedef void (*SimulatorRuntimeProfilingApiCall)(intptr_t arg0, intptr_t arg1);
 
 // This signature supports direct call to accessor getter callback.
-typedef v8::Handle<v8::Value> (*SimulatorRuntimeDirectGetterCall)(
-  intptr_t arg0,
-  intptr_t arg1);
-typedef void (*SimulatorRuntimeDirectGetterCallNew)(intptr_t arg0,
-                                                    intptr_t arg1);
-typedef v8::Handle<v8::Value> (*SimulatorRuntimeProfilingGetterCall)(
-    intptr_t arg0, intptr_t arg1, intptr_t arg2);
-typedef void (*SimulatorRuntimeProfilingGetterCallNew)(
+typedef void (*SimulatorRuntimeDirectGetterCall)(intptr_t arg0, intptr_t arg1);
+typedef void (*SimulatorRuntimeProfilingGetterCall)(
     intptr_t arg0, intptr_t arg1, intptr_t arg2);
 
 // Software interrupt instructions are used by the simulator to call into the
@@ -1326,9 +1318,7 @@ void Simulator::SoftwareInterrupt(Instruction* instr) {
             break;
           }
         }
-      } else if (
-          redirection->type() == ExternalReference::DIRECT_API_CALL ||
-          redirection->type() == ExternalReference::DIRECT_API_CALL_NEW) {
+      } else if (redirection->type() == ExternalReference::DIRECT_API_CALL) {
         // See callers of MacroAssembler::CallApiFunctionAndReturn for
         // explanation of register usage.
         if (::v8::internal::FLAG_trace_sim || !stack_aligned) {
@@ -1341,23 +1331,11 @@ void Simulator::SoftwareInterrupt(Instruction* instr) {
           PrintF("\n");
         }
         CHECK(stack_aligned);
-        if (redirection->type() == ExternalReference::DIRECT_API_CALL) {
-          SimulatorRuntimeDirectApiCall target =
-            reinterpret_cast<SimulatorRuntimeDirectApiCall>(external);
-          v8::Handle<v8::Value> result = target(arg1);
-          if (::v8::internal::FLAG_trace_sim) {
-            PrintF("Returned %p\n", reinterpret_cast<void *>(*result));
-          }
-          *(reinterpret_cast<intptr_t*>(arg0)) = (intptr_t) *result;
-          set_register(r3, arg0);
-        } else {
-          SimulatorRuntimeDirectApiCallNew target =
-            reinterpret_cast<SimulatorRuntimeDirectApiCallNew>(external);
-          target(arg0);
-        }
+        SimulatorRuntimeDirectApiCall target =
+          reinterpret_cast<SimulatorRuntimeDirectApiCall>(external);
+        target(arg0);
       } else if (
-          redirection->type() == ExternalReference::DIRECT_GETTER_CALL ||
-          redirection->type() == ExternalReference::DIRECT_GETTER_CALL_NEW) {
+          redirection->type() == ExternalReference::PROFILING_API_CALL) {
         // See callers of MacroAssembler::CallApiFunctionAndReturn for
         // explanation of register usage.
         if (::v8::internal::FLAG_trace_sim || !stack_aligned) {
@@ -1371,29 +1349,32 @@ void Simulator::SoftwareInterrupt(Instruction* instr) {
           PrintF("\n");
         }
         CHECK(stack_aligned);
-        if (redirection->type() == ExternalReference::DIRECT_GETTER_CALL) {
-          SimulatorRuntimeDirectGetterCall target =
-            reinterpret_cast<SimulatorRuntimeDirectGetterCall>(external);
-#if !(defined(_AIX) || defined(V8_TARGET_ARCH_PPC64))
-          arg1 = *(reinterpret_cast<intptr_t *>(arg1));
-#endif
-          v8::Handle<v8::Value> result = target(arg1, arg2);
-          if (::v8::internal::FLAG_trace_sim) {
-            PrintF("Returned %p\n", reinterpret_cast<void *>(*result));
-          }
-          *(reinterpret_cast<intptr_t*>(arg0)) = (intptr_t) *result;
-          set_register(r3, arg0);
-        } else {
-          SimulatorRuntimeDirectGetterCallNew target =
-            reinterpret_cast<SimulatorRuntimeDirectGetterCallNew>(external);
-#if !(defined(_AIX) || defined(V8_TARGET_ARCH_PPC64))
-          arg0 = *(reinterpret_cast<intptr_t *>(arg0));
-#endif
-          target(arg0, arg1);
-        }
+        SimulatorRuntimeProfilingApiCall target =
+          reinterpret_cast<SimulatorRuntimeProfilingApiCall>(external);
+        target(arg0, arg1);
       } else if (
-        redirection->type() == ExternalReference::PROFILING_GETTER_CALL ||
-        redirection->type() == ExternalReference::PROFILING_GETTER_CALL_NEW) {
+          redirection->type() == ExternalReference::DIRECT_GETTER_CALL) {
+        // See callers of MacroAssembler::CallApiFunctionAndReturn for
+        // explanation of register usage.
+        if (::v8::internal::FLAG_trace_sim || !stack_aligned) {
+          PrintF("Call to host function at %p args %08" V8PRIxPTR " %08"
+                 V8PRIxPTR,
+                 reinterpret_cast<void*>(external), arg0, arg1);
+          if (!stack_aligned) {
+            PrintF(" with unaligned stack %08" V8PRIxPTR
+                   "\n", get_register(sp));
+          }
+          PrintF("\n");
+        }
+        CHECK(stack_aligned);
+        SimulatorRuntimeDirectGetterCall target =
+          reinterpret_cast<SimulatorRuntimeDirectGetterCall>(external);
+#if !ABI_PASSES_HANDLES_IN_REGS
+        arg0 = *(reinterpret_cast<intptr_t *>(arg0));
+#endif
+        target(arg0, arg1);
+      } else if (
+        redirection->type() == ExternalReference::PROFILING_GETTER_CALL) {
         if (::v8::internal::FLAG_trace_sim || !stack_aligned) {
           PrintF("Call to host function at %p args %08" V8PRIxPTR " %08"
                  V8PRIxPTR " %08" V8PRIxPTR,
@@ -1405,27 +1386,13 @@ void Simulator::SoftwareInterrupt(Instruction* instr) {
           PrintF("\n");
         }
         CHECK(stack_aligned);
-        if (redirection->type() == ExternalReference::PROFILING_GETTER_CALL) {
-          SimulatorRuntimeProfilingGetterCall target =
-            reinterpret_cast<SimulatorRuntimeProfilingGetterCall>(external);
-#if !(defined(_AIX) || defined(V8_TARGET_ARCH_PPC64))
-          arg1 = *(reinterpret_cast<intptr_t *>(arg1));
+        SimulatorRuntimeProfilingGetterCall target =
+          reinterpret_cast<SimulatorRuntimeProfilingGetterCall>(
+            external);
+#if !ABI_PASSES_HANDLES_IN_REGS
+        arg0 = *(reinterpret_cast<intptr_t *>(arg0));
 #endif
-          v8::Handle<v8::Value> result = target(arg1, arg2, arg3);
-          if (::v8::internal::FLAG_trace_sim) {
-            PrintF("Returned %p\n", reinterpret_cast<void *>(*result));
-          }
-          *(reinterpret_cast<intptr_t*>(arg0)) = (intptr_t) *result;
-          set_register(r3, arg0);
-        } else {
-          SimulatorRuntimeProfilingGetterCallNew target =
-            reinterpret_cast<SimulatorRuntimeProfilingGetterCallNew>(
-              external);
-#if !(defined(_AIX) || defined(V8_TARGET_ARCH_PPC64))
-          arg0 = *(reinterpret_cast<intptr_t *>(arg0));
-#endif
-          target(arg0, arg1, arg2);
-        }
+        target(arg0, arg1, arg2);
       } else {
         // builtin call.
         ASSERT(redirection->type() == ExternalReference::BUILTIN_CALL);
@@ -1915,7 +1882,9 @@ bool Simulator::DecodeExt2_10bit(Instruction *instr) {
 }
 
 
-void Simulator::DecodeExt2_9bit(Instruction* instr) {
+bool Simulator::DecodeExt2_9bit_part1(Instruction* instr) {
+  bool found = true;
+
   int opcode = instr->Bits(9, 1) << 1;
   switch (opcode) {
     case TW: {
@@ -2042,6 +2011,20 @@ void Simulator::DecodeExt2_9bit(Instruction* instr) {
       break;
     }
 #endif
+    default: {
+      found = false;
+      break;
+    }
+  }
+
+  return found;
+}
+
+
+
+void Simulator::DecodeExt2_9bit_part2(Instruction* instr) {
+  int opcode = instr->Bits(9, 1) << 1;
+  switch (opcode) {
     case CNTLZWX: {
       int rs = instr->RSValue();
       int ra = instr->RAValue();
@@ -2208,8 +2191,11 @@ void Simulator::DecodeExt2_9bit(Instruction* instr) {
       int rb = instr->RBValue();
       int32_t ra_val = get_register(ra);
       int32_t rb_val = get_register(rb);
-      // result is undefined if divisor is zero.
-      int32_t alu_out = rb_val ? ra_val / rb_val : -1;
+      // result is undefined if divisor is zero or if operation
+      // is 0x80000000 / -1.
+      int32_t alu_out = (rb_val == 0 || (ra_val == kMinInt && rb_val == -1)) ?
+        -1 :
+        ra_val / rb_val;
       set_register(rt, alu_out);
       if (instr->Bit(0)) {  // RC bit set
         SetCR0(alu_out);
@@ -2224,8 +2210,14 @@ void Simulator::DecodeExt2_9bit(Instruction* instr) {
       int rb = instr->RBValue();
       int64_t ra_val = get_register(ra);
       int64_t rb_val = get_register(rb);
-      // result is undefined if divisor is zero.
-      int64_t alu_out = rb_val ? ra_val / rb_val : -1;
+      int64_t one = 1;  // work-around gcc
+      int64_t kMinLongLong = (one << 63);
+      // result is undefined if divisor is zero or if operation
+      // is 0x80000000_00000000 / -1.
+      int64_t alu_out = (rb_val == 0 ||
+                         (ra_val == kMinLongLong && rb_val == -1)) ?
+        -1 :
+        ra_val / rb_val;
       set_register(rt, alu_out);
       if (instr->Bit(0)) {  // RC bit set
         SetCR0(alu_out);
@@ -2440,7 +2432,9 @@ void Simulator::DecodeExt2(Instruction* instr) {
     if (DecodeExt2_10bit(instr))
         return;
     // Now look at the lesser encodings
-    DecodeExt2_9bit(instr);
+    if (DecodeExt2_9bit_part1(instr))
+        return;
+    DecodeExt2_9bit_part2(instr);
 }
 
 
@@ -3376,7 +3370,7 @@ void Simulator::Execute() {
 
 void Simulator::CallInternal(byte *entry) {
   // Prepare to execute the code at entry
-#if defined(_AIX) || defined(V8_TARGET_ARCH_PPC64)
+#if ABI_USES_FUNCTION_DESCRIPTORS
   // entry is the function descriptor
   set_pc(*(reinterpret_cast<intptr_t *>(entry)));
 #else
@@ -3526,10 +3520,22 @@ intptr_t Simulator::Call(byte* entry, int argument_count, ...) {
 }
 
 
-double Simulator::CallFP(byte* entry, double d0, double d1) {
+void Simulator::CallFP(byte* entry, double d0, double d1) {
   set_d_register_from_double(1, d0);
   set_d_register_from_double(2, d1);
   CallInternal(entry);
+}
+
+
+int32_t Simulator::CallFPReturnsInt(byte* entry, double d0, double d1) {
+  CallFP(entry, d0, d1);
+  int32_t result = get_register(r3);
+  return result;
+}
+
+
+double Simulator::CallFPReturnsDouble(byte* entry, double d0, double d1) {
+  CallFP(entry, d0, d1);
   return get_double_from_d_register(1);
 }
 

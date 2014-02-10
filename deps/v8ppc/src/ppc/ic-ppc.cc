@@ -367,7 +367,7 @@ void CallICBase::GenerateMonomorphicCacheProbe(MacroAssembler* masm,
                                          extra_state,
                                          Code::NORMAL,
                                          argc);
-  Isolate::Current()->stub_cache()->GenerateProbe(
+  masm->isolate()->stub_cache()->GenerateProbe(
       masm, flags, r4, r5, r6, r7, r8, r9);
 
   // If the stub cache probing failed, the receiver might be a value.
@@ -406,7 +406,7 @@ void CallICBase::GenerateMonomorphicCacheProbe(MacroAssembler* masm,
 
   // Probe the stub cache for the value object.
   __ bind(&probe);
-  Isolate::Current()->stub_cache()->GenerateProbe(
+  masm->isolate()->stub_cache()->GenerateProbe(
       masm, flags, r4, r5, r6, r7, r8, r9);
 
   __ bind(&miss);
@@ -669,9 +669,9 @@ void LoadIC::GenerateMegamorphic(MacroAssembler* masm) {
 
   // Probe the stub cache.
   Code::Flags flags = Code::ComputeFlags(
-      Code::STUB, MONOMORPHIC, Code::kNoExtraICState,
+      Code::HANDLER, MONOMORPHIC, Code::kNoExtraICState,
       Code::NORMAL, Code::LOAD_IC);
-  Isolate::Current()->stub_cache()->GenerateProbe(
+  masm->isolate()->stub_cache()->GenerateProbe(
       masm, flags, r3, r5, r6, r7, r8, r9);
 
   // Cache miss: Jump to runtime.
@@ -855,8 +855,8 @@ void KeyedStoreIC::GenerateNonStrictArguments(MacroAssembler* masm) {
       GenerateMappedArgumentsLookup(masm, r5, r4, r6, r7, r8, &notin, &slow);
   __ StoreP(r3, mapped_location);
   __ mr(r9, r6);  // r6 is modified by GenerateMappedArgumentsLookup
-  __ mr(r22, r3);
-  __ RecordWrite(r6, r9, r22, kLRHasNotBeenSaved, kDontSaveFPRegs);
+  __ mr(r11, r3);
+  __ RecordWrite(r6, r9, r11, kLRHasNotBeenSaved, kDontSaveFPRegs);
   __ Ret();
   __ bind(&notin);
   // The unmapped lookup expects that the parameter map is in r6.
@@ -864,8 +864,8 @@ void KeyedStoreIC::GenerateNonStrictArguments(MacroAssembler* masm) {
       GenerateUnmappedArgumentsLookup(masm, r4, r6, r7, &slow);
   __ StoreP(r3, unmapped_location);
   __ mr(r9, r6);  // r6 is modified by GenerateUnmappedArgumentsLookup
-  __ mr(r22, r3);
-  __ RecordWrite(r6, r9, r22, kLRHasNotBeenSaved, kDontSaveFPRegs);
+  __ mr(r11, r3);
+  __ RecordWrite(r6, r9, r11, kLRHasNotBeenSaved, kDontSaveFPRegs);
   __ Ret();
   __ bind(&slow);
   GenerateMiss(masm, MISS);
@@ -1515,10 +1515,10 @@ void StoreIC::GenerateMegamorphic(MacroAssembler* masm,
 
   // Get the receiver from the stack and probe the stub cache.
   Code::Flags flags = Code::ComputeFlags(
-      Code::STUB, MONOMORPHIC, strict_mode,
+      Code::HANDLER, MONOMORPHIC, strict_mode,
       Code::NORMAL, Code::STORE_IC);
 
-  Isolate::Current()->stub_cache()->GenerateProbe(
+  masm->isolate()->stub_cache()->GenerateProbe(
       masm, flags, r4, r5, r6, r7, r8, r9);
 
   // Cache miss: Jump to runtime.
