@@ -19,7 +19,7 @@
 // OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
 // USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-process.env.NODE_DEBUG='net,cluster,child_process';
+process.env.NODE_DEBUG='net';
 
 var common = require('../common');
 var assert = require('assert');
