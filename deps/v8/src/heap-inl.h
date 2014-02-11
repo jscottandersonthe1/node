@@ -634,6 +634,11 @@ Isolate* Heap::isolate() {
     RETURN_EMPTY;                                                              \
   } while (false)
 
+    // two macros ensures any macro passed will
+// be expanded before being stringified
+#define STRINGIZE_DETAIL(x) #x
+#define STRINGIZE(x) STRINGIZE_DETAIL(x)
+
 #define CALL_AND_RETRY_OR_DIE(                                             \
      ISOLATE, FUNCTION_CALL, RETURN_VALUE, RETURN_EMPTY)                   \
   CALL_AND_RETRY(                                                          \
@@ -641,7 +646,7 @@ Isolate* Heap::isolate() {
       FUNCTION_CALL,                                                       \
       RETURN_VALUE,                                                        \
       RETURN_EMPTY,                                                        \
-      v8::internal::V8::FatalProcessOutOfMemory("CALL_AND_RETRY", true))
+      v8::internal::V8::FatalProcessOutOfMemory("CALL_AND_RETRY1" STRINGIZE(__FILE__) STRINGIZE(__LINE__), true))
 
 #define CALL_HEAP_FUNCTION(ISOLATE, FUNCTION_CALL, TYPE)                      \
   CALL_AND_RETRY_OR_DIE(ISOLATE,                                              \
