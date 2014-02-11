@@ -53,4 +53,5 @@ else
 
 assert.throws(function() {
   eval(s);
+  console.error('returned from script');
 }, /Maximum call stack/);
