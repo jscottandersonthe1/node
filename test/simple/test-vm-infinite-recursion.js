@@ -44,11 +44,12 @@ var callstack = function () {
 //process.exit(0);
 var assert = require('assert');
 var vm = require('vm');
+var os = require('os');
 var s;
 var dp = 0;
 
 if (true)
-	s = 'console.error("inscript", dp++, process.memoryUsage()); vm.runInNewContext(s, { vm: vm, s: s, console: console, callstack: callstack, dp: dp, process: process});';
+	s = 'console.error("inscript", dp++, os.freemem(), process.memoryUsage()); vm.runInNewContext(s, { vm: vm, s: s, console: console, callstack: callstack, dp: dp, os: os, process: process});';
 else
 	s = 'vm.runInNewContext(s, { vm: vm, s: s });';
 
