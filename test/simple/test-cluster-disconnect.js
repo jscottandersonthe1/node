@@ -19,6 +19,7 @@
 // OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
 // USE OR OTHER DEALINGS IN THE SOFTWARE.
 
+process.env.NODE_DEBUG='net,cluster,child_process';
 
 var common = require('../common');
 var assert = require('assert');
@@ -35,6 +36,11 @@ if (cluster.isWorker) {
   }).listen(common.PORT + 1, '127.0.0.1');
 
 } else if (cluster.isMaster) {
+
+	setTimeout(function() {
+		console.error('active', process._getActiveHandles());
+	}, 20000);
+
   var servers = 2;
 
   // test a single TCP server
@@ -76,7 +82,9 @@ if (cluster.isWorker) {
       var worker = cluster.fork();
       worker.on('listening', function() {
         online += 1;
+		console.error('online', online);
         if (online === workers * servers) {
+			console.error('invoking cb');
           cb();
         }
       });
@@ -93,18 +101,22 @@ if (cluster.isWorker) {
   var test = function(again) {
     //1. start cluster
     startCluster(function() {
+		console.error('here1');
       results.start += 1;
 
       //2. test cluster
       testCluster(function() {
+		console.error('here2');
         results.test += 1;
 
         //3. disconnect cluster
         cluster.disconnect(function() {
+			console.error('here3');
           results.disconnect += 1;
 
           // run test again to confirm cleanup
           if (again) {
+			console.error('here4');
             test();
           }
         });
