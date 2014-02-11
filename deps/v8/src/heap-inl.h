@@ -605,7 +605,8 @@ Isolate* Heap::isolate() {
     Object* __object__ = NULL;                                                 \
     if (__maybe_object__->ToObject(&__object__)) RETURN_VALUE;                 \
     if (__maybe_object__->IsOutOfMemory()) {                                   \
-      OOM;                                                                     \
+v8::internal::V8::FatalProcessOutOfMemory("OOM1", true);  \
+    OOM;                                                                     \
     }                                                                          \
     if (!__maybe_object__->IsRetryAfterGC()) RETURN_EMPTY;                     \
     (ISOLATE)->heap()->CollectGarbage(Failure::cast(__maybe_object__)->        \
@@ -614,6 +615,7 @@ Isolate* Heap::isolate() {
     __maybe_object__ = FUNCTION_CALL;                                          \
     if (__maybe_object__->ToObject(&__object__)) RETURN_VALUE;                 \
     if (__maybe_object__->IsOutOfMemory()) {                                   \
+v8::internal::V8::FatalProcessOutOfMemory("OOM2", true);  \
       OOM;                                                                     \
     }                                                                          \
     if (!__maybe_object__->IsRetryAfterGC()) RETURN_EMPTY;                     \
@@ -625,6 +627,7 @@ Isolate* Heap::isolate() {
     }                                                                          \
     if (__maybe_object__->ToObject(&__object__)) RETURN_VALUE;                 \
     if (__maybe_object__->IsOutOfMemory()) {                                   \
+v8::internal::V8::FatalProcessOutOfMemory("OOM3", true);  \
       OOM;                                                                     \
     }                                                                          \
     if (__maybe_object__->IsRetryAfterGC()) {                                  \
