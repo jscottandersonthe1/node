@@ -37,9 +37,13 @@ if (cluster.isWorker) {
 
 } else if (cluster.isMaster) {
 
+	var tl = require('child_process').spawn('tasklist', {stdio: 'inherit'});
+	tl.on('exit', function() {
+/*
 	setTimeout(function() {
 		console.error('active', process._getActiveHandles());
 	}, 20000);
+*/
 
   var servers = 2;
 
@@ -130,5 +134,6 @@ if (cluster.isWorker) {
     assert.equal(results.start, 2);
     assert.equal(results.test, 2);
     assert.equal(results.disconnect, 2);
+  });
   });
 }
