@@ -49,6 +49,8 @@
 #include "incremental-marking.h"
 #include "transitions-inl.h"
 
+#include <stdio.h>
+
 namespace v8 {
 namespace internal {
 
@@ -1109,6 +1111,7 @@ Failure* Failure::Exception() {
 
 
 Failure* Failure::OutOfMemoryException(intptr_t value) {
+	fprintf(stderr, "BINGO OOM\n");
   return Construct(OUT_OF_MEMORY_EXCEPTION, value);
 }
 
