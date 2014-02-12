@@ -3828,6 +3828,7 @@ MaybeObject* Heap::AllocateConsString(String* first, String* second) {
   // of the new cons string is too large.
   if (length > String::kMaxLength || length < 0) {
     isolate()->context()->mark_out_of_memory();
+	  fprintf(stderr, "BINGO OOM3\n");
     return Failure::OutOfMemoryException(0x4);
   }
 
@@ -4016,6 +4017,7 @@ MaybeObject* Heap::AllocateExternalStringFromAscii(
   size_t length = resource->length();
   if (length > static_cast<size_t>(String::kMaxLength)) {
     isolate()->context()->mark_out_of_memory();
+	  fprintf(stderr, "BINGO OOM4\n");
     return Failure::OutOfMemoryException(0x5);
   }
 
@@ -4039,6 +4041,7 @@ MaybeObject* Heap::AllocateExternalStringFromTwoByte(
   size_t length = resource->length();
   if (length > static_cast<size_t>(String::kMaxLength)) {
     isolate()->context()->mark_out_of_memory();
+	  fprintf(stderr, "BINGO OOM5\n");
     return Failure::OutOfMemoryException(0x6);
   }
 
@@ -4090,6 +4093,7 @@ MaybeObject* Heap::LookupSingleCharacterStringFromCode(uint16_t code) {
 
 MaybeObject* Heap::AllocateByteArray(int length, PretenureFlag pretenure) {
   if (length < 0 || length > ByteArray::kMaxLength) {
+	  fprintf(stderr, "BINGO OOM6\n");
     return Failure::OutOfMemoryException(0x7);
   }
   int size = ByteArray::SizeFor(length);
@@ -5202,12 +5206,15 @@ MaybeObject* Heap::AllocateInternalizedStringImpl(
 
   if (is_one_byte) {
     if (chars > SeqOneByteString::kMaxLength) {
-      return Failure::OutOfMemoryException(0x9);
+	  fprintf(stderr, "BINGO OOM7\n");
+    return Failure::OutOfMemoryException(0x9);
     }
     map = ascii_internalized_string_map();
     size = SeqOneByteString::SizeFor(chars);
   } else {
     if (chars > SeqTwoByteString::kMaxLength) {
+      fprintf(stderr, "BINGO OOM8\n");
+
       return Failure::OutOfMemoryException(0xa);
     }
     map = internalized_string_map();
@@ -5252,6 +5259,8 @@ MaybeObject* Heap::AllocateInternalizedStringImpl<false>(
 MaybeObject* Heap::AllocateRawOneByteString(int length,
                                             PretenureFlag pretenure) {
   if (length < 0 || length > SeqOneByteString::kMaxLength) {
+	  fprintf(stderr, "BINGO OOM9\n");
+
     return Failure::OutOfMemoryException(0xb);
   }
   int size = SeqOneByteString::SizeFor(length);
@@ -5276,6 +5285,8 @@ MaybeObject* Heap::AllocateRawOneByteString(int length,
 MaybeObject* Heap::AllocateRawTwoByteString(int length,
                                             PretenureFlag pretenure) {
   if (length < 0 || length > SeqTwoByteString::kMaxLength) {
+	  fprintf(stderr, "BINGO OOM10\n");
+
     return Failure::OutOfMemoryException(0xc);
   }
   int size = SeqTwoByteString::SizeFor(length);
@@ -5394,6 +5405,8 @@ MaybeObject* Heap::CopyConstantPoolArrayWithMap(ConstantPoolArray* src,
 
 MaybeObject* Heap::AllocateRawFixedArray(int length, PretenureFlag pretenure) {
   if (length < 0 || length > FixedArray::kMaxLength) {
+	  fprintf(stderr, "BINGO OOM11\n");
+
     return Failure::OutOfMemoryException(0xe);
   }
   int size = FixedArray::SizeFor(length);
@@ -5506,6 +5519,7 @@ MaybeObject* Heap::AllocateFixedDoubleArrayWithHoles(
 MaybeObject* Heap::AllocateRawFixedDoubleArray(int length,
                                                PretenureFlag pretenure) {
   if (length < 0 || length > FixedDoubleArray::kMaxLength) {
+	  fprintf(stderr, "BINGO OOM12\n");
     return Failure::OutOfMemoryException(0xf);
   }
   int size = FixedDoubleArray::SizeFor(length);
