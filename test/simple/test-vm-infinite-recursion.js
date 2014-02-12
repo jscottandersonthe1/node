@@ -26,6 +26,10 @@ function _callstack() {
     return e.stack;
   }
 }
+
+console.log('stdout');
+console.error('stderr');
+
 var replacementPreparer = function (error, trace) {
   return trace;
 };
