@@ -5341,6 +5341,11 @@ MaybeObject* Heap::AllocateEmptyExternalArray(ExternalArrayType array_type) {
 
 MaybeObject* Heap::CopyFixedArrayWithMap(FixedArray* src, Map* map) {
   int len = src->length();
+if(  len > FixedArray::kMaxLength) {
+  fprintf(stderr, "CopyFixedArrayWithMap %d\n", len);
+  fflush(stderr);
+}
+  
   Object* obj;
   { MaybeObject* maybe_obj = AllocateRawFixedArray(len, NOT_TENURED);
     if (!maybe_obj->ToObject(&obj)) return maybe_obj;
@@ -5425,7 +5430,11 @@ MaybeObject* Heap::AllocateFixedArrayWithFiller(int length,
 
   ASSERT(!InNewSpace(filler));
   Object* result;
-  { MaybeObject* maybe_result = AllocateRawFixedArray(length, pretenure);
+if(  length > FixedArray::kMaxLength) {
+  fprintf(stderr, "CopyFixedArrayWithMap %d\n", length);
+  fflush(stderr);
+}
+{ MaybeObject* maybe_result = AllocateRawFixedArray(length, pretenure);
     if (!maybe_result->ToObject(&result)) return maybe_result;
   }
 
@@ -5450,6 +5459,10 @@ MaybeObject* Heap::AllocateFixedArrayWithHoles(int length,
 
 MaybeObject* Heap::AllocateUninitializedFixedArray(int length) {
   if (length == 0) return empty_fixed_array();
+  if(  length > FixedArray::kMaxLength) {
+    fprintf(stderr, "CopyFixedArrayWithMap %d\n", length);
+    fflush(stderr);
+  }
 
   Object* obj;
   { MaybeObject* maybe_obj = AllocateRawFixedArray(length, NOT_TENURED);

@@ -3155,7 +3155,7 @@ void CEntryStub::Generate(MacroAssembler* masm) {
                                       isolate);
   Label already_have_failure;
   JumpIfOOM(masm, eax, ecx, &already_have_failure);
-  __ mov(eax, reinterpret_cast<int32_t>(Failure::OutOfMemoryException(0x177)));
+  __ mov(eax, reinterpret_cast<int32_t>(Failure::OutOfMemoryException(0x1)));
   __ bind(&already_have_failure);
   __ mov(Operand::StaticVariable(pending_exception), eax);
   // Fall through to the next label.
