@@ -682,7 +682,7 @@ static Handle<SharedFunctionInfo> MakeFunctionInfo(CompilationInfo* info) {
 
     // Compile the code.
     if (!MakeCode(info)) {
-      if (!isolate->has_pending_exception()) isolate->StackOverflow();
+      if (!isolate->has_pending_exception()) isolate->StackOverflow(18);
       return Handle<SharedFunctionInfo>::null();
     }
 
@@ -1022,7 +1022,7 @@ bool Compiler::CompileLazy(CompilationInfo* info) {
     // Compile the code.
     if (!MakeCode(info)) {
       if (!isolate->has_pending_exception()) {
-        isolate->StackOverflow();
+        isolate->StackOverflow(17);
       }
     } else {
       InstallCodeCommon(info);

@@ -1128,7 +1128,7 @@ int RegExpMacroAssemblerMIPS::CheckStackGuardState(Address* return_address,
                                                    Address re_frame) {
   Isolate* isolate = frame_entry<Isolate*>(re_frame, kIsolate);
   if (isolate->stack_guard()->IsStackOverflow()) {
-    isolate->StackOverflow();
+    isolate->StackOverflow(7);
     return EXCEPTION;
   }
 

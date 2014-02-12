@@ -627,7 +627,7 @@ int RegExpImpl::IrregexpExecRaw(Handle<JSRegExp> regexp,
   }
   if (result == RE_EXCEPTION) {
     ASSERT(!isolate->has_pending_exception());
-    isolate->StackOverflow();
+    isolate->StackOverflow(13);
   }
   return result;
 #endif  // V8_INTERPRETED_REGEXP

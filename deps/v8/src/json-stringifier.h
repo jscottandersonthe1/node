@@ -276,7 +276,7 @@ MaybeObject* BasicJsonStringifier::Stringify(Handle<Object> object) {
       return isolate_->Throw(*factory_->NewTypeError(
                  "circular_structure", HandleVector<Object>(NULL, 0)));
     case STACK_OVERFLOW:
-      return isolate_->StackOverflow();
+      return isolate_->StackOverflow(14);
     default:
       return Failure::Exception();
   }

@@ -805,7 +805,7 @@ class Isolate {
   void TraceException(bool flag);
 
   // Out of resource exception helpers.
-  Failure* StackOverflow();
+  Failure* StackOverflow(int code = 0);
   Failure* TerminateExecution();
   void CancelTerminateExecution();
 

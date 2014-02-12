@@ -944,7 +944,7 @@ MaybeObject* Execution::HandleStackGuardInterrupt(Isolate* isolate) {
   }
   if (stack_guard->IsInterrupted()) {
     stack_guard->Continue(INTERRUPT);
-    return isolate->StackOverflow();
+    return isolate->StackOverflow(16);
   }
   if (stack_guard->IsFullDeopt()) {
     stack_guard->Continue(FULL_DEOPT);

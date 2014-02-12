@@ -689,7 +689,7 @@ FunctionLiteral* Parser::DoParseProgram(CompilationInfo* info,
       result->set_dont_optimize_reason(
           factory()->visitor()->dont_optimize_reason());
     } else if (stack_overflow()) {
-      isolate()->StackOverflow();
+      isolate()->StackOverflow(11);
     }
   }
 
@@ -785,7 +785,7 @@ FunctionLiteral* Parser::ParseLazy(Utf16CharacterStream* source) {
   ASSERT(target_stack_ == NULL);
 
   if (result == NULL) {
-    if (stack_overflow()) isolate()->StackOverflow();
+    if (stack_overflow()) isolate()->StackOverflow(10);
   } else {
     Handle<String> inferred_name(shared_info->inferred_name());
     result->set_inferred_name(inferred_name);
@@ -5790,7 +5790,7 @@ ScriptDataImpl* PreParserApi::PreParse(Isolate* isolate,
   scanner.Initialize(source);
   PreParser::PreParseResult result = preparser.PreParseProgram();
   if (result == PreParser::kPreParseStackOverflow) {
-    isolate->StackOverflow();
+    isolate->StackOverflow(9);
     return NULL;
   }
 

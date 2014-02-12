@@ -8797,7 +8797,7 @@ RUNTIME_FUNCTION(MaybeObject*, Runtime_Call) {
   Handle<Object>* argv = argv_small_buffer;
   if (argc > argv_small_size) {
     argv = new Handle<Object>[argc];
-    if (argv == NULL) return isolate->StackOverflow();
+    if (argv == NULL) return isolate->StackOverflow(4);
     argv_large_buffer = SmartArrayPointer<Handle<Object> >(argv);
   }
 
@@ -8837,7 +8837,7 @@ RUNTIME_FUNCTION(MaybeObject*, Runtime_Apply) {
   Handle<Object>* argv = argv_small_buffer;
   if (argc > argv_small_size) {
     argv = new Handle<Object>[argc];
-    if (argv == NULL) return isolate->StackOverflow();
+    if (argv == NULL) return isolate->StackOverflow(3);
     argv_large_buffer = SmartArrayPointer<Handle<Object> >(argv);
   }
 
@@ -9435,7 +9435,7 @@ RUNTIME_FUNCTION(MaybeObject*, Runtime_StackGuard) {
 
   // First check if this is a real stack overflow.
   if (isolate->stack_guard()->IsStackOverflow()) {
-    return isolate->StackOverflow();
+    return isolate->StackOverflow(2);
   }
 
   return Execution::HandleStackGuardInterrupt(isolate);
@@ -9450,7 +9450,7 @@ RUNTIME_FUNCTION(MaybeObject*, Runtime_TryInstallRecompiledCode) {
   // First check if this is a real stack overflow.
   if (isolate->stack_guard()->IsStackOverflow()) {
     SealHandleScope shs(isolate);
-    return isolate->StackOverflow();
+    return isolate->StackOverflow(1);
   }
 
   isolate->optimizing_compiler_thread()->InstallOptimizedFunctions();

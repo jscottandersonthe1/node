@@ -5431,7 +5431,7 @@ MaybeObject* Heap::AllocateFixedArrayWithFiller(int length,
   ASSERT(!InNewSpace(filler));
   Object* result;
 if(  length > FixedArray::kMaxLength) {
-  fprintf(stderr, "CopyFixedArrayWithMap %d\n", length);
+  fprintf(stderr, "AllocateFixedArrayWithFiller %d\n", length);
   fflush(stderr);
 }
 { MaybeObject* maybe_result = AllocateRawFixedArray(length, pretenure);
@@ -5460,7 +5460,7 @@ MaybeObject* Heap::AllocateFixedArrayWithHoles(int length,
 MaybeObject* Heap::AllocateUninitializedFixedArray(int length) {
   if (length == 0) return empty_fixed_array();
   if(  length > FixedArray::kMaxLength) {
-    fprintf(stderr, "CopyFixedArrayWithMap %d\n", length);
+    fprintf(stderr, "AllocateUninitializedFixedArray %d\n", length);
     fflush(stderr);
   }
 

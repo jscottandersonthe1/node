@@ -183,7 +183,7 @@ NativeRegExpMacroAssembler::Result NativeRegExpMacroAssembler::Execute(
   if (result == EXCEPTION && !isolate->has_pending_exception()) {
     // We detected a stack overflow (on the backtrack stack) in RegExp code,
     // but haven't created the exception yet.
-    isolate->StackOverflow();
+    isolate->StackOverflow(5);
   }
   return static_cast<Result>(result);
 }

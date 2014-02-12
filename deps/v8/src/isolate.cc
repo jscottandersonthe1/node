@@ -1089,8 +1089,8 @@ const char* const Isolate::kStackOverflowMessage =
   "Uncaught RangeError: Maximum call stack size exceeded";
 
 
-Failure* Isolate::StackOverflow() {
-  fprintf(stderr, "StackOverflow\n"); fflush(stderr);
+Failure* Isolate::StackOverflow(int code) {
+  fprintf(stderr, "StackOverflow %d\n", code); fflush(stderr);
   HandleScope scope(this);
   // At this point we cannot create an Error object using its javascript
   // constructor.  Instead, we copy the pre-constructed boilerplate and

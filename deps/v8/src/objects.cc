@@ -5765,7 +5765,7 @@ Handle<JSObject> JSObjectWalkVisitor::StructureWalk(Handle<JSObject> object) {
   Isolate* isolate = object->GetIsolate();
   StackLimitCheck check(isolate);
   if (check.HasOverflowed()) {
-    isolate->StackOverflow();
+    isolate->StackOverflow(12);
     return Handle<JSObject>::null();
   }
 

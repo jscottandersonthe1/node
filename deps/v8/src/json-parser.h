@@ -281,7 +281,7 @@ template <bool seq_ascii>
 Handle<Object> JsonParser<seq_ascii>::ParseJsonValue() {
   StackLimitCheck stack_check(isolate_);
   if (stack_check.HasOverflowed()) {
-    isolate_->StackOverflow();
+    isolate_->StackOverflow(15);
     return Handle<Object>::null();
   }
 

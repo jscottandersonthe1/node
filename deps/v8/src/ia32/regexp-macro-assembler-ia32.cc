@@ -1100,7 +1100,7 @@ int RegExpMacroAssemblerIA32::CheckStackGuardState(Address* return_address,
                                                    Address re_frame) {
   Isolate* isolate = frame_entry<Isolate*>(re_frame, kIsolate);
   if (isolate->stack_guard()->IsStackOverflow()) {
-    isolate->StackOverflow();
+    isolate->StackOverflow(8);
     return EXCEPTION;
   }
 
