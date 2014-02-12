@@ -1100,8 +1100,9 @@ Failure* Isolate::StackOverflow(int code) {
       Handle<JSObject>::cast(GetProperty(this, js_builtins_object(), key));
   fprintf(stderr, "BeforeCopyBoilerplate %d\n", code); fflush(stderr);
   Handle<JSObject> exception = JSObject::Copy(boilerplate);
-  fprintf(stderr, "StacBeforeCopyBoilerplate %d\n", code); fflush(stderr);
+  fprintf(stderr, "AfterCopyBoilerplate %d\n", code); fflush(stderr);
   DoThrow(*exception, NULL);
+  fprintf(stderr, "AfterDoThrow %d\n", code); fflush(stderr);
 
   // Get stack trace limit.
   Handle<Object> error = GetProperty(js_builtins_object(), "$Error");
