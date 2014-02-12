@@ -1342,7 +1342,7 @@ void MacroAssembler::IsObjectNameType(Register object,
 void MacroAssembler::DebugBreak() {
   mov(r0, Operand::Zero());
   mov(r1, Operand(ExternalReference(Runtime::kDebugBreak, isolate())));
-  CEntryStub ces(1);
+  CEntryStub ces(1, kDontSaveFPRegs, "DebugBreak\n");
   ASSERT(AllowThisStubCall(&ces));
   Call(ces.GetCode(isolate()), RelocInfo::DEBUG_BREAK);
 }

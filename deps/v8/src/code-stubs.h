@@ -34,6 +34,8 @@
 #include "globals.h"
 #include "macro-assembler.h"
 
+#include <stdio.h>
+
 namespace v8 {
 namespace internal {
 
@@ -1342,8 +1344,14 @@ class CompareNilICStub : public HydrogenCodeStub  {
 class CEntryStub : public PlatformCodeStub {
  public:
   explicit CEntryStub(int result_size,
-                      SaveFPRegsMode save_doubles = kDontSaveFPRegs)
-      : result_size_(result_size), save_doubles_(save_doubles) { }
+                      SaveFPRegsMode save_doubles = kDontSaveFPRegs, char* msg=NULL)
+      : result_size_(result_size), save_doubles_(save_doubles) { 
+
+	if(msg)
+		{
+			fprintf(stderr, msg); fflush(stderr);
+		}
+  }
 
   void Generate(MacroAssembler* masm);
 

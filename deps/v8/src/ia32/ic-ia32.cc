@@ -1065,7 +1065,7 @@ void CallICBase::GenerateMiss(MacroAssembler* masm,
     __ push(ecx);
 
     // Call the entry.
-    CEntryStub stub(1);
+    CEntryStub stub(1, kDontSaveFPRegs, "GenerateMiss\n");
     __ mov(eax, Immediate(2));
     __ mov(ebx, Immediate(ExternalReference(IC_Utility(id), masm->isolate())));
     __ CallStub(&stub);

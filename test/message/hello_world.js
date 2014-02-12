@@ -20,9 +20,11 @@
 // USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 
-
+var os = require('os');
 
 var common = require('../common');
 var assert = require('assert');
 
+console.log(os.freemem());
+console.error(os.freemem());
 console.log('hello world');

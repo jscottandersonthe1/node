@@ -1111,7 +1111,7 @@ Failure* Failure::Exception() {
 
 
 Failure* Failure::OutOfMemoryException(intptr_t value) {
-	fprintf(stderr, "BINGO OOM %p\n", value);
+	fprintf(stderr, "BINGO OOM %p\n", value); fflush(stderr);
   return Construct(OUT_OF_MEMORY_EXCEPTION, value);
 }
 

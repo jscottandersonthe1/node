@@ -682,7 +682,7 @@ void MacroAssembler::RecordWrite(Register object,
 void MacroAssembler::DebugBreak() {
   Set(eax, Immediate(0));
   mov(ebx, Immediate(ExternalReference(Runtime::kDebugBreak, isolate())));
-  CEntryStub ces(1);
+  CEntryStub ces(1, kDontSaveFPRegs, "DebugBreak\n");
   call(ces.GetCode(isolate()), RelocInfo::DEBUG_BREAK);
 }
 #endif
@@ -2203,7 +2203,7 @@ void MacroAssembler::CallRuntime(const Runtime::Function* f,
   Set(eax, Immediate(num_arguments));
   mov(ebx, Immediate(ExternalReference(f, isolate())));
   CEntryStub ces(1, CpuFeatures::IsSupported(SSE2) ? save_doubles
-                                                   : kDontSaveFPRegs);
+                                                   : kDontSaveFPRegs, "CallRuntime\n");
   CallStub(&ces);
 }
 
@@ -2213,7 +2213,7 @@ void MacroAssembler::CallExternalReference(ExternalReference ref,
   mov(eax, Immediate(num_arguments));
   mov(ebx, Immediate(ref));
 
-  CEntryStub stub(1);
+  CEntryStub stub(1, kDontSaveFPRegs, "CallExternalREf\n");
   CallStub(&stub);
 }
 
@@ -2406,7 +2406,7 @@ void MacroAssembler::CallApiFunctionAndReturn(
 void MacroAssembler::JumpToExternalReference(const ExternalReference& ext) {
   // Set the entry point and jump to the C entry runtime stub.
   mov(ebx, Immediate(ext));
-  CEntryStub ces(1);
+  CEntryStub ces(1, kDontSaveFPRegs, "JumpToExt\n");
   jmp(ces.GetCode(isolate()), RelocInfo::CODE_TARGET);
 }
 

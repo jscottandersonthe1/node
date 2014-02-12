@@ -2978,6 +2978,8 @@ void CEntryStub::GenerateCore(MacroAssembler* masm,
 
   // Result returned in eax, or eax+edx if result_size_ is 2.
 
+  fprintf(stderr, "in CEntryStub::GenerateCore\n"); fflush(stderr);
+  
   // Check stack alignment.
   if (FLAG_debug_code) {
     __ CheckStackAlignment();
