@@ -609,7 +609,7 @@ Isolate* Heap::isolate() {
     Object* __object__ = NULL;                                                 \
     if (__maybe_object__->ToObject(&__object__)) RETURN_VALUE;                 \
     if (__maybe_object__->IsOutOfMemory()) {                                   \
-v8::internal::V8::FatalProcessOutOfMemory("OOM1", true);  \
+/*v8::internal::V8::FatalProcessOutOfMemory("OOM1", true);*/  \
     OOM;                                                                     \
     }                                                                          \
     if (!__maybe_object__->IsRetryAfterGC()) RETURN_EMPTY;                     \
@@ -619,7 +619,7 @@ v8::internal::V8::FatalProcessOutOfMemory("OOM1", true);  \
     __maybe_object__ = FUNCTION_CALL;                                          \
     if (__maybe_object__->ToObject(&__object__)) RETURN_VALUE;                 \
     if (__maybe_object__->IsOutOfMemory()) {                                   \
-v8::internal::V8::FatalProcessOutOfMemory("OOM2", true);  \
+/*v8::internal::V8::FatalProcessOutOfMemory("OOM2", true); */ \
       OOM;                                                                     \
     }                                                                          \
     if (!__maybe_object__->IsRetryAfterGC()) RETURN_EMPTY;                     \
@@ -631,7 +631,7 @@ v8::internal::V8::FatalProcessOutOfMemory("OOM2", true);  \
     }                                                                          \
     if (__maybe_object__->ToObject(&__object__)) RETURN_VALUE;                 \
     if (__maybe_object__->IsOutOfMemory()) {                                   \
-v8::internal::V8::FatalProcessOutOfMemory("OOM3", true);  \
+/*v8::internal::V8::FatalProcessOutOfMemory("OOM3", true);*/  \
       OOM;                                                                     \
     }                                                                          \
     if (__maybe_object__->IsRetryAfterGC()) {                                  \
