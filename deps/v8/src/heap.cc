@@ -5405,7 +5405,7 @@ MaybeObject* Heap::CopyConstantPoolArrayWithMap(ConstantPoolArray* src,
 
 MaybeObject* Heap::AllocateRawFixedArray(int length, PretenureFlag pretenure) {
   if (length < 0 || length > FixedArray::kMaxLength) {
-	  fprintf(stderr, "BINGO OOM11\n");
+	  fprintf(stderr, "BINGO OOM11 %d\n", length);
 
     return Failure::OutOfMemoryException(0xe);
   }

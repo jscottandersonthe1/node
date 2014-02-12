@@ -1349,7 +1349,7 @@ class CEntryStub : public PlatformCodeStub {
 
 	if(msg)
 		{
-			fprintf(stderr, msg); fflush(stderr);
+			//fprintf(stderr, msg); fflush(stderr);
 		}
   }
 

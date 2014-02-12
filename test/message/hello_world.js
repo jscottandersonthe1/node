@@ -25,6 +25,7 @@ var os = require('os');
 var common = require('../common');
 var assert = require('assert');
 
-console.log(os.freemem());
-console.error(os.freemem());
+console.log('freemem', os.freemem());
+console.log(process.env);
+console.error('freemem',os.freemem());
 console.log('hello world');
