@@ -26,6 +26,7 @@
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 #include <stdlib.h>
+#include <stdio.h>
 
 #include "v8.h"
 
@@ -1089,6 +1090,7 @@ const char* const Isolate::kStackOverflowMessage =
 
 
 Failure* Isolate::StackOverflow() {
+  fprintf(stderr, "StackOverflow\n"); fflush(stderr);
   HandleScope scope(this);
   // At this point we cannot create an Error object using its javascript
   // constructor.  Instead, we copy the pre-constructed boilerplate and
