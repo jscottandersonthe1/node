@@ -180,6 +180,15 @@ skip:
 
 
 static ssize_t uv__fs_read(uv_fs_t* req) {
+#if defined(_AIX)
+  struct stat buf;
+  if(fstat(req->file, &buf))
+    return -1;
+  if(S_ISDIR(buf.st_mode)) {
+    errno = EISDIR;
+    return -1;
+  } 
+#endif /* defined(_AIX) */
   if (req->off < 0)
     return read(req->file, req->buf, req->len);
   else
