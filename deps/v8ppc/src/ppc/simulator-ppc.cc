@@ -314,7 +314,7 @@ void PPCDebugger::Debug() {
              == 0x7d821008) {
           sim_->set_pc(sim_->get_pc() + Instruction::kInstrSize);
         } else {
-          sim_->InstructionDecode(
+          sim_->ExecuteInstruction(
                   reinterpret_cast<Instruction*>(sim_->get_pc()));
         }
 
@@ -329,7 +329,7 @@ void PPCDebugger::Debug() {
                                    reinterpret_cast<byte*>(sim_->get_pc()));
             PrintF("  0x%08" V8PRIxPTR "  %s\n", sim_->get_pc(),
                    buffer.start());
-            sim_->InstructionDecode(
+            sim_->ExecuteInstruction(
                     reinterpret_cast<Instruction*>(sim_->get_pc()));
           }
         }
@@ -340,7 +340,7 @@ void PPCDebugger::Debug() {
           sim_->set_pc(sim_->get_pc() + Instruction::kInstrSize);
         } else {
           // Execute the one instruction we broke at with breakpoints disabled.
-          sim_->InstructionDecode(
+          sim_->ExecuteInstruction(
                   reinterpret_cast<Instruction*>(sim_->get_pc()));
         }
         // Leave the debugger shell.
@@ -835,7 +835,11 @@ Simulator::Simulator(Isolate* isolate) : isolate_(isolate) {
   Initialize(isolate);
   // Set up simulator support first. Some of this information is needed to
   // setup the architecture state.
+#ifdef V8_TARGET_ARCH_PPC64
+  size_t stack_size = 2 * 1024*1024;  // allocate 2MB for stack
+#else
   size_t stack_size = 1 * 1024*1024;  // allocate 1MB for stack
+#endif
   stack_ = reinterpret_cast<char*>(malloc(stack_size));
   pc_modified_ = false;
   icount_ = 0;
@@ -1171,6 +1175,7 @@ bool Simulator::OverflowFrom(int32_t alu_out,
 }
 
 
+#if !V8_TARGET_ARCH_PPC64
 // Calls into the V8 runtime are based on this very simple interface.
 // Note: To be able to return two values from some calls the code in runtime.cc
 // uses the ObjectPair which is essentially two 32-bit values stuffed into a
@@ -1183,6 +1188,26 @@ typedef int64_t (*SimulatorRuntimeCall)(intptr_t arg0,
                                         intptr_t arg3,
                                         intptr_t arg4,
                                         intptr_t arg5);
+#else
+// For 64-bit, we need to be more explicit.
+typedef intptr_t (*SimulatorRuntimeCall)(intptr_t arg0,
+                                        intptr_t arg1,
+                                        intptr_t arg2,
+                                        intptr_t arg3,
+                                        intptr_t arg4,
+                                        intptr_t arg5);
+struct ObjectPair {
+  intptr_t x;
+  intptr_t y;
+};
+
+typedef struct ObjectPair (*SimulatorRuntimeObjectPairCall)(intptr_t arg0,
+                                                            intptr_t arg1,
+                                                            intptr_t arg2,
+                                                            intptr_t arg3,
+                                                            intptr_t arg4,
+                                                            intptr_t arg5);
+#endif
 
 // These prototypes handle the four types of FP calls.
 typedef int64_t (*SimulatorRuntimeCompareCall)(double darg0, double darg1);
@@ -1267,6 +1292,9 @@ void Simulator::SoftwareInterrupt(Instruction* instr) {
             SimulatorRuntimeCompareCall target =
               reinterpret_cast<SimulatorRuntimeCompareCall>(external);
             iresult = target(dval0, dval1);
+#if V8_TARGET_ARCH_PPC64
+            set_register(r3, iresult);
+#else
             int32_t lo_res = static_cast<int32_t>(iresult);
             int32_t hi_res = static_cast<int32_t>(iresult >> 32);
 #if __BYTE_ORDER == __BIG_ENDIAN
@@ -1275,6 +1303,7 @@ void Simulator::SoftwareInterrupt(Instruction* instr) {
 #else
             set_register(r3, lo_res);
             set_register(r4, hi_res);
+#endif
 #endif
             break;
           }
@@ -1395,10 +1424,9 @@ void Simulator::SoftwareInterrupt(Instruction* instr) {
         target(arg0, arg1, arg2);
       } else {
         // builtin call.
-        ASSERT(redirection->type() == ExternalReference::BUILTIN_CALL);
-        SimulatorRuntimeCall target =
-            reinterpret_cast<SimulatorRuntimeCall>(external);
         if (::v8::internal::FLAG_trace_sim || !stack_aligned) {
+          SimulatorRuntimeCall target =
+            reinterpret_cast<SimulatorRuntimeCall>(external);
           PrintF(
               "Call to host function at %p,\n"
               "\t\t\t\targs %08" V8PRIxPTR ", %08" V8PRIxPTR ", %08" V8PRIxPTR
@@ -1417,13 +1445,11 @@ void Simulator::SoftwareInterrupt(Instruction* instr) {
           PrintF("\n");
         }
         CHECK(stack_aligned);
+#if !V8_TARGET_ARCH_PPC64
+        ASSERT(redirection->type() == ExternalReference::BUILTIN_CALL);
+        SimulatorRuntimeCall target =
+          reinterpret_cast<SimulatorRuntimeCall>(external);
         int64_t result = target(arg0, arg1, arg2, arg3, arg4, arg5);
-#if V8_TARGET_ARCH_PPC64
-        if (::v8::internal::FLAG_trace_sim) {
-          PrintF("Returned %08" V8PRIxPTR "\n", result);
-        }
-        set_register(r3, result);
-#else
         int32_t lo_res = static_cast<int32_t>(result);
         int32_t hi_res = static_cast<int32_t>(result >> 32);
         if (::v8::internal::FLAG_trace_sim) {
@@ -1436,6 +1462,28 @@ void Simulator::SoftwareInterrupt(Instruction* instr) {
         set_register(r3, lo_res);
         set_register(r4, hi_res);
 #endif
+#else
+        if (redirection->type() == ExternalReference::BUILTIN_CALL) {
+          SimulatorRuntimeCall target =
+            reinterpret_cast<SimulatorRuntimeCall>(external);
+          intptr_t result = target(arg0, arg1, arg2, arg3, arg4, arg5);
+          if (::v8::internal::FLAG_trace_sim) {
+            PrintF("Returned %08" V8PRIxPTR "\n", result);
+          }
+          set_register(r3, result);
+        } else {
+          ASSERT(redirection->type() ==
+                 ExternalReference::BUILTIN_OBJECTPAIR_CALL);
+          SimulatorRuntimeObjectPairCall target =
+            reinterpret_cast<SimulatorRuntimeObjectPairCall>(external);
+          struct ObjectPair result = target(arg0, arg1, arg2, arg3, arg4, arg5);
+          if (::v8::internal::FLAG_trace_sim) {
+            PrintF("Returned %08" V8PRIxPTR ", %08" V8PRIxPTR "\n",
+                   result.x, result.y);
+          }
+          set_register(r3, result.x);
+          set_register(r4, result.y);
+        }
 #endif
       }
       set_pc(saved_lr);
@@ -1558,7 +1606,7 @@ void Simulator::SetCR0(intptr_t result, bool setSO) {
 }
 
 
-void Simulator::DecodeBranchConditional(Instruction* instr) {
+void Simulator::ExecuteBranchConditional(Instruction* instr) {
   int bo = instr->Bits(25, 21) << 21;
   int offset = (instr->Bits(15, 2) << 18) >> 16;
   int condition_bit = instr->Bits(20, 16);
@@ -1612,7 +1660,7 @@ void Simulator::DecodeBranchConditional(Instruction* instr) {
 
 
 // Handle execution based on instruction types.
-void Simulator::DecodeExt1(Instruction* instr) {
+void Simulator::ExecuteExt1(Instruction* instr) {
   switch (instr->Bits(10, 1) << 1) {
     case MCRF:
       UNIMPLEMENTED();  // Not used by V8.
@@ -1666,7 +1714,7 @@ void Simulator::DecodeExt1(Instruction* instr) {
 }
 
 
-bool Simulator::DecodeExt2_10bit(Instruction *instr) {
+bool Simulator::ExecuteExt2_10bit(Instruction *instr) {
   bool found = true;
 
   int opcode = instr->Bits(10, 1) << 1;
@@ -1882,7 +1930,7 @@ bool Simulator::DecodeExt2_10bit(Instruction *instr) {
 }
 
 
-bool Simulator::DecodeExt2_9bit_part1(Instruction* instr) {
+bool Simulator::ExecuteExt2_9bit_part1(Instruction* instr) {
   bool found = true;
 
   int opcode = instr->Bits(9, 1) << 1;
@@ -2022,7 +2070,7 @@ bool Simulator::DecodeExt2_9bit_part1(Instruction* instr) {
 
 
 
-void Simulator::DecodeExt2_9bit_part2(Instruction* instr) {
+void Simulator::ExecuteExt2_9bit_part2(Instruction* instr) {
   int opcode = instr->Bits(9, 1) << 1;
   switch (opcode) {
     case CNTLZWX: {
@@ -2427,18 +2475,18 @@ void Simulator::DecodeExt2_9bit_part2(Instruction* instr) {
 }
 
 
-void Simulator::DecodeExt2(Instruction* instr) {
+void Simulator::ExecuteExt2(Instruction* instr) {
     // Check first the 10-1 bit versions
-    if (DecodeExt2_10bit(instr))
+    if (ExecuteExt2_10bit(instr))
         return;
     // Now look at the lesser encodings
-    if (DecodeExt2_9bit_part1(instr))
+    if (ExecuteExt2_9bit_part1(instr))
         return;
-    DecodeExt2_9bit_part2(instr);
+    ExecuteExt2_9bit_part2(instr);
 }
 
 
-void Simulator::DecodeExt4(Instruction* instr) {
+void Simulator::ExecuteExt4(Instruction* instr) {
   switch (instr->Bits(5, 1) << 1) {
     case FDIV: {
       int frt = instr->RTValue();
@@ -2740,7 +2788,7 @@ void Simulator::DecodeExt4(Instruction* instr) {
 }
 
 #if V8_TARGET_ARCH_PPC64
-void Simulator::DecodeExt5(Instruction* instr) {
+void Simulator::ExecuteExt5(Instruction* instr) {
   switch (instr->Bits(4, 2) << 2) {
     case RLDICL: {
       int ra = instr->RAValue();
@@ -2796,6 +2844,42 @@ void Simulator::DecodeExt5(Instruction* instr) {
       }
       return;
     }
+    case RLDIMI: {
+      int ra = instr->RAValue();
+      int rs = instr->RSValue();
+      uintptr_t rs_val = get_register(rs);
+      intptr_t ra_val = get_register(ra);
+      int sh = (instr->Bits(15, 11) | (instr->Bit(1) << 5));
+      int mb = (instr->Bits(10, 6) | (instr->Bit(5) << 5));
+      int me = 63 - sh;
+      // rotate left
+      uintptr_t result = (rs_val << sh) | (rs_val >> (64-sh));
+      uintptr_t mask = 0;
+      if (mb < me+1) {
+        uintptr_t bit = 0x8000000000000000 >> mb;
+        for (; mb <= me; mb++) {
+          mask |= bit;
+          bit >>= 1;
+        }
+      } else if (mb == me+1) {
+         mask = 0xffffffffffffffff;
+      } else {  // mb > me+1
+        uintptr_t bit = 0x8000000000000000 >> (me+1);  // needs to be tested
+        mask = 0xffffffffffffffff;
+        for (;me < mb;me++) {
+          mask ^= bit;
+          bit >>= 1;
+        }
+      }
+      result &= mask;
+      ra_val &= ~mask;
+      result |= ra_val;
+      set_register(ra, result);
+      if (instr->Bit(0)) {  // RC bit set
+        SetCR0(result);
+      }
+      return;
+    }
   }
   switch (instr->Bits(4, 1) << 1) {
     case RLDCL: {
@@ -2823,28 +2907,10 @@ void Simulator::DecodeExt5(Instruction* instr) {
 }
 #endif
 
-// Executes the current instruction.
-void Simulator::InstructionDecode(Instruction* instr) {
-  if (v8::internal::FLAG_check_icache) {
-    CheckICache(isolate_->simulator_i_cache(), instr);
-  }
-  pc_modified_ = false;
-  if (::v8::internal::FLAG_trace_sim) {
-    disasm::NameConverter converter;
-    disasm::Disassembler dasm(converter);
-    // use a reasonably large buffer
-    v8::internal::EmbeddedVector<char, 256> buffer;
-    dasm.InstructionDecode(buffer, reinterpret_cast<byte*>(instr));
-    PrintF("%05d  %08" V8PRIxPTR "  %s\n", icount_,
-           reinterpret_cast<intptr_t>(instr), buffer.start());
-  }
+
+void Simulator::ExecuteGeneric(Instruction* instr) {
   int opcode = instr->OpcodeValue() << 26;
   switch (opcode) {
-    case TWI: {
-      // used for call redirection in simulation mode
-      SoftwareInterrupt(instr);
-      break;
-    }
     case SUBFIC: {
       int rt = instr->RTValue();
       int ra = instr->RAValue();
@@ -2930,7 +2996,7 @@ void Simulator::InstructionDecode(Instruction* instr) {
       break;
     }
     case BCX: {
-      DecodeBranchConditional(instr);
+      ExecuteBranchConditional(instr);
       break;
     }
     case BX: {
@@ -2943,7 +3009,7 @@ void Simulator::InstructionDecode(Instruction* instr) {
       break;
     }
     case EXT1: {
-      DecodeExt1(instr);
+      ExecuteExt1(instr);
       break;
     }
     case RLWIMIX: {
@@ -3081,7 +3147,7 @@ void Simulator::InstructionDecode(Instruction* instr) {
       break;
     }
     case EXT2: {
-      DecodeExt2(instr);
+      ExecuteExt2(instr);
       break;
     }
 
@@ -3252,13 +3318,13 @@ void Simulator::InstructionDecode(Instruction* instr) {
     case EXT3:
       UNIMPLEMENTED();
     case EXT4: {
-      DecodeExt4(instr);
+      ExecuteExt4(instr);
       break;
     }
 
 #if V8_TARGET_ARCH_PPC64
     case EXT5: {
-      DecodeExt5(instr);
+      ExecuteExt5(instr);
       break;
     }
     case LD: {
@@ -3330,6 +3396,35 @@ void Simulator::InstructionDecode(Instruction* instr) {
       break;
     }
   }
+}
+
+
+void Simulator::Trace(Instruction *instr) {
+  disasm::NameConverter converter;
+  disasm::Disassembler dasm(converter);
+  // use a reasonably large buffer
+  v8::internal::EmbeddedVector<char, 256> buffer;
+  dasm.InstructionDecode(buffer, reinterpret_cast<byte*>(instr));
+  PrintF("%05d  %08" V8PRIxPTR "  %s\n", icount_,
+         reinterpret_cast<intptr_t>(instr), buffer.start());
+}
+
+
+// Executes the current instruction.
+void Simulator::ExecuteInstruction(Instruction* instr) {
+  if (v8::internal::FLAG_check_icache) {
+    CheckICache(isolate_->simulator_i_cache(), instr);
+  }
+  pc_modified_ = false;
+  if (::v8::internal::FLAG_trace_sim) {
+    Trace(instr);
+  }
+  int opcode = instr->OpcodeValue() << 26;
+  if (opcode == TWI) {
+    SoftwareInterrupt(instr);
+  } else {
+    ExecuteGeneric(instr);
+  }
   if (!pc_modified_) {
     set_pc(reinterpret_cast<intptr_t>(instr) + Instruction::kInstrSize);
   }
@@ -3347,7 +3442,7 @@ void Simulator::Execute() {
     while (program_counter != end_sim_pc) {
       Instruction* instr = reinterpret_cast<Instruction*>(program_counter);
       icount_++;
-      InstructionDecode(instr);
+      ExecuteInstruction(instr);
       program_counter = get_pc();
     }
   } else {
@@ -3360,7 +3455,7 @@ void Simulator::Execute() {
         PPCDebugger dbg(this);
         dbg.Debug();
       } else {
-        InstructionDecode(instr);
+        ExecuteInstruction(instr);
       }
       program_counter = get_pc();
     }
