@@ -53,6 +53,24 @@
 #include "constants-ppc.h"
 #include "serialize.h"
 
+#define ABI_USES_FUNCTION_DESCRIPTORS \
+  (V8_HOST_ARCH_PPC && \
+    (defined(_AIX) || \
+      (defined(V8_TARGET_ARCH_PPC64) && (__BYTE_ORDER != __LITTLE_ENDIAN))))
+
+#define ABI_PASSES_HANDLES_IN_REGS \
+  (!V8_HOST_ARCH_PPC || defined(_AIX) || defined(V8_TARGET_ARCH_PPC64))
+
+#define ABI_RETURNS_HANDLES_IN_REGS \
+  (!V8_HOST_ARCH_PPC || (__BYTE_ORDER == __LITTLE_ENDIAN))
+
+#define ABI_RETURNS_OBJECT_PAIRS_IN_REGS \
+  (!V8_HOST_ARCH_PPC || (__BYTE_ORDER == __LITTLE_ENDIAN))
+
+#define ABI_TOC_ADDRESSABILITY_VIA_IP \
+  (V8_HOST_ARCH_PPC && defined(V8_TARGET_ARCH_PPC64) && \
+    (__BYTE_ORDER == __LITTLE_ENDIAN))
+
 namespace v8 {
 namespace internal {
 
@@ -419,7 +437,7 @@ class MemOperand BASE_EMBEDDED {
 
   explicit MemOperand(Register ra, Register rb);
 
-  uint32_t offset() const {
+  int32_t offset() const {
     ASSERT(rb_.is(no_reg));
     return offset_;
   }
@@ -901,6 +919,7 @@ class Assembler : public AssemblerBase {
   void rldic(Register dst, Register src, int sh, int mb, RCBit r = LeaveRC);
   void rldicl(Register dst, Register src, int sh, int mb, RCBit r = LeaveRC);
   void rldicr(Register dst, Register src, int sh, int me, RCBit r = LeaveRC);
+  void rldimi(Register dst, Register src, int sh, int mb, RCBit r = LeaveRC);
   void sldi(Register dst, Register src, const Operand& val, RCBit rc = LeaveRC);
   void srdi(Register dst, Register src, const Operand& val, RCBit rc = LeaveRC);
   void clrrdi(Register dst, Register src, const Operand& val,
