@@ -37,6 +37,7 @@
 
 #include "disasm.h"
 #include "assembler.h"
+#include "codegen.h"
 #include "ppc/constants-ppc.h"
 #include "ppc/simulator-ppc.h"
 #include "ppc/frames-ppc.h"
@@ -1331,11 +1332,20 @@ void Simulator::SoftwareInterrupt(Instruction* instr) {
           PrintF("\n");
         }
         CHECK(stack_aligned);
-        v8::Handle<v8::Value> result = target(arg1);
+#if ABI_RETURNS_HANDLES_IN_REGS
+        intptr_t p0 = arg0;
+#else
+        intptr_t p0 = arg1;
+#endif
+        v8::Handle<v8::Value> result = target(p0);
         if (::v8::internal::FLAG_trace_sim) {
           PrintF("Returned %p\n", reinterpret_cast<void *>(*result));
         }
+#if ABI_RETURNS_HANDLES_IN_REGS
+        arg0 = (intptr_t)*result;
+#else
         *(reinterpret_cast<intptr_t*>(arg0)) = (intptr_t) *result;
+#endif
         set_register(r3, arg0);
       } else if (redirection->type() == ExternalReference::DIRECT_GETTER_CALL) {
         // See callers of MacroAssembler::CallApiFunctionAndReturn for
@@ -1353,14 +1363,25 @@ void Simulator::SoftwareInterrupt(Instruction* instr) {
           PrintF("\n");
         }
         CHECK(stack_aligned);
-#if !(defined(_AIX) || defined(V8_TARGET_ARCH_PPC64))
-        arg1 = *(reinterpret_cast<intptr_t *>(arg1));
+#if ABI_RETURNS_HANDLES_IN_REGS
+        intptr_t p0 = arg0;
+        intptr_t p1 = arg1;
+#else
+        intptr_t p0 = arg1;
+        intptr_t p1 = arg2;
 #endif
-        v8::Handle<v8::Value> result = target(arg1, arg2);
+#if !ABI_PASSES_HANDLES_IN_REGS
+        p0 = *(reinterpret_cast<intptr_t *>(p0));
+#endif
+        v8::Handle<v8::Value> result = target(p0, p1);
         if (::v8::internal::FLAG_trace_sim) {
           PrintF("Returned %p\n", reinterpret_cast<void *>(*result));
         }
+#if ABI_RETURNS_HANDLES_IN_REGS
+        arg0 = (intptr_t)*result;
+#else
         *(reinterpret_cast<intptr_t*>(arg0)) = (intptr_t) *result;
+#endif
         set_register(r3, arg0);
       } else {
         // builtin call.
@@ -2708,6 +2729,42 @@ void Simulator::DecodeExt5(Instruction* instr) {
       }
       return;
     }
+    case RLDIMI: {
+      int ra = instr->RAValue();
+      int rs = instr->RSValue();
+      uintptr_t rs_val = get_register(rs);
+      intptr_t ra_val = get_register(ra);
+      int sh = (instr->Bits(15, 11) | (instr->Bit(1) << 5));
+      int mb = (instr->Bits(10, 6) | (instr->Bit(5) << 5));
+      int me = 63 - sh;
+      // rotate left
+      uintptr_t result = (rs_val << sh) | (rs_val >> (64-sh));
+      uintptr_t mask = 0;
+      if (mb < me+1) {
+        uintptr_t bit = 0x8000000000000000 >> mb;
+        for (; mb <= me; mb++) {
+          mask |= bit;
+          bit >>= 1;
+        }
+      } else if (mb == me+1) {
+         mask = 0xffffffffffffffff;
+      } else {  // mb > me+1
+        uintptr_t bit = 0x8000000000000000 >> (me+1);  // needs to be tested
+        mask = 0xffffffffffffffff;
+        for (;me < mb;me++) {
+          mask ^= bit;
+          bit >>= 1;
+        }
+      }
+      result &= mask;
+      ra_val &= ~mask;
+      result |= ra_val;
+      set_register(ra, result);
+      if (instr->Bit(0)) {  // RC bit set
+        SetCR0(result);
+      }
+      return;
+    }
   }
   UNIMPLEMENTED();  // Not used by V8.
 }
@@ -3282,7 +3339,7 @@ intptr_t Simulator::Call(byte* entry, int argument_count, ...) {
   set_register(sp, entry_stack);
 
   // Prepare to execute the code at entry
-#if defined(_AIX) || defined(V8_TARGET_ARCH_PPC64)
+#if ABI_USES_FUNCTION_DESCRIPTORS
   // entry is the function descriptor
   set_pc(*(reinterpret_cast<intptr_t *>(entry)));
 #else
