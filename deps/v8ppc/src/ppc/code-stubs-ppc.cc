@@ -3528,9 +3528,13 @@ void CEntryStub::GenerateCore(MacroAssembler* masm,
   }
 
   // PPC LINUX ABI:
-#if !defined(USE_SIMULATOR)
+  // The #if below used to be !USE_SIMULATOR but needed
+  // to change to support nativesim=true builds
+#if defined(V8_HOST_ARCH_PPC64) || defined(V8_HOST_ARCH_PPC)
   // Call C built-in on native hardware.
 #if defined(V8_TARGET_ARCH_PPC64)
+
+#if !ABI_RETURNS_OBJECT_PAIRS_IN_REGS
   if (result_size_ < 2) {
 #if __BYTE_ORDER == __LITTLE_ENDIAN
     __ mr(r3, r14);
@@ -3555,6 +3559,17 @@ void CEntryStub::GenerateCore(MacroAssembler* masm,
     __ mr(r5, r16);
     isolate_reg = r6;
   }
+#else
+#if __BYTE_ORDER == __LITTLE_ENDIAN
+  __ mr(r3, r14);
+#else
+  // r3 = argc << 32 (for alignment), r4 = argv
+  __ ShiftLeftImm(r3, r14, Operand(32));
+#endif
+  __ mr(r4, r16);
+  isolate_reg = r5;
+#endif
+
 #elif defined(_AIX)  // 32-bit AIX
   // r3 = argc, r4 = argv
   __ mr(r3, r14);
@@ -3583,12 +3598,14 @@ void CEntryStub::GenerateCore(MacroAssembler* masm,
 
   __ mov(isolate_reg, Operand(ExternalReference::isolate_address()));
 
-#if !defined(USE_SIMULATOR) && \
-  (defined(_AIX) || defined(V8_TARGET_ARCH_PPC64))
+#if ABI_USES_FUNCTION_DESCRIPTORS && !defined(USE_SIMULATOR)
   // Native AIX/PPC64 Linux use a function descriptor.
   __ LoadP(ToRegister(2), MemOperand(r15, kPointerSize));  // TOC
   __ LoadP(ip, MemOperand(r15, 0));  // Instruction address
   Register target = ip;
+#elif ABI_TOC_ADDRESSABILITY_VIA_IP
+  Register target = ip;
+  __ Move(ip, r15);
 #else
   Register target = r15;
 #endif
@@ -3625,7 +3642,7 @@ void CEntryStub::GenerateCore(MacroAssembler* masm,
   // check for failure result
   Label failure_returned;
   STATIC_ASSERT(((kFailureTag + 1) & kFailureTagMask) == 0);
-#if defined(V8_TARGET_ARCH_PPC64) && !defined(USE_SIMULATOR)
+#if defined(V8_TARGET_ARCH_PPC64) && !ABI_RETURNS_OBJECT_PAIRS_IN_REGS
   // If return value is on the stack, pop it to registers.
   if (result_size_ > 1) {
     ASSERT_EQ(2, result_size_);
@@ -3706,8 +3723,10 @@ void CEntryStub::Generate(MacroAssembler* masm) {
   int arg_stack_space = 1;
 
   // PPC LINUX ABI:
-#if !defined(USE_SIMULATOR)
-#if defined(V8_TARGET_ARCH_PPC64)
+  // The #if immediately below was !USE_SIMULATOR, but needed
+  // to change to support nativesim=true builds
+#if defined(V8_HOST_ARCH_PPC64) || defined(V8_HOST_ARCH_PPC)
+#if defined(V8_TARGET_ARCH_PPC64) && !ABI_RETURNS_OBJECT_PAIRS_IN_REGS
   // Pass buffer for return value on stack if necessary
   if (result_size_ > 1) {
     ASSERT_EQ(2, result_size_);
@@ -3795,7 +3814,7 @@ void JSEntryStub::GenerateBody(MacroAssembler* masm, bool is_construct) {
   Label invoke, handler_entry, exit;
 
   // Called from C
-#if defined(_AIX) || defined(V8_TARGET_ARCH_PPC64)
+#if ABI_USES_FUNCTION_DESCRIPTORS
   __ function_descriptor();
 #endif
 
@@ -4856,8 +4875,7 @@ void RegExpExecStub::Generate(MacroAssembler* masm) {
   __ addi(code, code, Operand(Code::kHeaderSize - kHeapObjectTag));
 
 
-#if defined(USE_SIMULATOR) && \
-  (defined(_AIX) || defined(V8_TARGET_ARCH_PPC64))
+#if ABI_USES_FUNCTION_DESCRIPTORS && defined(USE_SIMULATOR)
   // Even Simulated AIX/PPC64 Linux uses a function descriptor for the
   // RegExp routine.  Extract the instruction address here since
   // DirectCEntryStub::GenerateCall will not do it for calls out to
@@ -6758,11 +6776,17 @@ void DirectCEntryStub::GenerateCall(MacroAssembler* masm,
 
 void DirectCEntryStub::GenerateCall(MacroAssembler* masm,
                                     Register target) {
-#if !defined(USE_SIMULATOR) && \
-  (defined(_AIX) || defined(V8_TARGET_ARCH_PPC64))
+  Register scratch = r11;
+#if ABI_USES_FUNCTION_DESCRIPTORS && !defined(USE_SIMULATOR)
+  Register dest = ip;
   // Native AIX/PPC64 Linux use a function descriptor.
   __ LoadP(ToRegister(2), MemOperand(target, kPointerSize));  // TOC
-  __ LoadP(target, MemOperand(target, 0));  // Instruction address
+  __ LoadP(ip, MemOperand(target, 0));  // Instruction address
+#elif ABI_TOC_ADDRESSABILITY_VIA_IP
+  Register dest = ip;
+  __ Move(ip, target);
+#else
+  Register dest = target;
 #endif
 
   __ mov(r0, Operand(reinterpret_cast<intptr_t>(GetCode().location()),
@@ -6777,11 +6801,11 @@ void DirectCEntryStub::GenerateCall(MacroAssembler* masm,
   __ bind(&start);
   __ b(&here, SetLK);
   __ bind(&here);
-  __ mflr(ip);
+  __ mflr(scratch);
   __ mtlr(r0);  // from above, so we know where to return
-  __ addi(ip, ip, Operand(6 * Assembler::kInstrSize));
-  __ StoreP(ip, MemOperand(sp, kStackFrameExtraParamSlot * kPointerSize));
-  __ Jump(target);  // Call the C++ function.
+  __ addi(scratch, scratch, Operand(6 * Assembler::kInstrSize));
+  __ StoreP(scratch, MemOperand(sp, kStackFrameExtraParamSlot * kPointerSize));
+  __ Jump(dest);  // Call the C++ function.
   ASSERT_EQ(Assembler::kInstrSize +
             (6 * Assembler::kInstrSize),
             masm->SizeOfCodeGeneratedSince(&start));
@@ -7461,10 +7485,12 @@ void ProfileEntryHookStub::Generate(MacroAssembler* masm) {
   __ mov(ip, Operand(reinterpret_cast<intptr_t>(&entry_hook_)));
   __ LoadP(ip, MemOperand(ip));
 
-#if (defined(_AIX) || defined(V8_TARGET_ARCH_PPC64))
+#if ABI_USES_FUNCTION_DESCRIPTORS
   // Function descriptor
   __ LoadP(ToRegister(2), MemOperand(ip, kPointerSize));
   __ LoadP(ip, MemOperand(ip, 0));
+#elif ABI_TOC_ADDRESSABILITY_VIA_IP
+  // ip already set.
 #endif
 
   // PPC LINUX ABI:
@@ -7481,7 +7507,10 @@ void ProfileEntryHookStub::Generate(MacroAssembler* masm) {
 #endif
   __ Call(ip);
 
-#if !defined(USE_SIMULATOR)
+// For the most part this is true only when USE_SIMULATOR is true
+// The exception is when built with nativesim=true, then we need
+// Real PPC calling support plus simulation
+#if defined(V8_HOST_ARCH_PPC64) || defined(V8_HOST_ARCH_PPC)
   __ addi(sp, sp, Operand(kNumRequiredStackFrameSlots * kPointerSize));
 #endif
 
