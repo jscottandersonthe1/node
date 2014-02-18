@@ -2122,11 +2122,13 @@ void MacroAssembler::CallApiFunctionAndReturn(ExternalReference function,
   addi(r29, r29, Operand(1));
   stw(r29, MemOperand(r26, kLevelOffset));
 
+#if !ABI_RETURNS_HANDLES_IN_REGS
   // PPC LINUX ABI
   // The return value is pointer-sized non-scalar value.
   // Space has already been allocated on the stack which will pass as an
   // implicity first argument.
   addi(r3, sp, Operand((kStackFrameExtraParamSlot + 1) * kPointerSize));
+#endif
 
   // Native call returns to the DirectCEntry stub which redirects to the
   // return address pushed on stack (could have moved after GC).
@@ -2134,8 +2136,10 @@ void MacroAssembler::CallApiFunctionAndReturn(ExternalReference function,
   DirectCEntryStub stub;
   stub.GenerateCall(this, function);
 
+#if !ABI_RETURNS_HANDLES_IN_REGS
   // Retrieve return value from stack buffer
   LoadP(r3, MemOperand(r3));
+#endif
 
   Label promote_scheduled_exception;
   Label delete_allocated_handles;
@@ -3352,15 +3356,20 @@ void MacroAssembler::CallCFunctionHelper(Register function,
   // Just call directly. The function called cannot cause a GC, or
   // allow preemption, so the return address in the link register
   // stays correct.
-#if !defined(USE_SIMULATOR) && \
-  (defined(_AIX) || defined(V8_TARGET_ARCH_PPC64))
+#if ABI_USES_FUNCTION_DESCRIPTORS && !defined(USE_SIMULATOR)
   // AIX uses a function descriptor. When calling C code be aware
   // of this descriptor and pick up values from it
+  Register dest = ip;
   LoadP(ToRegister(2), MemOperand(function, kPointerSize));
-  LoadP(function, MemOperand(function, 0));
+  LoadP(dest, MemOperand(function, 0));
+#elif ABI_TOC_ADDRESSABILITY_VIA_IP
+  Register dest = ip;
+  Move(ip, function);
+#else
+  Register dest = function;
 #endif
 
-  Call(function);
+  Call(dest);
 
   int stack_passed_arguments = CalculateStackPassedWords(
       num_reg_arguments, num_double_arguments);
@@ -3528,7 +3537,7 @@ void MacroAssembler::GetRelocatedValueLocation(Register lis_location,
     lwz(scratch, MemOperand(lis_location, 3*kInstrSize));
   }
   sldi(result, result, Operand(16));
-  rlwimi(result, scratch, 0, 16, 31);
+  rldimi(result, scratch, 0, 48);
 
   lwz(scratch, MemOperand(lis_location, 4*kInstrSize));
   // scratch is now ori.
@@ -3539,7 +3548,7 @@ void MacroAssembler::GetRelocatedValueLocation(Register lis_location,
     lwz(scratch, MemOperand(lis_location, 4*kInstrSize));
   }
   sldi(result, result, Operand(16));
-  rlwimi(result, scratch, 0, 16, 31);
+  rldimi(result, scratch, 0, 48);
 #endif
 }
 
@@ -3553,8 +3562,9 @@ void MacroAssembler::CheckPageFlag(
   ASSERT(cc == ne || cc == eq);
   ClearRightImm(scratch, object, Operand(kPageSizeBits));
   LoadP(scratch, MemOperand(scratch, MemoryChunk::kFlagsOffset));
-  li(r0, Operand(mask));
-  and_(r0, r0, scratch, SetRC);
+
+  And(r0, scratch, Operand(mask), SetRC);
+
   if (cc == ne) {
     bne(condition_met, cr0);
   }
@@ -3962,7 +3972,7 @@ void MacroAssembler::LoadDoubleLiteral(DwVfpRegister result,
 }
 
 void MacroAssembler::Add(Register dst, Register src,
-                         uint32_t value, Register scratch) {
+                         intptr_t value, Register scratch) {
   if (is_int16(value)) {
     addi(dst, src, Operand(value));
   } else {
