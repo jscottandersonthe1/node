@@ -202,8 +202,17 @@
             'ldflags!': [ '-pthread' ],
           }],
           [ 'OS=="aix"', {
+            # AIX is missing /usr/include/endian.h
             'defines': [
-              'V8_INTERPRETED_REGEXP',
+              '__LITTLE_ENDIAN=1234',
+              '__BIG_ENDIAN=4321',
+              '__BYTE_ORDER=__BIG_ENDIAN',
+              '__FLOAT_WORD_ORDER=__BIG_ENDIAN'],
+            'conditions': [
+              [ 'target_arch=="ppc64"', {
+                'cflags': [ '-maix64' ],
+                'ldflags': [ '-maix64' ],
+              }],
             ],
             'ldflags!': [ '-rdynamic' ],
           }],
