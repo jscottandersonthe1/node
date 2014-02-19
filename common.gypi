@@ -63,8 +63,9 @@
           ['OS=="solaris"', {
             # pull in V8's postmortem metadata
             'ldflags': [ '-Wl,-z,allextract' ]
-          }, {
-            # Doesn't work with the Solaris linker.
+          }],
+          ['OS!="solaris" and OS!="aix"', {
+            # Doesn't work with the Solaris/AIX linker.
             'ldflags': [ '-Wl,--gc-sections' ],
           }],
           ['clang == 0 and gcc_version >= 40', {
