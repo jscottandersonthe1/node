@@ -277,7 +277,7 @@ int uv_exepath(char* buffer, size_t* size) {
   if(ps.pr_argv == 0)
     return -1;
 
-  argv = (char **) *((char ***) (int) ps.pr_argv);
+  argv = (char **) *((char ***) (intptr_t) ps.pr_argv);
 
   if(argv == NULL)
     return -1;
