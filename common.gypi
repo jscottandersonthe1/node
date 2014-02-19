@@ -33,6 +33,10 @@
           ['target_arch=="x64"', {
             'msvs_configuration_platform': 'x64',
           }],
+          ['OS=="aix"', {
+            'cflags': [ '-gxcoff' ],
+            'ldflags': [ '-Wl,-bbigtoc' ],
+          }],
         ],
         'msvs_settings': {
           'VCCLCompilerTool': {
@@ -153,7 +157,7 @@
         'cflags': [ '-pthread', ],
         'ldflags': [ '-pthread' ],
       }],
-      [ 'OS in "linux freebsd openbsd solaris android"', {
+      [ 'OS in "linux freebsd openbsd solaris android aix"', {
         'cflags': [ '-Wall', '-Wextra', '-Wno-unused-parameter', ],
         'cflags_cc': [ '-fno-rtti', '-fno-exceptions' ],
         'ldflags': [ '-rdynamic' ],
@@ -184,6 +188,21 @@
             'ldflags': [ '-pthreads' ],
             'cflags!': [ '-pthread' ],
             'ldflags!': [ '-pthread' ],
+          }],
+          [ 'OS=="aix"', {
+            # AIX is missing /usr/include/endian.h
+            'defines': [
+              '__LITTLE_ENDIAN=1234',
+              '__BIG_ENDIAN=4321',
+              '__BYTE_ORDER=__BIG_ENDIAN',
+              '__FLOAT_WORD_ORDER=__BIG_ENDIAN'],
+            'conditions': [
+              [ 'target_arch=="ppc64"', {
+                'cflags': [ '-maix64' ],
+                'ldflags': [ '-maix64' ],
+              }],
+            ],
+            'ldflags!': [ '-rdynamic' ],
           }],
         ],
       }],
