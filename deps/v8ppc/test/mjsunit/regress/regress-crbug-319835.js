@@ -1,4 +1,4 @@
-// Copyright 2011 the V8 project authors. All rights reserved.
+// Copyright 2013 the V8 project authors. All rights reserved.
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions are
 // met:
@@ -25,41 +25,27 @@
 // (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-// Extra POSIX/ANSI routines for Win32 when using Visual Studio C++. Please
-// refer to The Open Group Base Specification for specification of the correct
-// semantics for these functions.
-// (http://www.opengroup.org/onlinepubs/000095399/)
+// Flags: --allow-natives-syntax
 
-#ifndef V8_WIN32_MATH_H_
-#define V8_WIN32_MATH_H_
+try {} catch(e) {}  // No need to optimize the top level.
 
-#ifndef _MSC_VER
-#error Wrong environment, expected MSVC.
-#endif  // _MSC_VER
+var size = 0x20000;
+var a = new Float64Array(size);
+var training = new Float64Array(10);
+function store(a, index) {
+  var offset = 0x20000000;
+  for (var i = 0; i < 1; i++) {
+    a[index + offset] = 0xcc;
+  }
+}
 
-// MSVC 2013+ provides implementations of all standard math functions.
-#if (_MSC_VER < 1800)
-enum {
-  FP_NAN,
-  FP_INFINITE,
-  FP_ZERO,
-  FP_SUBNORMAL,
-  FP_NORMAL
-};
+store(training, -0x20000000);
+store(training, -0x20000000 + 1);
+store(training, -0x20000000);
+store(training, -0x20000000 + 1);
+%OptimizeFunctionOnNextCall(store);
 
-namespace v8 {
-
-int isfinite(double x);
-
-}  // namespace v8
-
-int isnan(double x);
-int isinf(double x);
-int isless(double x, double y);
-int isgreater(double x, double y);
-int fpclassify(double x);
-int signbit(double x);
-
-#endif  // _MSC_VER < 1800
-
-#endif  // V8_WIN32_MATH_H_
+// Segfault maybe?
+for (var i = -0x20000000; i < -0x20000000 + size; i++) {
+  store(a, i);
+}
