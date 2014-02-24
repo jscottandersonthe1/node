@@ -46,14 +46,6 @@
 #include <sys/proc.h>
 #include <sys/procfs.h>
 
-#define reqevents events
-#define rtnevents revents
-#include <sys/poll.h>
-#undef reqevents
-#undef rtnevents
-#undef events
-#undef revents
-
 #include <sys/pollset.h>
 
 int uv__platform_loop_init(uv_loop_t* loop, int default_loop) {
@@ -178,10 +170,18 @@ void uv__io_poll(uv_loop_t* loop, int timeout) {
 
     nevents = 0;
 
+    assert(loop->watchers != NULL);
+    loop->watchers[loop->nwatchers] = (void*) events;
+    loop->watchers[loop->nwatchers + 1] = (void*) (uintptr_t) nfds;
+
     for (i = 0; i < nfds; i++) {
       pe = events + i;
       pc.cmd = PS_DELETE;
       pc.fd = pe->fd;
+
+      /* Skip invalidated events, see uv__platform_invalidate_fd */
+      if (pc.fd == -1)
+        continue;
 
       assert(pc.fd >= 0);
       assert((unsigned) pc.fd < loop->nwatchers);
@@ -201,6 +201,9 @@ void uv__io_poll(uv_loop_t* loop, int timeout) {
       w->cb(loop, w, pe->revents);
       nevents++;
     }
+
+    loop->watchers[loop->nwatchers] = NULL;
+    loop->watchers[loop->nwatchers + 1] = NULL;
 
     if (nevents != 0) {
       if (nfds == ARRAY_SIZE(events) && --count != 0) {
@@ -710,13 +713,13 @@ void uv_free_interface_addresses(uv_interface_address_t* addresses,
 }
 
 void uv__platform_invalidate_fd(uv_loop_t* loop, int fd) {
-  uv__io_t *events;
+  struct pollfd* events;
   uintptr_t i;
   uintptr_t nfds;
 
   assert(loop->watchers != NULL);
 
-  events = (uv__io_t *) loop->watchers[loop->nwatchers];
+  events = (struct pollfd*) loop->watchers[loop->nwatchers];
   nfds = (uintptr_t) loop->watchers[loop->nwatchers + 1];
   if (events == NULL)
     return;
