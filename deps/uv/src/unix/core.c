@@ -60,6 +60,10 @@
 # include <sys/wait.h>
 #endif
 
+#ifdef _AIX
+#include <sys/ioctl.h>
+#endif
+
 static void uv__run_pending(uv_loop_t* loop);
 
 static uv_loop_t default_loop_struct;
@@ -432,7 +436,8 @@ skip:
 }
 
 
-#if defined(__linux__) || defined(__FreeBSD__) || defined(__APPLE__)
+#if defined(__linux__) || defined(__FreeBSD__) || defined(__APPLE__) || \
+    defined(_AIX)
 
 int uv__nonblock(int fd, int set) {
   int r;
