@@ -24,7 +24,8 @@
 
 // Windows will always be little endian (including ARM), so we just need to
 // worry about gcc.
-#if defined(__ARMEB__) || __BYTE_ORDER == __BIG_ENDIAN
+#if defined(__ARMEB__) || \
+  (defined(__BYTE_ORDER) && defined(__BIG_ENDIAN) && __BYTE_ORDER == __BIG_ENDIAN)
 #define V8_TYPED_ARRAY_BIG_ENDIAN 1
 #else
 #define V8_TYPED_ARRAY_LITTLE_ENDIAN 1
