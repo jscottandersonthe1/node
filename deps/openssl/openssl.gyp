@@ -662,7 +662,7 @@
         ['exclude', 'store/.*$']
       ],
       'conditions': [
-        [ 'host_arch=="ppc"', {
+        [ 'node_byteorder=="big"', {
            # Define Big Endian
            'defines': ['B_ENDIAN']
         }, {

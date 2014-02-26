@@ -480,6 +480,7 @@ def configure_node(o):
   target_arch = options.dest_cpu or host_arch
   o['variables']['host_arch'] = host_arch
   o['variables']['target_arch'] = target_arch
+  o['variables']['node_byteorder'] = sys.byteorder
 
   if target_arch == 'arm':
     configure_arm(o)
