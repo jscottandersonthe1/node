@@ -164,7 +164,7 @@
 
       'conditions': [
         [ 'node_use_openssl=="true"', {
-          'defines': [ 'HAVE_OPENSSL=1' ],
+          'defines': [ 'HAVE_OPENSSL=1','_LINUX_SOURCE_COMPAT' ],
           'sources': [
             'src/node_crypto.cc',
             'src/node_crypto_bio.cc',
