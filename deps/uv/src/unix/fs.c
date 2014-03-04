@@ -217,6 +217,15 @@ skip:
 static ssize_t uv__fs_read(uv_fs_t* req) {
   ssize_t result;
 
+#if defined(_AIX)
+  struct stat buf;
+  if(fstat(req->file, &buf))
+    return -1;
+  if(S_ISDIR(buf.st_mode)) {
+    errno = EISDIR;
+    return -1;
+  }
+#endif /* defined(_AIX) */
   if (req->off < 0)
     result = readv(req->file, (struct iovec*) req->bufs, req->nbufs);
   else {
@@ -665,7 +674,8 @@ static void uv__to_stat(struct stat* src, uv_stat_t* dst) {
   dst->st_birthtim.tv_nsec = src->st_birthtimespec.tv_nsec;
   dst->st_flags = src->st_flags;
   dst->st_gen = src->st_gen;
-#elif defined(_BSD_SOURCE) || defined(_SVID_SOURCE) || defined(_XOPEN_SOURCE)
+#elif !defined(_AIX) && \
+  (defined(_BSD_SOURCE) || defined(_SVID_SOURCE) || defined(_XOPEN_SOURCE))
   dst->st_atim.tv_sec = src->st_atim.tv_sec;
   dst->st_atim.tv_nsec = src->st_atim.tv_nsec;
   dst->st_mtim.tv_sec = src->st_mtim.tv_sec;
