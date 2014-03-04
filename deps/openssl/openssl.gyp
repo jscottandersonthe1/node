@@ -1,4 +1,4 @@
-# Copyright (c) 2012 The Chromium Authors. All rights reserved.
+# Copyright (c) 2013 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
@@ -652,6 +652,13 @@
         ['exclude', 'store/.*$']
       ],
       'conditions': [
+        [ 'node_byteorder=="big"', {
+           # Define Big Endian
+             'defines': ['B_ENDIAN']
+        }, {
+           # Define Little Endian
+           'defines':['L_ENDIAN']
+        }],
         ['target_arch!="ia32" and target_arch!="x64" and target_arch!="arm" or openssl_no_asm!=0', {
           # Disable asm
           'defines': [
@@ -1091,7 +1098,6 @@
     ],
     'defines': [
       # No clue what these are for.
-      'L_ENDIAN',
       'PURIFY',
       '_REENTRANT',
 
