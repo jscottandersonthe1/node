@@ -210,7 +210,7 @@
               '__FLOAT_WORD_ORDER=__BIG_ENDIAN'],
             'conditions': [
               [ 'target_arch=="ppc"', {
-                'ldflags': [ '-Wl,-bmaxdata:0x30000000/dsa' ],
+                'ldflags': [ '-Wl,-bmaxdata:0x60000000/dsa' ],
               }],
               [ 'target_arch=="ppc64"', {
                 'cflags': [ '-maix64' ],
