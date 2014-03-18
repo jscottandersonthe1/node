@@ -734,7 +734,7 @@ int parse_data(char *buf, int err, int *events, uv_fs_event_t* handle) {
   if(sscanf(p, "RC_FROM_EVPROD=%d\nEND_EVENT_DATA", &evp_rc) == 1) {
     int fileIsDirectory = 0; /* NO==0, YES==1, error otherwise*/
 
-    fileIsDirectory = file_is_a_directory(handle->filename);
+    fileIsDirectory = file_is_a_directory(handle->path);
     if(fileIsDirectory == 1) { /* Directory */
       if(evp_rc == AHAFS_MODDIR_UNMOUNT || evp_rc == AHAFS_MODDIR_REMOVE_SELF) {
         /* The directory is no longer available for monitoring */
@@ -802,7 +802,7 @@ static void uv__ahafs_event(uv_loop_t* loop, uv__io_t* event_watch, unsigned int
   /* For directory changes, the name of the files that triggered the change
    * are never absolute pathnames
    */
-  if (file_is_a_directory(handle->filename) == 1) {
+  if (file_is_a_directory(handle->path) == 1) {
     p = handle->dir_filename;
     while(*p != NULL){
       fname[i]= *p;
@@ -811,8 +811,8 @@ static void uv__ahafs_event(uv_loop_t* loop, uv__io_t* event_watch, unsigned int
     }
   } else {
     /* For file changes, figure out whether filename is absolute or not */
-    if(handle->filename[0] == '/') {
-      p = strrchr(handle->filename, '/');
+    if(handle->path[0] == '/') {
+      p = strrchr(handle->path, '/');
       p++;
 
       while(*p != NULL) {
@@ -895,7 +895,7 @@ int uv_fs_event_start(uv_fs_event_t* handle,
   /* Setup/Initialize all the libuv routines */
   uv__handle_start(handle); /* FIXME shouldn't start automatically */
   uv__io_init(&handle->event_watcher, uv__ahafs_event, fd);
-  handle->filename = strdup(&absolutePath);
+  handle->path = strdup(&absolutePath);
   handle->cb = cb;
 
   uv__io_start(loop, &handle->event_watcher, UV__POLLIN);
@@ -910,14 +910,14 @@ int uv_fs_event_stop(uv_fs_event_t* handle) {
   uv__io_stop(handle->loop, &handle->event_watcher, UV__POLLIN);
   uv__handle_stop(handle);
 
-  fileIsDirectory = file_is_a_directory(handle->filename);
+  fileIsDirectory = file_is_a_directory(handle->path);
   if(fileIsDirectory == 1) {
     free(handle->dir_filename);
     handle->dir_filename = NULL;
   }
 
-  free(handle->filename);
-  handle->filename = NULL;
+  free(handle->path);
+  handle->path = NULL;
   close(handle->event_watcher.fd);
   handle->event_watcher.fd = -1;
 }
