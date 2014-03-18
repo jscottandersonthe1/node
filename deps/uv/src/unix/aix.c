@@ -833,7 +833,7 @@ static void uv__ahafs_event(uv_loop_t* loop, uv__io_t* event_watch, unsigned int
 
 int uv_fs_event_init(uv_loop_t* loop, uv_fs_event_t* handle) {
   uv__handle_init(loop, (uv_handle_t*)handle, UV_FS_EVENT);
-  return 0
+  return 0;
 }
 
 
@@ -898,7 +898,7 @@ int uv_fs_event_start(uv_fs_event_t* handle,
   handle->path = strdup(&absolutePath);
   handle->cb = cb;
 
-  uv__io_start(loop, &handle->event_watcher, UV__POLLIN);
+  uv__io_start(handle->loop, &handle->event_watcher, UV__POLLIN);
 
   return 0;
 }
