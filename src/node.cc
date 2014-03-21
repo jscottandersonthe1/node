@@ -2886,7 +2886,7 @@ static void PrintHelp() {
          "  --no-deprecation     silence deprecation warnings\n"
          "  --trace-deprecation  show stack traces on deprecations\n"
          "  --v8-options         print v8 command line options\n"
-         "  --max-stack-size=val set max v8 stack size (bytes)\n"
+         "  --stack-size=val     set max v8 stack size (bytes)\n"
          "\n"
          "Environment variables:\n"
 #ifdef _WIN32
