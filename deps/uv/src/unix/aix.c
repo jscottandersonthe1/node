@@ -495,7 +495,7 @@ int file_is_a_directory(char* filename) {
   int rc = 0;
 
   if(stat(filename, &statbuf) < 0) {
-    perror("file_is_a_directory - Error stating file");
+    fprintf(stderr, "file_is_a_directory - Error stating file: %s\n", strerror(errno));
     return(errno);
   }
   if(statbuf.st_type == VDIR) {
@@ -522,7 +522,7 @@ int is_ahafs_mounted(void){
   char *obj, *stub;
 
   if((p = (struct vmount *)malloc(siz)) == (struct vmount *)NULL) {
-    perror("malloc");
+    fprintf(stderr, "is_ahafs_mounted - malloc: %s\n", strerror(errno));
     return(-1);
   }
 
@@ -533,7 +533,7 @@ int is_ahafs_mounted(void){
       break;        /* It worked */
     }
     if(rv<0) {
-      perror("mntctl");
+      fprintf(stderr, "is_ahafs_mounted - mntctl: %s\n", strerror(errno));
       free(p);
       return(-1);
     }
@@ -544,7 +544,7 @@ int is_ahafs_mounted(void){
     p = (struct vmount *)malloc(siz);
 
     if(p == (struct vmount *)NULL) {
-      perror("realloc");
+      fprintf(stderr, "is_ahafs_mounted - realloc: %s\n", strerror(errno));
       return(-1);
     }
     i++;
@@ -563,10 +563,32 @@ int is_ahafs_mounted(void){
   }
 
   /* Error Message*/
-  fprintf(stderr, "/aha is required for monitoring filesystem changes");
+  fprintf(stderr, "/aha is required for monitoring filesystem changes\n");
   return(-1);
 }
 
+/* NAME:    _mkdir
+ * PURPOSE: Recursive call to mkdir() to create intermediate folders, if any
+ * RETURNS:
+ *  Return code from mkdir call
+ */
+int _mkdir(const char *dir) {
+  char tmp[256];
+  char *p = NULL;
+  size_t len;
+
+  snprintf(tmp, sizeof(tmp),"%s",dir);
+  len = strlen(tmp);
+  if(tmp[len - 1] == '/')
+    tmp[len - 1] = 0;
+  for(p = tmp + 1; *p; p++)
+    if(*p == '/') {
+      *p = 0;
+      mkdir(tmp, S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
+      *p = '/';
+    }
+  return mkdir(tmp, S_IRWXU | S_IRWXG | S_IROTH | S_IXOTH);
+}
 
 /* NAME:    mk_subdirs
  * PURPOSE: Creates necessary subdirectories in the AIX Event Infrastructure
@@ -577,6 +599,7 @@ int is_ahafs_mounted(void){
 int mk_subdirs(char *filename) {
   char cmd[2048];
   char *p;
+  int rc=0;
 
   /* Strip off the monitor file name */
   p = strrchr(filename, '/');
@@ -585,13 +608,19 @@ int mk_subdirs(char *filename) {
     return(0);
 
   if(file_is_a_directory(filename) == 1) {
-    sprintf(cmd, "/usr/bin/mkdir -p /aha/fs/modDir.monFactory/");
-    strncat(cmd, filename, (p - filename));
+    sprintf(cmd, "/aha/fs/modDir.monFactory");
   } else {
-    sprintf(cmd, "/usr/bin/mkdir -p /aha/fs/modFile.monFactory/");
-    strncat(cmd, filename, (p - filename));
+    sprintf(cmd, "/aha/fs/modFile.monFactory");
   }
-  return(system(cmd));
+
+  strncat(cmd, filename, (p - filename));
+  rc = _mkdir(cmd);
+
+  if(rc == -1 && errno != EEXIST){
+    fprintf(stderr, "mk_subdirs error: %s\n", strerror(errno));
+  }
+
+  return rc;
 }
 
 
@@ -618,12 +647,13 @@ int setup_ahafs(const char* filename, int *fd) {
   }
 
   if((strlen(monFile) + strlen(filename) + 5) > PATH_MAX) {
-    printf(stderr, "Error: Cannot monitor object, path name too long\n");
+    fprintf(stderr, "Error: Cannot monitor object, path name too long\n");
     return(ENAMETOOLONG);
   }
 
   /* Make the necessary subdirectories for the monitor file */
-  if((rc = mk_subdirs(filename)))
+  rc = mk_subdirs(filename);
+  if(rc == -1 && errno != EEXIST)
     return(rc);
 
   strcat(monFile, filename);
@@ -634,7 +664,7 @@ int setup_ahafs(const char* filename, int *fd) {
   /* Open the monitor file, creating it if necessary */
   *fd = open(monFile, O_CREAT|O_RDWR);
   if(*fd < 0) {
-    perror("Error opening monitor file");
+    fprintf(stderr, "setup_ahafs - Error opening monitor file: %s\n", strerror(errno));
     return(*fd);
   }
 
@@ -658,7 +688,7 @@ int setup_ahafs(const char* filename, int *fd) {
 
   rc = write(*fd, monFileWrStr, strlen(monFileWrStr)+1);
   if(rc < 0) {
-    perror("Error writing to monitor file");
+    fprintf(stderr, "setup_ahafs - Error writing to monitor file: %s\n", strerror(errno));
     return(errno);
   }
 
@@ -792,9 +822,9 @@ static void uv__ahafs_event(uv_loop_t* loop, uv__io_t* event_watch, unsigned int
   bytes = pread(event_watch->fd, resultData, RDWR_BUF_SIZE, 0);
 
   if(bytes < 0)
-    perror("Error reading monitor file");
+    fprintf(stderr, "uv__ahafs_event - Error reading monitor file: %s\n", strerror(errno));
   else if(bytes == 0)
-    fprintf(stderr, "Error reading monitor file.  No data to be read\n");
+    fprintf(stderr, "uv__ahafs_event - Error reading monitor file:  No data to be read\n");
   else  /* Parse the data */
     rc = parse_data(resultData, err, &events, handle);
 
@@ -906,6 +936,9 @@ int uv_fs_event_start(uv_fs_event_t* handle,
 int uv_fs_event_stop(uv_fs_event_t* handle) {
   int fileIsDirectory = 0; /* NO==0, YES==1, error otherwise*/
 
+  if (!uv__is_active(handle))
+    return -EINVAL;
+
   uv__io_stop(handle->loop, &handle->event_watcher, UV__POLLIN);
   uv__handle_stop(handle);
 
@@ -919,6 +952,8 @@ int uv_fs_event_stop(uv_fs_event_t* handle) {
   handle->path = NULL;
   close(handle->event_watcher.fd);
   handle->event_watcher.fd = -1;
+
+  return 0;
 }
 
 
