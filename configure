@@ -390,6 +390,7 @@ def host_arch_cc():
     '__i386__'    : 'ia32',
     '__arm__'     : 'arm',
     '__mips__'    : 'mips',
+    '__PPC64__'   : 'ppc64',
     '__PPC__'     : 'ppc',
     '_ARCH_PPC'   : 'ppc',
   }
