@@ -890,21 +890,28 @@ int uv_fs_event_start(uv_fs_event_t* handle,
     sprintf(absolutePath, filename);
     p = strrchr(filename, '/');
     p++;
-
-    while(*p != NULL) {
-      fname[i]= *p;
-      i++;
+  } else {
+    if(filename[0] == '.' && filename[1] == '/') {
+      /* We have a relative pathname, compose the absolute pathname */
+      sprintf(fname, filename);
+      (void) snprintf(cwd, PATH_MAX-1, "/proc/%lu/cwd", (unsigned long) getpid());
+      res = readlink(cwd, absolutePath, sizeof(absolutePath) - 1);
+      if (res < 0)
+        return res;
+      p = strrchr(absolutePath, '/');
+      p++;
+      p++;
+    } else {
+      /* We have a relative pathname, compose the absolute pathname */
+      sprintf(fname, filename);
+      (void) snprintf(cwd, PATH_MAX-1, "/proc/%lu/cwd", (unsigned long) getpid());
+      res = readlink(cwd, absolutePath, sizeof(absolutePath) - 1);
+      if (res < 0)
+        return res;
+      p = strrchr(absolutePath, '/');
       p++;
     }
-  } else {
-    /* We have a relative pathname, compose the absolute pathname */
-    sprintf(fname, filename);
-    (void) snprintf(cwd, PATH_MAX-1, "/proc/%lu/cwd", (unsigned long) getpid());
-    res = readlink(cwd, absolutePath, sizeof(absolutePath) - 1);
-    if (res < 0)
-      return res;
-    p = strrchr(absolutePath, '/');
-    p++;
+    /* Copy to filename buffer */
     while(filename[i] != NULL) {
       *p = filename[i];
       i++;
