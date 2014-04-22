@@ -195,6 +195,10 @@
             'cflags': [ '-m32' ],
             'ldflags': [ '-m32' ],
           }],
+          [ 'target_arch=="s390"', {
+            'cflags': [ '-m31' ],
+            'ldflags': [ '-m31' ],
+          }],
           [ 'OS=="solaris"', {
             'cflags': [ '-pthreads' ],
             'ldflags': [ '-pthreads' ],
