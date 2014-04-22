@@ -409,6 +409,8 @@ def host_arch_cc():
     '__PPC64__'   : 'ppc64',
     '__PPC__'     : 'ppc',
     '_ARCH_PPC'   : 'ppc',
+    '__s390__'    : 's390',
+    '__s390x__'   : 's390x',
   }
 
   rtn = 'ia32' # default
