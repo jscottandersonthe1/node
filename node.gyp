@@ -58,6 +58,8 @@
     ],
   },
 
+  'conditions': [
+    ['OS!="aix"', {
   'targets': [
     {
       'target_name': 'node',
@@ -241,20 +243,13 @@
             'tools/msvs/genfiles/node_perfctr_provider.rc',
           ]
         } ],
-        # Conditionally include v8 or v8ppc or v8z
+        # Conditionally include v8 or v8z
         [ 'node_shared_v8=="false" and target_arch!="ppc" and target_arch!="ppc64" and target_arch!="s390" and target_arch!="s390x"', {
           'sources': [
             'deps/v8/include/v8.h',
             'deps/v8/include/v8-debug.h',
           ],
           'dependencies': [ 'deps/v8/tools/gyp/v8.gyp:v8' ],
-        }],
-        [ 'node_shared_v8=="false" and (target_arch=="ppc" or target_arch=="ppc64")', {
-          'sources': [
-            'deps/v8ppc/include/v8.h',
-            'deps/v8ppc/include/v8-debug.h',
-          ],
-          'dependencies': [ 'deps/v8ppc/tools/gyp/v8.gyp:v8' ],
         }],
         [ 'node_shared_v8=="false" and (target_arch=="s390" or target_arch=="s390x")', {
           'sources': [
@@ -317,11 +312,6 @@
             '-lkvm',
           ],
         }],
-        [ 'OS=="aix"', {
-          'defines': [
-            '_LINUX_SOURCE_COMPAT',
-          ],
-        }],
         [ 'OS=="solaris"', {
           'libraries': [
             '-lkstat',
@@ -336,17 +326,11 @@
             'PLATFORM="sunos"',
           ],
         }],
-        # Conditionally reference v8 or v8ppc
+        # Conditionally reference v8 or v8z
         [
           'OS=="linux freebsd" and node_shared_v8=="false" and target_arch!="ppc" and target_arch!="ppc64" and target_arch!="s390" and target_arch!="s390x"', {
             'ldflags': [
               '-Wl,--whole-archive <(V8_BASE) -Wl,--no-whole-archive',
-            ],
-        }],
-        [
-          'OS=="linux" and node_shared_v8=="false" and (target_arch=="ppc" or target_arch=="ppc64")', {
-            'ldflags': [
-              '-Wl,--whole-archive <(PRODUCT_DIR)/obj.target/deps/v8ppc/tools/gyp/libv8_base.a -Wl,--no-whole-archive',
             ],
         }],
         [
@@ -362,6 +346,279 @@
         },
       },
     },
+  ], # end targets
+  }], # end non-aix section
+  ['OS=="aix"', {
+  'targets': [
+    {
+      'target_name': 'node_base',
+      'type': 'static_library',
+
+      'dependencies': [
+        'node_js2c#host',
+      ],
+
+      'include_dirs': [
+        'src',
+        'tools/msvs/genfiles',
+        'deps/uv/src/ares',
+        '<(SHARED_INTERMEDIATE_DIR)' # for node_natives.h
+      ],
+
+      'sources': [
+        'src/fs_event_wrap.cc',
+        'src/cares_wrap.cc',
+        'src/handle_wrap.cc',
+        'src/node.cc',
+        'src/node_buffer.cc',
+        'src/node_constants.cc',
+        'src/node_extensions.cc',
+        'src/node_file.cc',
+        'src/node_http_parser.cc',
+        'src/node_javascript.cc',
+        'src/node_main.cc',
+        'src/node_os.cc',
+        'src/node_script.cc',
+        'src/node_stat_watcher.cc',
+        'src/node_string.cc',
+        'src/node_zlib.cc',
+        'src/pipe_wrap.cc',
+        'src/signal_wrap.cc',
+        'src/string_bytes.cc',
+        'src/stream_wrap.cc',
+        'src/slab_allocator.cc',
+        'src/tcp_wrap.cc',
+        'src/timer_wrap.cc',
+        'src/tty_wrap.cc',
+        'src/process_wrap.cc',
+        'src/v8_typed_array.cc',
+        'src/udp_wrap.cc',
+        # headers to make for a more pleasant IDE experience
+        'src/handle_wrap.h',
+        'src/node.h',
+        'src/node_buffer.h',
+        'src/node_constants.h',
+        'src/node_crypto.h',
+        'src/node_extensions.h',
+        'src/node_file.h',
+        'src/node_http_parser.h',
+        'src/node_javascript.h',
+        'src/node_os.h',
+        'src/node_root_certs.h',
+        'src/node_script.h',
+        'src/node_string.h',
+        'src/node_version.h',
+        'src/ngx-queue.h',
+        'src/pipe_wrap.h',
+        'src/tty_wrap.h',
+        'src/tcp_wrap.h',
+        'src/udp_wrap.h',
+        'src/req_wrap.h',
+        'src/slab_allocator.h',
+        'src/string_bytes.h',
+        'src/stream_wrap.h',
+        'src/tree.h',
+        'src/v8_typed_array.h',
+        'deps/http_parser/http_parser.h',
+        '<(SHARED_INTERMEDIATE_DIR)/node_natives.h',
+        # javascript files to make for an even more pleasant IDE experience
+        '<@(library_files)',
+        # node.gyp is added to the project by default.
+        'common.gypi',
+      ],
+
+      'defines': [
+        'NODE_WANT_INTERNALS=1',
+        'ARCH="<(target_arch)"',
+        'PLATFORM="<(OS)"',
+        'NODE_TAG="<(node_tag)"',
+      ],
+
+      'conditions': [
+        [ 'node_use_openssl=="true"', {
+          'defines': [ 'HAVE_OPENSSL=1' ],
+          'sources': [ 'src/node_crypto.cc' ],
+          'conditions': [
+            [ 'node_shared_openssl=="false"', {
+              'dependencies': [
+                './deps/openssl/openssl.gyp:openssl',
+
+                # For tests
+                './deps/openssl/openssl.gyp:openssl-cli',
+              ],
+              # Do not let unused OpenSSL symbols to slip away
+              'xcode_settings': {
+                'OTHER_LDFLAGS': [
+                  '-Wl,-force_load,<(PRODUCT_DIR)/libopenssl.a',
+                ],
+              },
+              'conditions': [
+                ['OS in "linux freebsd"', {
+                  'ldflags': [
+                    '-Wl,--whole-archive <(PRODUCT_DIR)/libopenssl.a -Wl,--no-whole-archive',
+                  ],
+                }],
+              ],
+            }]]
+        }, {
+          'defines': [ 'HAVE_OPENSSL=0' ]
+        }],
+        [ 'node_use_dtrace=="true"', {
+          'defines': [ 'HAVE_DTRACE=1' ],
+          'dependencies': [
+            'node_dtrace_header',
+            'specialize_node_d',
+          ],
+          'include_dirs': [ '<(SHARED_INTERMEDIATE_DIR)' ],
+
+          #
+          # DTrace is supported on solaris, mac, and bsd.  There are three
+          # object files associated with DTrace support, but they're not all
+          # used all the time:
+          #
+          #   node_dtrace.o           all configurations
+          #   node_dtrace_ustack.o    not supported on OS X
+          #   node_dtrace_provider.o  All except OS X.  "dtrace -G" is not
+          #                           used on OS X.
+          #
+          # Note that node_dtrace_provider.cc and node_dtrace_ustack.cc do not
+          # actually exist.  They're listed here to trick GYP into linking the
+          # corresponding object files into the final "node" executable.  These
+          # object files are generated by "dtrace -G" using custom actions
+          # below, and the GYP-generated Makefiles will properly build them when
+          # needed.
+          #
+          'sources': [
+            'src/node_dtrace.cc',
+          ],
+          'conditions': [ [
+            'OS!="mac"', {
+              'sources': [
+                'src/node_dtrace_ustack.cc',
+                'src/node_dtrace_provider.cc',
+              ]
+            }
+          ] ]
+        } ],
+        [ 'node_use_systemtap=="true"', {
+          'defines': [ 'HAVE_SYSTEMTAP=1', 'STAP_SDT_V1=1' ],
+          'dependencies': [ 'node_systemtap_header' ],
+          'include_dirs': [ '<(SHARED_INTERMEDIATE_DIR)' ],
+          'sources': [
+            'src/node_dtrace.cc',
+            '<(SHARED_INTERMEDIATE_DIR)/node_systemtap.h',
+          ],
+        } ],
+        [ 'node_use_etw=="true"', {
+          'defines': [ 'HAVE_ETW=1' ],
+          'dependencies': [ 'node_etw' ],
+          'sources': [
+            'src/node_win32_etw_provider.h',
+            'src/node_win32_etw_provider-inl.h',
+            'src/node_win32_etw_provider.cc',
+            'src/node_dtrace.cc',
+            'tools/msvs/genfiles/node_etw_provider.h',
+            'tools/msvs/genfiles/node_etw_provider.rc',
+          ]
+        } ],
+        [ 'node_use_perfctr=="true"', {
+          'defines': [ 'HAVE_PERFCTR=1' ],
+          'dependencies': [ 'node_perfctr' ],
+          'sources': [
+            'src/node_win32_perfctr_provider.h',
+            'src/node_win32_perfctr_provider.cc',
+            'src/node_counters.cc',
+            'src/node_counters.h',
+            'tools/msvs/genfiles/node_perfctr_provider.rc',
+          ]
+        } ],
+        # Conditionally include v8ppc
+        [ 'node_shared_v8=="false" and (target_arch=="ppc" or target_arch=="ppc64")', {
+          'sources': [
+            'deps/v8ppc/include/v8.h',
+            'deps/v8ppc/include/v8-debug.h',
+          ],
+          'dependencies': [ 'deps/v8ppc/tools/gyp/v8.gyp:v8' ],
+        }],
+        [ 'node_shared_zlib=="false"', {
+          'dependencies': [ 'deps/zlib/zlib.gyp:zlib' ],
+        }],
+
+        [ 'node_shared_http_parser=="false"', {
+          'dependencies': [ 'deps/http_parser/http_parser.gyp:http_parser' ],
+        }],
+
+        [ 'node_shared_cares=="false"', {
+          'dependencies': [ 'deps/cares/cares.gyp:cares' ],
+        }],
+
+        [ 'node_shared_libuv=="false"', {
+          'dependencies': [ 'deps/uv/uv.gyp:libuv' ],
+        }],
+
+        [ 'OS=="aix"', {
+          'defines': [
+            '__POSIX__',
+            '_LINUX_SOURCE_COMPAT',
+          ],
+        }],
+      ],
+      'msvs_settings': {
+        'VCLinkerTool': {
+          'SubSystem': 1, # /subsystem:console
+        },
+      },
+    },
+    {
+      'target_name': 'node_exp',
+      'type': 'none',
+      'dependencies': [
+        'node_base',
+      ],
+      'actions': [
+        {
+          'action_name': 'expfile',
+          'inputs': [
+            '<(OBJ_DIR)'
+          ],
+          'outputs': [
+            'node.exp'
+          ],
+          'action': [
+            'sh', 'tools/create_expfile.sh', '<@(_inputs)', '<(PRODUCT_DIR)/<@(_outputs)'
+          ],
+        }
+      ]
+    },
+    {
+      'target_name': 'node',
+      'type': 'executable',
+      'dependencies': ['node_base', 'node_exp'],
+      'sources': [
+        '<@(library_files)',
+        # node.gyp is added to the project by default.
+        'common.gypi',
+      ],
+      'ldflags': ['-Wl,-bE:<(PRODUCT_DIR)/node.exp'],
+      'actions': [
+        {
+          'action_name': 'node_binary_creation',
+          'inputs': ['<@(library_files)'],
+          'outputs': ['nothing'],
+          'action': ['echo', 'Linking final node binary']
+        }
+      ],
+      'msvs_settings': {
+        'VCLinkerTool': {
+          'SubSystem': 1, # /subsystem:console
+        },
+      },
+    },
+  ], # end targets
+  }], # end aix section
+  ], # end conditions block
+
+  'targets': [
     # generate ETW header and resource files
     {
       'target_name': 'node_etw',
