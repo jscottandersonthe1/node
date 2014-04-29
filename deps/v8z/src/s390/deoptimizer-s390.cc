@@ -38,16 +38,20 @@
 namespace v8 {
 namespace internal {
 
-const int Deoptimizer::table_entry_size_ = 20;
+#if V8_TARGET_ARCH_S390X
+const int Deoptimizer::table_entry_size_ = 26;
+#else
+const int Deoptimizer::table_entry_size_ = 24;
+#endif
 
 
 int Deoptimizer::patch_size() {
 #if V8_TARGET_ARCH_S390X
-  const int kCallInstructionSizeInWords = 7;
+  const int kCallInstructionSize = 16;
 #else
-  const int kCallInstructionSizeInWords = 4;
+  const int kCallInstructionSize = 10;
 #endif
-  return kCallInstructionSizeInWords * Assembler::kInstrSize;
+  return kCallInstructionSize;
 }
 
 
@@ -85,10 +89,9 @@ void Deoptimizer::DeoptimizeFunction(JSFunction* function) {
     int call_size_in_bytes =
         MacroAssembler::CallSizeNotPredictableCodeSize(deopt_entry,
                                                        RelocInfo::NONE);
-    int call_size_in_words = call_size_in_bytes / Assembler::kInstrSize;
     ASSERT(call_size_in_bytes % Assembler::kInstrSize == 0);
     ASSERT(call_size_in_bytes <= patch_size());
-    CodePatcher patcher(call_address, call_size_in_words);  // FIXME: 2ND ARG
+    CodePatcher patcher(call_address, call_size_in_bytes);  // FIXME: 2ND ARG
     patcher.masm()->Call(deopt_entry, RelocInfo::NONE);
     ASSERT(prev_call_address == NULL ||
            call_address >= prev_call_address + patch_size());
@@ -126,7 +129,7 @@ static const int32_t kBranchBeforeStackCheck = 0xa7a40009;
 static const int32_t kBranchBeforeInterrupt =  0xa7a40015;
 #else
 static const int32_t kBranchBeforeStackCheck = 0xa7a40006;
-static const int32_t kBranchBeforeInterrupt =  0xa7a4001e;
+static const int32_t kBranchBeforeInterrupt =  0xa7a4000e;
 #endif
 
 
@@ -135,7 +138,6 @@ void Deoptimizer::PatchStackCheckCodeAt(Code* unoptimized_code,
                                         Address pc_after,
                                         Code* check_code,
                                         Code* replacement_code) {
-  const int kInstrSize = Assembler::kInstrSize;
   // There are two 'Stack check' sequences from full-codegen-s390.cc
   // both have similar code - and FLAG_count_based_interrupts will
   // control which we expect to find
@@ -173,44 +175,28 @@ void Deoptimizer::PatchStackCheckCodeAt(Code* unoptimized_code,
   }
 #endif
 
-
-  // @TODO Continue to fix this PPC code into 390.
-
-  // We patch the code to the following form:
-  // 60000000       ori     r0, r0, 0        ;; NOP
-  // 3d80NNNN       lis     r12_p, NNNN        ;; two part load
-  // 618cNNNN       ori     r12_p, r12_p, NNNN   ;; of on stack replace address
-  // 7d8803a6       mtlr    r12_p
-  // 4e800021       blrl
-
 #if V8_TARGET_ARCH_S390X
-  CodePatcher patcher(pc_after - 8 * kInstrSize, 6);  // FIXME: 2ND ARG
+  CodePatcher patcher(pc_after - 18, 16);  // 16 bytes - BRC + IIHF + IILF
 
-  // Assemble the 64 bit value from the five part load and verify
+  // Assemble the 64 bit value from the IIHF and IILF and verify
   // that it is the stack guard code
   uint64_t stack_check_address =
-    (Memory::uint32_at(pc_after - 7 * kInstrSize) & 0xFFFF) << 16;
-  stack_check_address |=
-    (Memory::uint32_at(pc_after - 6 * kInstrSize) & 0xFFFF);
-  stack_check_address <<= 32;
-  stack_check_address |=
-    (Memory::uint32_at(pc_after - 4 * kInstrSize) & 0xFFFF) << 16;
-  stack_check_address |=
-    (Memory::uint32_at(pc_after - 3 * kInstrSize) & 0xFFFF);
+                     (Assembler::instr_at(pc_after - 14) & 0xFFFFFFFF) << 32;
+  stack_check_address |= Assembler::instr_at(pc_after - 8) & 0xFFFFFFFF;
 #else
-  CodePatcher patcher(pc_after - 5 * kInstrSize, 3);  // FIXME: 2ND ARG
+  CodePatcher patcher(pc_after - 12, 10);  // 10 bytes - BRC + IILF
 
-  // Assemble the 32 bit value from the two part load and verify
-  // that it is the stack guard code
+  // Assemble the 32 bit value from IILF and verify that it is the
+  // stack guard code
   uint32_t stack_check_address =
-    (Memory::int32_at(pc_after - 4 * kInstrSize) & 0xFFFF) << 16;
-  stack_check_address |=
-    (Memory::int32_at(pc_after - 3 * kInstrSize) & 0xFFFF);
+                     Assembler::instr_at(pc_after - 8) & 0xFFFFFFFF;
 #endif
+  USE(stack_check_address);
   ASSERT(stack_check_address ==
     reinterpret_cast<uintptr_t>(check_code->entry()));
 
   // Replace conditional jump with NOP.
+  patcher.masm()->nop();   // @TODO Can probably use a 4-byte NOP.
   patcher.masm()->nop();
 
   // Now modify the two part load (or 5 part on 64bit)
@@ -219,10 +205,10 @@ void Deoptimizer::PatchStackCheckCodeAt(Code* unoptimized_code,
 
 #if V8_TARGET_ARCH_S390X
   unoptimized_code->GetHeap()->incremental_marking()->RecordCodeTargetPatch(
-      unoptimized_code, pc_after - 7 * kInstrSize, replacement_code);
+      unoptimized_code, pc_after - 14, replacement_code);
 #else
   unoptimized_code->GetHeap()->incremental_marking()->RecordCodeTargetPatch(
-      unoptimized_code, pc_after - 4 * kInstrSize, replacement_code);
+      unoptimized_code, pc_after - 8, replacement_code);
 #endif
 }
 
@@ -231,8 +217,6 @@ void Deoptimizer::RevertStackCheckCodeAt(Code* unoptimized_code,
                                          Address pc_after,
                                          Code* check_code,
                                          Code* replacement_code) {
-  const int kInstrSize = Assembler::kInstrSize;
-
   // Check we have a branch & link through r12 (ip)
   //   BASR R14, R12
   ASSERT(Assembler::instr_at(pc_after - 2) == 0x0dec);
@@ -250,60 +234,42 @@ void Deoptimizer::RevertStackCheckCodeAt(Code* unoptimized_code,
 
 #if V8_TARGET_ARCH_S390X
   // Replace NOP with conditional jump.
-  CodePatcher patcher(pc_after - 8 * kInstrSize, 6);  // FIXME: 2ND ARG
+  CodePatcher patcher(pc_after - 18, 16);  // 16 bytes - LR + LR + IIHF + IILF
   if (FLAG_count_based_interrupts) {
-      // TODO(john): remove link bit and BF bit
-      patcher.masm()->branchOnCond(ge, +68);  // , BF,
-                // v8::internal::Assembler::encode_crbit(cr7, CR_LT));  // bge
-    ASSERT_EQ(kBranchBeforeInterrupt,
-              Memory::int32_at(pc_after - 8 * kInstrSize));
+    ASSERT(false);  // @TODO +64 offset is definitely wrong!
+    patcher.masm()->brc(ge, Operand(64));          // Insert BRC
+    ASSERT_EQ(kBranchBeforeInterrupt, Assembler::instr_at(pc_after - 18));
   } else {
-      // TODO(john): remove link bit and BF bit
-    patcher.masm()->branchOnCond(ge, +32);  //  , BF,
+    patcher.masm()->brc(ge, Operand(18));  //  , BF,
                 // v8::internal::Assembler::encode_crbit(cr7, CR_LT));  // bge
-    ASSERT_EQ(kBranchBeforeStackCheck,
-              Memory::int32_at(pc_after - 8 * kInstrSize));
+    ASSERT_EQ(kBranchBeforeStackCheck, Assembler::instr_at(pc_after - 18));
   }
 #else
   // Replace NOP with conditional jump.
-  CodePatcher patcher(pc_after - 5 * kInstrSize, 3);  // FIXME: 2ND ARG
+  CodePatcher patcher(pc_after - 12, 10);  // 10 bytes - LR + LR + IILF
   if (FLAG_count_based_interrupts) {
-      // TODO(john): remove link bit and BF bit
-      patcher.masm()->branchOnCond(ge, +36);  // BF,
-                // v8::internal::Assembler::encode_crbit(cr7, CR_LT))  // bge
-    ASSERT_EQ(kBranchBeforeInterrupt,
-              Memory::int32_at(pc_after - 5 * kInstrSize));
+    patcher.masm()->brc(ge, Operand(28));          // Insert BRC
+    ASSERT_EQ(kBranchBeforeInterrupt, Assembler::instr_at(pc_after - 12));
   } else {
-      // TODO(john): remove link bit and BF bit
-    patcher.masm()->branchOnCond(ge, +20);  // BF,
-                // v8::internal::Assembler::encode_crbit(cr7, CR_LT))  // bge
-    ASSERT_EQ(kBranchBeforeStackCheck,
-              Memory::int32_at(pc_after - 5 * kInstrSize));
+    patcher.masm()->brc(ge, Operand(12));
+    ASSERT_EQ(kBranchBeforeStackCheck, Assembler::instr_at(pc_after - 12));
   }
 #endif
 
 #if V8_TARGET_ARCH_S390X
-  // Assemble the 64 bit value from the five part load and verify
+  // Assemble the 64 bit value from the IIHF and IILF and verify
   // that it is the stack guard code
-  uint64_t stack_check_address =
-    (Memory::uint32_at(pc_after - 7 * kInstrSize) & 0xFFFF) << 16;
-  stack_check_address |=
-    (Memory::uint32_at(pc_after - 6 * kInstrSize) & 0xFFFF);
-  stack_check_address <<= 32;
-  stack_check_address |=
-    (Memory::uint32_at(pc_after - 4 * kInstrSize) & 0xFFFF) << 16;
-  stack_check_address |=
-    (Memory::uint32_at(pc_after - 3 * kInstrSize) & 0xFFFF);
+  uint64_t replacement_code_address =
+                     (Assembler::instr_at(pc_after - 14) & 0xFFFFFFFF) << 32;
+  replacement_code_address |= Assembler::instr_at(pc_after - 8) & 0xFFFFFFFF;
 #else
-  // Assemble the 32 bit value from the two part load and verify
-  // that it is the replacement code address
-  // This assumes a FIXED_SEQUENCE for lis/ori
-  uint32_t stack_check_address =
-    (Memory::int32_at(pc_after - 4 * kInstrSize) & 0xFFFF) << 16;
-  stack_check_address |=
-    (Memory::int32_at(pc_after - 3 * kInstrSize) & 0xFFFF);
+  // Assemble the 32 bit value from IILF and verify that it is the
+  // stack guard code
+  uint32_t replacement_code_address =
+                     Assembler::instr_at(pc_after - 8) & 0xFFFFFFFF;
 #endif
-  ASSERT(stack_check_address ==
+  USE(replacement_code_address);
+  ASSERT(replacement_code_address ==
     reinterpret_cast<uintptr_t>(replacement_code->entry()));
 
   // Now modify the two part load (or 5 part on 64bit)
@@ -312,10 +278,10 @@ void Deoptimizer::RevertStackCheckCodeAt(Code* unoptimized_code,
 
 #if V8_TARGET_ARCH_S390X
   check_code->GetHeap()->incremental_marking()->RecordCodeTargetPatch(
-      unoptimized_code, pc_after - 7 * kInstrSize, check_code);
+      unoptimized_code, pc_after - 14, check_code);
 #else
   check_code->GetHeap()->incremental_marking()->RecordCodeTargetPatch(
-      unoptimized_code, pc_after - 4 * kInstrSize, check_code);
+      unoptimized_code, pc_after - 8, check_code);
 #endif
 }
 
@@ -1045,32 +1011,25 @@ void Deoptimizer::EntryGenerator::Generate() {
 
   Isolate* isolate = masm()->isolate();
 
-  // Unlike on ARM we don't save all the registers, just the useful ones.
-  // For the rest, there are gaps on the stack, so the offsets remain the same.
+  // Save all the registers onto the stack
   const int kNumberOfRegisters = Register::kNumRegisters;
 
   RegList restored_regs = kJSCallerSaved | kCalleeSaved;
-  RegList saved_regs = restored_regs | sp.bit();
 
   const int kDoubleRegsSize =
       kDoubleSize * DoubleRegister::kNumAllocatableRegisters;
 
   // Save all FPU registers before messing with them.
-  __ Sub(sp, Operand(kDoubleRegsSize));
+  __ lay(sp, MemOperand(sp, -kDoubleRegsSize));
   for (int i = 0; i < DoubleRegister::kNumAllocatableRegisters; ++i) {
     DoubleRegister fpu_reg = DoubleRegister::FromAllocationIndex(i);
     int offset = i * kDoubleSize;
     __ StoreF(fpu_reg, MemOperand(sp, offset));
   }
 
-  // Push saved_regs (needed to populate FrameDescription::registers_).
-  // Leave gaps for other registers.
-  __ Sub(sp, Operand(kNumberOfRegisters * kPointerSize));
-  for (int16_t i = kNumberOfRegisters - 1; i >= 0; i--) {
-    if ((saved_regs & (1 << i)) != 0) {
-      __ StoreP(ToRegister(i), MemOperand(sp, kPointerSize * i));
-    }
-  }
+  // Push all GPRs onto the stack
+  __ lay(sp, MemOperand(sp, -kNumberOfRegisters * kPointerSize));
+  __ StoreMultipleP(r0, sp, MemOperand(sp));   // Save all 16 registers
 
   const int kSavedRegistersAreaSize =
       (kNumberOfRegisters * kPointerSize) + kDoubleRegsSize;
@@ -1078,24 +1037,24 @@ void Deoptimizer::EntryGenerator::Generate() {
   // Get the bailout id from the stack.
   __ LoadP(r4, MemOperand(sp, kSavedRegistersAreaSize));
 
+  // Cleanse the Return address for 31-bit
+  __ CleanseP(r14);
+
   // Get the address of the location in the code object if possible(r5)(return
   // address for lazy deoptimization) and compute the fp-to-sp delta in
   // register r6.
   if (type() == EAGER) {
     __ LoadImmP(r5, Operand::Zero());
     // Correct one word for bailout id.
-    __ LoadRR(r6, sp);
-    __ AddP(r6, Operand(kSavedRegistersAreaSize + (1 * kPointerSize)));
+    __ la(r6, MemOperand(sp, kSavedRegistersAreaSize + (1 * kPointerSize)));
   } else if (type() == OSR) {
     __ LoadRR(r5, r14);
     // Correct one word for bailout id.
-    __ LoadRR(r6, sp);
-    __ AddP(r6, Operand(kSavedRegistersAreaSize + (1 * kPointerSize)));
+    __ la(r6, MemOperand(sp, kSavedRegistersAreaSize + (1 * kPointerSize)));
   } else {
     __ LoadRR(r5, r14);
     // Correct two words for bailout id and return address.
-    __ LoadRR(r6, sp);
-    __ AddP(r6, Operand(kSavedRegistersAreaSize + (2 * kPointerSize)));
+    __ AddP(r6, Operand(kSavedRegistersAreaSize + (1 * kPointerSize)));
   }
   __ Sub(r6, fp, r6);
 
@@ -1107,7 +1066,10 @@ void Deoptimizer::EntryGenerator::Generate() {
   // r4: bailout id already loaded.
   // r5: code address or 0 already loaded.
   // r6: Fp-to-sp delta.
+  // Parm6: isolate is passed on the stack.
   __ mov(r7, Operand(ExternalReference::isolate_address()));
+  __ StoreP(r7, MemOperand(sp));
+
   // Call Deoptimizer::New().
   {
     AllowExternalCallThatCantCauseGC scope(masm());
@@ -1120,11 +1082,15 @@ void Deoptimizer::EntryGenerator::Generate() {
 
   // Copy core registers into FrameDescription::registers_[kNumRegisters].
   ASSERT(Register::kNumRegisters == kNumberOfRegisters);
+  __ mvc(MemOperand(r3, FrameDescription::registers_offset()), MemOperand(sp),
+         kNumberOfRegisters * kPointerSize);
+  /*
   for (int i = 0; i < kNumberOfRegisters; i++) {
     int offset = (i * kPointerSize) + FrameDescription::registers_offset();
     __ LoadP(r4, MemOperand(sp, i * kPointerSize));
     __ StoreP(r4, MemOperand(r3, offset));
   }
+  */
 
   // Copy VFP registers to
   // double_registers_[DoubleRegister::kNumAllocatableRegisters]
@@ -1139,9 +1105,9 @@ void Deoptimizer::EntryGenerator::Generate() {
   // Remove the bailout id, eventually return address, and the saved registers
   // from the stack.
   if (type() == EAGER || type() == OSR) {
-    __ AddP(sp, Operand(kSavedRegistersAreaSize + (1 * kPointerSize)));
+    __ la(sp, MemOperand(sp, kSavedRegistersAreaSize + (1 * kPointerSize)));
   } else {
-    __ AddP(sp, Operand(kSavedRegistersAreaSize + (2 * kPointerSize)));
+    __ la(sp, MemOperand(sp, kSavedRegistersAreaSize + (2 * kPointerSize)));
   }
 
   // Compute a pointer to the unwinding limit in register r4; that is
@@ -1152,8 +1118,7 @@ void Deoptimizer::EntryGenerator::Generate() {
   // Unwind the stack down to - but not including - the unwinding
   // limit and copy the contents of the activation frame to the input
   // frame description.
-  __ LoadRR(r5, r3);
-  __ AddP(r5, Operand(FrameDescription::frame_content_offset()));
+  __ la(r5, MemOperand(r3, FrameDescription::frame_content_offset()));
   Label pop_loop;
   __ bind(&pop_loop);
   __ pop(r6);
@@ -1241,15 +1206,22 @@ void Deoptimizer::TableEntryGenerator::GeneratePrologue() {
     int start = masm()->pc_offset();
     USE(start);
     if (type() == EAGER) {
+      __ lay(sp, MemOperand(sp, -kPointerSize));
       __ nop();
       __ nop();
+#if V8_TARGET_ARCH_S390X
+      __ nop();    // Should probably make it a 6-byte NOP
+#endif
     } else {
+      __ lay(sp, MemOperand(sp, -2 * kPointerSize));
       // Emulate ia32 like call by pushing return address to stack.
-      __ push(r14);
+      __ StoreP(r14, MemOperand(sp, kPointerSize));
     }
     __ LoadImmP(ip, Operand(i));
-    __ push(ip);
+    __ StoreP(ip, MemOperand(sp));
     __ b(&done);
+    int end = masm()->pc_offset();
+    USE(end);
     ASSERT(masm()->pc_offset() - start == table_entry_size_);
   }
   __ bind(&done);

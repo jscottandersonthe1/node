@@ -3835,6 +3835,27 @@ void JSEntryStub::GenerateBody(MacroAssembler* masm, bool is_construct) {
 #if ABI_USES_FUNCTION_DESCRIPTORS
   __ function_descriptor();
 #endif
+
+  // saving floating point registers
+#if defined(V8_HOST_ARCH_S39064)
+  // 64bit ABI requires f8 to f15 be saved
+  __ lay(sp, MemOperand(sp, -8 * kDoubleSize));
+  __ std(d8, MemOperand(sp));
+  __ std(d9, MemOperand(sp, 1 * kDoubleSize));
+  __ std(d10, MemOperand(sp, 2 * kDoubleSize));
+  __ std(d11, MemOperand(sp, 3 * kDoubleSize));
+  __ std(d12, MemOperand(sp, 4 * kDoubleSize));
+  __ std(d13, MemOperand(sp, 5 * kDoubleSize));
+  __ std(d14, MemOperand(sp, 6 * kDoubleSize));
+  __ std(d15, MemOperand(sp, 7 * kDoubleSize));
+#else
+  // 31bit ABI requires you to store f4 and f6:
+  // http://refspecs.linuxbase.org/ELF/zSeries/lzsabi0_s390.html#AEN417
+  __ lay(sp, MemOperand(sp, -2 * kDoubleSize));
+  __ std(d4, MemOperand(sp));
+  __ std(d6, MemOperand(sp, kDoubleSize));
+#endif
+
   // zLinux ABI
   //    Incoming parameters:
   //          r2: code entry
@@ -3848,9 +3869,7 @@ void JSEntryStub::GenerateBody(MacroAssembler* masm, bool is_construct) {
   __ lay(sp, MemOperand(sp, -10 * kPointerSize));
   __ StoreMultipleP(r6, sp, MemOperand(sp, 0));
 
-  // Floating point regs FPR0 - FRP13 are volatile
-  // FPR14-FPR31 are non-volatile, but sub-calls will save them for us
-  // @TODO Figure out if we need to preserve any S390 FP regs
+
 
 //  int offset_to_argv = kPointerSize * 22; // matches (22*4) above
 //  __ LoadlW(r7, MemOperand(sp, offset_to_argv));
@@ -3988,7 +4007,28 @@ void JSEntryStub::GenerateBody(MacroAssembler* masm, bool is_construct) {
 
   // Reload callee-saved preserved regs, return address reg (r14) and sp
   __ LoadMultipleP(r6, sp, MemOperand(sp, 0));
-  __ lay(sp, MemOperand(sp, 10 * kPointerSize));
+  __ la(sp, MemOperand(sp, 10 * kPointerSize));
+
+  // saving floating point registers
+#if defined(V8_HOST_ARCH_S39064)
+  // 64bit ABI requires f8 to f15 be saved
+  __ ld(d8, MemOperand(sp));
+  __ ld(d9, MemOperand(sp, 1 * kDoubleSize));
+  __ ld(d10, MemOperand(sp, 2 * kDoubleSize));
+  __ ld(d11, MemOperand(sp, 3 * kDoubleSize));
+  __ ld(d12, MemOperand(sp, 4 * kDoubleSize));
+  __ ld(d13, MemOperand(sp, 5 * kDoubleSize));
+  __ ld(d14, MemOperand(sp, 6 * kDoubleSize));
+  __ ld(d15, MemOperand(sp, 7 * kDoubleSize));
+  __ la(sp, MemOperand(sp, 8 * kDoubleSize));
+#else
+  // 31bit ABI requires you to store f4 and f6:
+  // http://refspecs.linuxbase.org/ELF/zSeries/lzsabi0_s390.html#AEN417
+  __ ld(d4, MemOperand(sp));
+  __ ld(d6, MemOperand(sp, kDoubleSize));
+  __ la(sp, MemOperand(sp, 2 * kDoubleSize));
+#endif
+
   __ b(r14);
 }
 
@@ -4019,9 +4059,9 @@ void InstanceofStub::Generate(MacroAssembler* masm) {
   Register scratch3 = no_reg;
 
 #if V8_TARGET_ARCH_S390X
-  const int32_t kDeltaToLoadBoolResult = 9 * Assembler::kInstrSize;
+  const int32_t kDeltaToLoadBoolResult = 28;  // IIHF + IILF + LG + CR + BRCL
 #else
-  const int32_t kDeltaToLoadBoolResult = 5 * Assembler::kInstrSize;
+  const int32_t kDeltaToLoadBoolResult = 18;  // IILF + L + CR + BRCL
 #endif
 
   Label slow, loop, is_instance, is_not_instance, not_js_object;
@@ -4068,6 +4108,7 @@ void InstanceofStub::Generate(MacroAssembler* masm) {
     // The offset was stored in r6 safepoint slot.
     // (See LCodeGen::DoDeferredLInstanceOfKnownGlobal)
     __ LoadFromSafepointRegisterSlot(scratch, r6);
+    __ CleanseP(r14);
     __ LoadRR(inline_site, r14);
     __ Sub(inline_site, inline_site, scratch);
     // Get the map location in scratch and patch it.
@@ -4138,7 +4179,8 @@ void InstanceofStub::Generate(MacroAssembler* masm) {
   __ bne(&slow);
 
   // Null is not instance of anything.
-  __ Cmpi(scratch, Operand(masm->isolate()->factory()->null_value()));
+  __ mov(r0, Operand(masm->isolate()->factory()->null_value()));
+  __ Cmp(scratch, r0);
   __ bne(&object_not_null);
   __ LoadSmiLiteral(r2, Smi::FromInt(1));
   __ Ret(HasArgsInRegisters() ? 0 : 2);
@@ -6819,9 +6861,11 @@ void ICCompareStub::GenerateKnownObjects(MacroAssembler* masm) {
   __ JumpIfSmi(r4, &miss);
   __ LoadP(r4, FieldMemOperand(r2, HeapObject::kMapOffset));
   __ LoadP(r5, FieldMemOperand(r3, HeapObject::kMapOffset));
-  __ Cmpi(r4, Operand(known_map_));
+  __ mov(r0, Operand(known_map_));
+  __ Cmp(r4, r0);
   __ bne(&miss);
-  __ Cmpi(r5, Operand(known_map_));
+  __ mov(r0, Operand(known_map_));
+  __ Cmp(r5, r0);
   __ bne(&miss);
 
   __ Sub(r2, r2, r3);
@@ -6953,7 +6997,8 @@ void StringDictionaryLookupStub::GenerateNegativeLookup(MacroAssembler* masm,
       __ LoadRoot(tmp, Heap::kTheHoleValueRootIndex);
 
       // Stop if found the property.
-      __ Cmpi(entity_name, Operand(Handle<String>(name)));
+      __ mov(r0, Operand(Handle<String>(name)));
+      __ Cmp(entity_name, r0);
       __ beq(miss);
 
       Label the_hole;
@@ -7072,11 +7117,12 @@ void StringDictionaryLookupStub::GeneratePositiveLookup(MacroAssembler* masm,
   }
   StringDictionaryLookupStub stub(POSITIVE_LOOKUP);
   __ CallStub(&stub);
-  __ Cmpi(r2, Operand::Zero());
+  __ LoadRR(r1, r2);
   __ LoadRR(scratch2, r4);
   __ MultiPop(spill_mask);
   __ LoadRR(r14, r0);
 
+  __ Cmpi(r1, Operand::Zero());
   __ bne(done);
   __ beq(miss);
 }
