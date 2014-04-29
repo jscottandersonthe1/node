@@ -2907,13 +2907,15 @@ void Assembler::sll(Register r1, const Operand& opnd) {
 }
 
 void Assembler::sll(Register r1, Register opnd) {
+  ASSERT(!opnd.is(r0));
   rs_form(SLL, r1, r0, opnd, 0);
 }
 
 
 // Shift Left Single Logical (64)
-void Assembler::sllg(Register r1, Register r3, const MemOperand& opnd) {
-  rsy_form(SLLG, r1, r3, opnd.rb(), opnd.offset());
+void Assembler::sllg(Register r1, Register r3, Register opnd) {
+  ASSERT(!opnd.is(r0));
+  rsy_form(SLLG, r1, r3, opnd, 0);
 }
 
 void Assembler::sllg(Register r1, Register r3, const Operand& opnd) {
@@ -2927,6 +2929,7 @@ void Assembler::srl(Register r1, const Operand& opnd) {
 
 // Shift Right Single Logical (32)
 void Assembler::srl(Register r1, Register opnd) {
+  ASSERT(!opnd.is(r0));
   rs_form(SRL, r1, r0, opnd, 0);
 }
 
@@ -2937,8 +2940,9 @@ void Assembler::srlk(Register r1, Register r3, const Operand& opnd) {
 }
 
 // Shift Right Single Logical (64)
-void Assembler::srlg(Register r1, Register r3, const MemOperand& opnd) {
-  rsy_form(SRLG, r1, r3, opnd.rb(), opnd.offset());
+void Assembler::srlg(Register r1, Register r3, Register opnd) {
+  ASSERT(!opnd.is(r0));
+  rsy_form(SRLG, r1, r3, opnd, 0);
 }
 
 void Assembler::srlg(Register r1, Register r3, const Operand& opnd) {
@@ -2951,8 +2955,9 @@ void Assembler::sla(Register r1, const Operand& opnd) {
 }
 
 // Shift Left Single (64)
-void Assembler::slag(Register r1, Register r3, const MemOperand& opnd) {
-  rsy_form(SLAG, r1, r3, opnd.rb(), opnd.offset());
+void Assembler::slag(Register r1, Register r3, Register opnd) {
+  ASSERT(!opnd.is(r0));
+  rsy_form(SLAG, r1, r3, opnd, 0);
 }
 
 void Assembler::slag(Register r1, Register r3, const Operand& opnd) {
@@ -2966,12 +2971,14 @@ void Assembler::sra(Register r1, const Operand& opnd) {
 
 // Shift Right Single (32)
 void Assembler::sra(Register r1, Register opnd) {
+  ASSERT(!opnd.is(r0));
   rs_form(SRA, r1, r0, opnd, 0);
 }
 
 // Shift Right Single (64)
-void Assembler::srag(Register r1, Register r3, const MemOperand& opnd) {
-  rsy_form(SRAG, r1, r3, opnd.rb(), opnd.offset());
+void Assembler::srag(Register r1, Register r3, Register opnd) {
+  ASSERT(!opnd.is(r0));
+  rsy_form(SRAG, r1, r3, opnd, 0);
 }
 
 void Assembler::srag(Register r1, Register r3, const Operand& opnd) {
@@ -3355,7 +3362,7 @@ void Assembler::ld(DoubleRegister r1, const MemOperand& opnd) {
 
 // Load (L)
 void Assembler::ldy(DoubleRegister r1, const MemOperand& opnd) {
-  rx_form(LDY, r1, opnd.rx(), opnd.rb(), opnd.offset());
+  rxy_form(LDY, r1, opnd.rx(), opnd.rb(), opnd.offset());
 }
 
 // Load Register-Register (L)
@@ -3414,7 +3421,7 @@ void Assembler::cdlfbr(Condition m3, Condition m4,
 
 // Convert from Fixed point (S<-32)
 void Assembler::cefbr(DoubleRegister r1, Register r2) {
-  rre_form(CDFBR, Register::from_code(r1.code()), r2);
+  rre_form(CEFBR, Register::from_code(r1.code()), r2);
 }
 
 // Convert to Fixed point (32<-S)
@@ -3565,11 +3572,6 @@ void Assembler::RecordRelocInfo(RelocInfo::Mode rmode, intptr_t data) {
       reloc_info_writer.Write(&rinfo);
     }
   }
-}
-
-
-void Assembler::BlockTrampolinePoolFor(int instructions) {
-  BlockTrampolinePoolBefore(pc_offset() + instructions * kInstrSize);
 }
 
 
