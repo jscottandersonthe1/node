@@ -1142,13 +1142,11 @@ bool Decoder::DecodeFourByte(Instruction* instr) {
       case OILL: Format(instr, "oill\t'r1,'i1"); break;
       case TMLL: Format(instr, "tmll\t'r1,'i1"); break;
       case STM: Format(instr, "stm\t'r1,'r2,'d1('r3)"); break;
-      case SLL: Format(instr, "sll\t'r1,'d1"); break;
-      case SRL: Format(instr, "srl\t'r1,'d1"); break;
-      case SLA: Format(instr, "sla\t'r1,'d1"); break;
-      case SRA: Format(instr, "sra\t'r1,'d1"); break;
-      case SLAG: Format(instr, "slag\t'r1,'r2,'d1('r3)"); break;
-      case SRAG: Format(instr, "srag\t'r1,'r2,'d1('r3)"); break;
       case LM: Format(instr, "lm\t'r1,'r2,'d1('r3)"); break;
+      case SLL: Format(instr, "sll\t'r1,'d1('r3)"); break;
+      case SRL: Format(instr, "srl\t'r1,'d1('r3)"); break;
+      case SLA: Format(instr, "sla\t'r1,'d1('r3)"); break;
+      case SRA: Format(instr, "sra\t'r1,'d1('r3)"); break;
       case AGR: Format(instr, "agr\t'r5,'r6"); break;
       case SGR: Format(instr, "sgr\t'r5,'r6"); break;
       case NGR: Format(instr, "ngr\t'r5,'r6"); break;
@@ -1159,6 +1157,7 @@ bool Decoder::DecodeFourByte(Instruction* instr) {
       case CGR: Format(instr, "cgr\t'r5,'r6"); break;
       case CLGR: Format(instr, "clgr\t'r5,'r6"); break;
       case LBR: Format(instr, "lbr\t'r5,'r6"); break;
+      case LEDBR: Format(instr, "ledbr\t'f5,'f6"); break;
       case LTGR: Format(instr, "ltgr\t'r5,'r6"); break;
       case LGR: Format(instr, "lgr\t'r5,'r6"); break;
       case LGBR: Format(instr, "lgbr\t'r5,'r6"); break;

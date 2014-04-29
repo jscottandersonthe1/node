@@ -303,7 +303,7 @@ void FullCodeGenerator::Generate() {
       __ LoadRoot(ip, Heap::kStackLimitRootIndex);
       __ Cmpl(sp, ip);
       // This is a FIXED_SEQUENCE and must match the other StackCheck code
-      __ b(ge, &ok);
+      __ b(ge, &ok, true);   // Force BRC as this is a FIXED_SEQUENCE
       StackCheckStub stub;
       __ CallStub(&stub);
       __ bind(&ok);
@@ -375,14 +375,14 @@ void FullCodeGenerator::EmitStackCheck(IterationStatement* stmt,
                    Max(1, distance / kBackEdgeDistanceUnit));
     }
     EmitProfilingCounterDecrement(weight);
-    __ b(ge, &ok);
+    __ b(ge, &ok, true);   // Force BRC as this is a FIXED_SEQUENCE
     InterruptStub stub;
     __ CallStub(&stub);
   } else {
     __ LoadRoot(ip, Heap::kStackLimitRootIndex);
     __ Cmpl(sp, ip);
     // This is a FIXED_SEQUENCE and must match the other StackCheck code
-    __ b(ge, &ok);
+    __ b(ge, &ok, true);   // Force BRC as this is a FIXED_SEQUENCE
     StackCheckStub stub;
     __ CallStub(&stub);
   }
@@ -461,7 +461,7 @@ void FullCodeGenerator::EmitReturnSequence() {
       masm_->LoadRR(sp, fp);
       masm_->LoadP(fp, MemOperand(sp));
       masm_->LoadP(r14, MemOperand(sp, kPointerSize));
-      masm_->lay(sp, 
+      masm_->lay(sp,
                  MemOperand(sp, (uint32_t)(sp_delta + (2 * kPointerSize))));
       masm_->Ret();
     }
@@ -3664,7 +3664,7 @@ void FullCodeGenerator::EmitFastAsciiArrayJoin(CallRuntime* expr) {
   // accumulate the sum of their lengths, as a smi-encoded value.
   __ LoadImmP(string_length, Operand::Zero());
   __ LoadRR(element, elements);
-  __ AddP(elements, Operand(FixedArray::kHeaderSize - kHeapObjectTag));
+  __ AddP(element, Operand(FixedArray::kHeaderSize - kHeapObjectTag));
   __ ShiftLeftImm(elements_end, array_length, Operand(kPointerSizeLog2));
   __ AddP(elements_end, element);
   // Loop condition: while (element < elements_end).
@@ -3746,7 +3746,8 @@ void FullCodeGenerator::EmitFastAsciiArrayJoin(CallRuntime* expr) {
 
   // Get first element in the array to free up the elements register to be used
   // for the result.
-  __ AddP(elements, Operand(FixedArray::kHeaderSize - kHeapObjectTag));
+  __ LoadRR(element, elements);
+  __ AddP(element, Operand(FixedArray::kHeaderSize - kHeapObjectTag));
   result = elements;  // End of live range for elements.
   elements = no_reg;
   // Live values in registers:

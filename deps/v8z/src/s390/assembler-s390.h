@@ -90,40 +90,32 @@ namespace internal {
 
 // Core register
 struct Register {
-  static const int kNumRegisters = 32;  // TODO(Alan): for now
-  static const int kNumAllocatableRegisters = 12;  // TODO(Alan): check
-  static const int kSizeInBytes = 4;  // TODO(Alan): check
+  static const int kNumRegisters = 16;
+  static const int kNumAllocatableRegisters = 8;  // r2-r9
+  static const int kSizeInBytes = 4;
 
   static int ToAllocationIndex(Register reg) {
-    int index = reg.code();
+    int index = reg.code() - 2;  // r0-r1 are skipped
     ASSERT(index < kNumAllocatableRegisters);
     return index;
   }
 
   static Register FromAllocationIndex(int index) {
     ASSERT(index >= 0 && index < kNumAllocatableRegisters);
-    return from_code(index);  // r0-r2 are skipped
+    return from_code(index + 2);  // r0-r1 are skipped
   }
 
   static const char* AllocationIndexToString(int index) {
     ASSERT(index >= 0 && index < kNumAllocatableRegisters);
     const char* const names[] = {
-        "gpr0",
-        "gpr1",
-        "gpr2",
-        "gpr3",
-        "gpr4",
-        "gpr5",
-        "gpr6",
-        "gpr7",
-        "gpr8",
-        "gpr9",
-        "gpr10",
-        "gpr11",
-        "gpr12",
-        "gpr13",
-        "gpr14",
-        "gpr15"
+        "r2",
+        "r3",
+        "r4",
+        "r5",
+        "r6",
+        "r7",
+        "r8",
+        "r9"
     };
     return names[index];
   }
@@ -181,6 +173,7 @@ const int kRegister_sp_Code = 15;
 const Register no_reg = { kRegister_no_reg_Code };
 
 const Register r0  = { kRegister_r0_Code };
+// Lithium scratch register - defined in lithium-codegen-s390.h
 const Register r1  = { kRegister_r1_Code };
 const Register r2  = { kRegister_r2_Code };
 const Register r3  = { kRegister_r3_Code };
@@ -192,9 +185,6 @@ const Register r8  = { kRegister_r8_Code };
 const Register r9  = { kRegister_r9_Code };
 // Used as roots register.
 const Register r10 = { kRegister_r10_Code };
-// PPC: Used as lithium codegen scratch register. (Probably need to
-// pick another reg for this on S390) - Change it in
-// lithium-codegen-s390.h
 const Register fp  = { kRegister_fp_Code };
 // IP - Intra procedural register
 const Register ip  = { kRegister_r12_Code };
@@ -203,24 +193,9 @@ const Register r13  = { kRegister_r13_Code };
 const Register r14  = { kRegister_r14_Code };
 const Register sp   = { kRegister_sp_Code };
 
-// PPC register aliases to allow for safer find and replace
-// of registers in stubs.  To be removed once all mapping is
-// completed.
-const Register r0_p  = { kRegister_r0_Code };
-const Register r1_p  = { kRegister_r1_Code };
-const Register r2_p  = { kRegister_r2_Code };
-const Register r3_p  = { kRegister_r3_Code };
-const Register r4_p  = { kRegister_r4_Code };
-const Register r5_p  = { kRegister_r5_Code };
-const Register r6_p  = { kRegister_r6_Code };
-const Register r7_p  = { kRegister_r7_Code };
-const Register r8_p  = { kRegister_r8_Code };
-const Register r9_p  = { kRegister_r9_Code };
-const Register r10_p = { kRegister_r10_Code };
-
 // Double word FP register.
 struct DoubleRegister {
-  static const int kNumRegisters = 32;
+  static const int kNumRegisters = 16;
   static const int kNumVolatileRegisters = 14;     // d0-d13
   static const int kNumAllocatableRegisters = 12;  // d1-d12
 
@@ -234,18 +209,18 @@ struct DoubleRegister {
   static const char* AllocationIndexToString(int index) {
     ASSERT(index >= 0 && index < kNumAllocatableRegisters);
     const char* const names[] = {
-      "d1",
-      "d2",
-      "d3",
-      "d4",
-      "d5",
-      "d6",
-      "d7",
-      "d8",
-      "d9",
-      "d10",
-      "d11",
-      "d12",
+      "f1",
+      "f2",
+      "f3",
+      "f4",
+      "f5",
+      "f6",
+      "f7",
+      "f8",
+      "f9",
+      "f10",
+      "f11",
+      "f12",
     };
     return names[index];
   }
@@ -701,9 +676,10 @@ class Assembler : public AssemblerBase {
       bool is_bound = false);  // jump on condition
 
   // Label version
-  void b(Condition cond, Label* l) {
-    branchOnCond(cond, branch_offset(l, false), l->is_bound());
+  void b(Condition cond, Label* l, bool forceBRC = false) {
+    branchOnCond(cond, branch_offset(l, false), l->is_bound() || forceBRC);
   }
+
   void b(Register r, Label* l) {
     positions_recorder()->WriteRecordedPositions();
     int32_t halfwords = branch_offset(l, false) / 2;
@@ -1683,13 +1659,13 @@ SS2_FORM(zap);
 
   // Shift Instructions (64)
   void sllg(Register r1, Register r3, const Operand& opnd);
-  void sllg(Register r1, Register r3, const MemOperand& opnd);
+  void sllg(Register r1, Register r3, const Register opnd);
   void srlg(Register r1, Register r3, const Operand& opnd);
-  void srlg(Register r1, Register r3, const MemOperand& opnd);
+  void srlg(Register r1, Register r3, const Register opnd);
   void srag(Register r1, Register r3, const Operand& opnd);
-  void srag(Register r1, Register r3, const MemOperand& opnd);
+  void srag(Register r1, Register r3, const Register opnd);
   void slag(Register r1, Register r3, const Operand& opnd);
-  void slag(Register r1, Register r3, const MemOperand& opnd);
+  void slag(Register r1, Register r3, const Register opnd);
 
   // Compare Instructions
   void cr(Register r1, Register r2);
@@ -1871,12 +1847,6 @@ SS2_FORM(zap);
     return pc_offset() - label->pos();
   }
 
-  // Check the number of instructions generated from label to here.
-  // TODO(JOHN): FIX IT
-  int InstructionsGeneratedSince(Label* label) {
-    return SizeOfCodeGeneratedSince(label) / kInstrSize;
-  }
-
   // Class for scoping postponing the trampoline pool generation.
   class BlockTrampolinePoolScope {
    public:
@@ -1964,7 +1934,6 @@ SS2_FORM(zap);
 
   // Postpone the generation of the trampoline pool for the specified number of
   // instructions.
-  void BlockTrampolinePoolFor(int instructions);
   void CheckTrampolinePool();
 
  public:

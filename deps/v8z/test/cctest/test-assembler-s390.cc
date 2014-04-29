@@ -1200,7 +1200,7 @@ TEST(14) {
   __ ahi(r13, Operand(123));
   __ aghi(r13, Operand(123));
   __ stm(r1, r2, MemOperand(r3, r0, 123));
-  __ slag(r1, r2, MemOperand(r0, r3, 123));
+  __ slag(r1, r2, Operand(123));
   __ lay(r1, MemOperand(r2, r3, -123));
   __ a(r13, MemOperand(r1, r2, 123));
   __ ay(r13, MemOperand(r1, r2, 123));
@@ -1238,7 +1238,7 @@ TEST(15) {
 
   Assembler assm(Isolate::Current(), NULL, 0);
 
-#if defined(_AIX) || defined(V8_TARGET_ARCH_S390X)
+#if defined(_AIX)
   __ function_descriptor();
 #endif
 
@@ -1289,7 +1289,7 @@ TEST(16) {
 
   MacroAssembler assm(Isolate::Current(), NULL, 0);
 
-#if defined(_AIX) || defined(V8_TARGET_ARCH_S390X)
+#if defined(_AIX)
   __ function_descriptor();
 #endif
 
@@ -1323,7 +1323,7 @@ TEST(17) {
 
   MacroAssembler assm(Isolate::Current(), NULL, 0);
 
-#if defined(_AIX) || defined(V8_TARGET_ARCH_S390X)
+#if defined(_AIX)
   __ function_descriptor();
 #endif
 
@@ -1362,7 +1362,7 @@ TEST(18) {
 
   MacroAssembler assm(Isolate::Current(), NULL, 0);
 
-#if defined(_AIX) || defined(V8_TARGET_ARCH_S390X)
+#if defined(_AIX)
   __ function_descriptor();
 #endif
 
