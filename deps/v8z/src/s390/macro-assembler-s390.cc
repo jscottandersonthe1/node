@@ -63,21 +63,18 @@ void MacroAssembler::Jump(Register target, Condition cond) {
 
 
 void MacroAssembler::Jump(intptr_t target, RelocInfo::Mode rmode,
-                          Condition cond, CRegister cr) {
+                          Condition cond, CRegister) {
   Label skip;
 
-  if (cond != al) b(NegateCondition(cond), &skip /*, cr*/);
+  if (cond != al)
+    b(NegateCondition(cond), &skip);
 
-  ASSERT(rmode == RelocInfo::CODE_TARGET ||
-         rmode == RelocInfo::RUNTIME_ENTRY);
+  ASSERT(rmode == RelocInfo::CODE_TARGET || rmode == RelocInfo::RUNTIME_ENTRY);
 
-  // Using IP for now, but maybe we should be using scratch
-  // register?
   mov(ip, Operand(target, rmode));
   b(ip);
 
   bind(&skip);
-  //  mov(pc, Operand(target, rmode), LeaveCC, cond);
 }
 
 
@@ -2318,7 +2315,7 @@ void MacroAssembler::ConvertToInt32(Register source,
   // convert
   cfdbr(Condition(5), dest, double_scratch);
   // jump if overflows
-  b(Condition(CC_OF), not_int32);
+  b(Condition(0x1), not_int32);
 }
 
 void MacroAssembler::EmitVFPTruncate(VFPRoundingMode rounding_mode,
@@ -2506,9 +2503,13 @@ void MacroAssembler::EmitECMATruncate(Register result,
   cfdbr(ROUND_TOWARD_0, result, double_input);
   // if condition code 3 is not set, this can be fit into
   // an Int32
-  b(Condition(0xc), &done);
+  // branch either cc == 0, 1 or 2
+  b(Condition(0xe), &done);
 
   // otherwise, do the manual truncation.
+
+  // Allocate 8 bytes on stack as temp for conversion via memory
+  lay(sp, MemOperand(sp, -8));
   StoreF(double_input, MemOperand(sp));
 #if __FLOAT_WORD_ORDER == __LITTLE_ENDIAN
   LoadlW(input_low, MemOperand(sp));
@@ -2517,6 +2518,9 @@ void MacroAssembler::EmitECMATruncate(Register result,
   LoadlW(input_high, MemOperand(sp));
   LoadlW(input_low, MemOperand(sp, 4));
 #endif
+  // Return the stack space
+  la(sp, MemOperand(sp, 8));
+
   EmitOutOfInt32RangeTruncate(result,
                               input_high,
                               input_low,
@@ -2631,7 +2635,7 @@ void MacroAssembler::InvokeBuiltin(Builtins::JavaScript id,
 
   GetBuiltinEntry(r4, id);
   if (flag == CALL_FUNCTION) {
-    call_wrapper.BeforeCall(CallSize(r2_p));
+    call_wrapper.BeforeCall(CallSize(r1));
     SetCallKind(r7, CALL_AS_METHOD);
     Call(r4);
     call_wrapper.AfterCall();
@@ -2964,10 +2968,9 @@ void MacroAssembler::UntagAndJumpIfNotSmi(
     Register dst, Register src, Label* non_smi_case) {
   STATIC_ASSERT(kSmiTag == 0);
   STATIC_ASSERT(kSmiTagSize == 1);
-  // this won't work if src == dst
-  ASSERT(src.code() != dst.code());
-  SmiUntag(dst, src);
   TestBit(src, 0, r0);
+  SmiUntag(dst, src);
+  ltr(r0, r0);
   bne(non_smi_case);
 }
 
@@ -3154,6 +3157,11 @@ void MacroAssembler::CopyBytes(Register src,
   Cmpi(length, Operand::Zero());
   beq(&done);
 
+  // FIXME: in the word_loop, scratch reg is used as a count reg but it's
+  //        get changed in the loop.
+  // TODO(JOHN): Disable word_loop by now, may be optimized in the future
+  b(&byte_loop);
+
   // Check src alignment and length to see whether word_loop is possible
   LoadRR(scratch, src);
   AndPImm(scratch, Operand(kPointerSize - 1));
@@ -3296,7 +3304,7 @@ void MacroAssembler::JumpIfInstanceTypeIsNotSequentialAscii(Register type,
   bne(failure);
 }
 
-static const int kRegisterPassedArguments = 8;
+static const int kRegisterPassedArguments = 5;
 
 
 int MacroAssembler::CalculateStackPassedWords(int num_reg_arguments,
@@ -3306,7 +3314,7 @@ int MacroAssembler::CalculateStackPassedWords(int num_reg_arguments,
       stack_passed_words +=
           2 * (num_double_arguments - DoubleRegister::kNumRegisters);
   }
-  // Up to four simple arguments are passed in registers r0..r2.
+  // Up to five simple arguments are passed in registers r2..r6
   if (num_reg_arguments > kRegisterPassedArguments) {
     stack_passed_words += num_reg_arguments - kRegisterPassedArguments;
   }
@@ -3333,14 +3341,9 @@ void MacroAssembler::PrepareCallCFunction(int num_reg_arguments,
 #endif
     ASSERT(IsPowerOf2(frame_alignment));
     nill(sp, Operand(-frame_alignment));
-#if !defined(USE_SIMULATOR)
-    // On the simulator we pass args on the stack
-    StoreP(scratch, MemOperand(sp));
-#else
-    // On the simulator we pass args on the stack
-    StoreP(scratch,
-           MemOperand(sp, stack_passed_arguments * kPointerSize));
-#endif
+
+    // Save the original stack pointer (pre-alignment) onto the stack
+    StoreP(scratch, MemOperand(sp, stack_passed_arguments * kPointerSize));
   } else {
     Sub(sp, Operand((stack_passed_arguments +
                           kNumRequiredStackFrameSlots) * kPointerSize));
@@ -3435,13 +3438,8 @@ void MacroAssembler::CallCFunctionHelper(Register function,
   int stack_passed_arguments = CalculateStackPassedWords(
       num_reg_arguments, num_double_arguments);
   if (ActivationFrameAlignment() > kPointerSize) {
-#if !defined(USE_SIMULATOR)
-    // On real hardware we follow the ABI
-    LoadP(sp, MemOperand(sp));
-#else
-    // On the simulator we pass args on the stack
+    // Load the original stack pointer (pre-alignment) from the stack
     LoadP(sp, MemOperand(sp, stack_passed_arguments * kPointerSize), r0);
-#endif
   } else {
     AddP(sp, Operand((stack_passed_arguments +
                           kNumRequiredStackFrameSlots) * kPointerSize));
@@ -4341,6 +4339,7 @@ void MacroAssembler::Load(Register dst, const MemOperand& opnd) {
 
 // compare arithmetic
 void MacroAssembler::Cmp(Register dst, const Operand& opnd) {
+  ASSERT(opnd.rmode_ == RelocInfo::NONE);
 #if V8_TARGET_ARCH_S390X
   cgfi(dst, opnd);
 #else
@@ -4765,7 +4764,7 @@ void MacroAssembler::StoreByte(Register src, const MemOperand& mem,
 void MacroAssembler::ShiftLeftImm(Register dst, Register src,
                                   const Operand& val) {
 #if V8_TARGET_ARCH_S390X
-  sllg(dst, src, MemOperand(r0, val.imm_));
+  sllg(dst, src, val);
 #else
   // 32-bit shift clobbers source.  Make a copy if necessary
   if (!dst.is(src))
@@ -4777,7 +4776,7 @@ void MacroAssembler::ShiftLeftImm(Register dst, Register src,
 void MacroAssembler::ShiftLeftP(Register dst, Register src,
                                 Register val) {
 #if V8_TARGET_ARCH_S390X
-  sllg(dst, src, MemOperand(val));
+  sllg(dst, src, val);
 #else
   ASSERT(!dst.is(val));
   if (!dst.is(src))
@@ -4789,7 +4788,7 @@ void MacroAssembler::ShiftLeftP(Register dst, Register src,
 void MacroAssembler::ShiftRightP(Register dst, Register src,
                                  Register val) {
 #if V8_TARGET_ARCH_S390X
-  srlg(dst, src, MemOperand(val));
+  srlg(dst, src, val);
 #else
   ASSERT(!dst.is(val));
   if (!dst.is(src))
@@ -4801,7 +4800,7 @@ void MacroAssembler::ShiftRightP(Register dst, Register src,
 void MacroAssembler::ShiftRightArithP(Register dst, Register src,
                                  Register val) {
 #if V8_TARGET_ARCH_S390X
-  srag(dst, src, MemOperand(val));
+  srag(dst, src, val);
 #else
   ASSERT(!dst.is(val));
   if (!dst.is(src))
@@ -4815,8 +4814,7 @@ void MacroAssembler::ShiftRightArithP(Register dst, Register src,
 void MacroAssembler::ShiftRightImm(Register dst, Register src,
                                   const Operand& val, RCBit) {
 #if V8_TARGET_ARCH_S390X
-  // TODO(JOHN): double check if this is correct
-  srlg(dst, src, MemOperand(r0, val.imm_));
+  srlg(dst, src, val);
 #else
   // 32-bit shift clobbers source.  Make a copy if necessary
   if (!dst.is(src))
@@ -4829,22 +4827,18 @@ void MacroAssembler::ShiftRightImm(Register dst, Register src,
 void MacroAssembler::ShiftRightArithImm(Register dst, Register src,
                                   const int val, RCBit) {
 #if V8_TARGET_ARCH_S390X
-  // TODO(JOHN): double check if this is correct
-  srag(dst, src, MemOperand(r0, val));
+  srag(dst, src, Operand(val));
 #else
   // 32-bit shift clobbers source.  Make a copy if necessary
   if (!dst.is(src))
     lr(dst, src);
-  // TODO(JOHN): double check if this is correct
-  sra(dst, Operand(static_cast<intptr_t>(val)));
+  sra(dst, Operand(val));
 #endif
 }
 
 // Clear right most # of bits
 void MacroAssembler::ClearRightImm(Register dst, Register src,
                                   const Operand& val) {
-  // FIXME: Before I fix here, it was "val.imm_ % kPointerSize"
-  // but I don't know whether the author wants to use 31 or 32.
   int numBitsToClear = val.imm_ % (kPointerSize * 8);
   uint64_t hexMask = ~((1L << numBitsToClear) - 1);
 
