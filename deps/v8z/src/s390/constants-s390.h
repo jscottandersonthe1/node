@@ -140,6 +140,8 @@ inline Condition ReverseCondition(Condition cond) {
     case gt: return lt;
     case ge: return le;
     case le: return ge;
+    case eq: return eq;
+    case ne: return ne;
     default:
       ASSERT(false);
       return cond;
@@ -1010,7 +1012,6 @@ enum OpcodeExt2 {
   LWZUX = 55 << 1,   // load word zero w/ update x-form
   CNTLZDX = 58 << 1,
   ANDCX = 60 << 1,
-  MULHWX = 75 << 1,
   DCBF = 86 << 1,
   LBZX = 87 << 1,    // load byte zero w/ x-form
   NEGX = 104 << 1,
@@ -1034,7 +1035,6 @@ enum OpcodeExt2 {
 */
   STBX = 215 << 1,    // store byte w/ x-form
   MULLD  = 233 << 1,  // Multiply Low Double Word
-  MULLW  = 235 << 1,  // Multiply Low Word
   STBUX = 247 << 1,   // store byte w/ update x-form
   ADDX = 266 << 1,    // Add
   LHZX = 279 << 1,    // load half-word zero w/ x-form
