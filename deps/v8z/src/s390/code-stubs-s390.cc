@@ -1081,8 +1081,8 @@ static void EmitStrictTwoHeapObjectCompare(MacroAssembler* masm,
     STATIC_ASSERT(LAST_TYPE < kNotStringTag + kIsSymbolMask);
     STATIC_ASSERT(kSymbolTag != 0);
     __ AndP(r4, r5);
-    __ LoadRR(r0, r4);
-    __ AndPImm(r0, Operand(kIsSymbolMask));
+    __ mov(r0, Operand(kIsSymbolMask));
+    __ AndP(r0, r4);
     __ bne(&return_not_equal /*, cr0*/);
 }
 
@@ -1124,16 +1124,16 @@ static void EmitCheckForSymbolsOrObjects(MacroAssembler* masm,
   // Ensure that no non-strings have the symbol bit set.
   Label object_test;
   STATIC_ASSERT(kSymbolTag != 0);
-  __ LoadRR(r0, r4);
-  __ AndPImm(r0, Operand(kIsNotStringMask));
+  __ mov(r0, Operand(kIsNotStringMask));
+  __ AndP(r0, r4);
   __ bne(&object_test /*, cr0*/);
-  __ LoadRR(r0, r4);
-  __ AndPImm(r0, Operand(kIsSymbolMask));
+  __ mov(r0, Operand(kIsSymbolMask));
+  __ AndP(r0, r4);
   __ beq(possible_strings /*, cr0*/);
   __ CompareObjectType(lhs, r5, r5, FIRST_NONSTRING_TYPE);
   __ bge(not_both_strings);
-  __ LoadRR(r0, r5);
-  __ AndPImm(r0, Operand(kIsSymbolMask));
+  __ mov(r0, Operand(kIsSymbolMask));
+  __ AndP(r0, r5);
   __ beq(possible_strings /*, cr0*/);
 
   // Both are symbols.  We already checked they weren't the same pointer
@@ -1154,7 +1154,7 @@ static void EmitCheckForSymbolsOrObjects(MacroAssembler* masm,
   __ LoadlB(r5, FieldMemOperand(r5, Map::kBitFieldOffset));
   __ LoadRR(r2, r5);
   __ AndP(r2, r4);
-  __ AndPImm(r2, Operand(1 << Map::kIsUndetectable));
+  __ AndPI(r2, Operand(1 << Map::kIsUndetectable));
   __ XorPImm(r2, Operand(1 << Map::kIsUndetectable));
   __ Ret();
 }
@@ -1287,8 +1287,8 @@ void CompareStub::Generate(MacroAssembler* masm) {
     __ LoadRR(r4, r2);
     __ OrP(r4, r3);
     STATIC_ASSERT(kSmiTagMask < 0x8000);
-    __ LoadRR(r0, r4);
-    __ AndPImm(r0, Operand(kSmiTagMask));
+    __ mov(r0, Operand(kSmiTagMask));
+    __ AndP(r0, r4);
     __ Assert(ne, "CompareStub: unexpected smi operands.", cr0);
     // TODO(JOHN): might be a probelm here b/c cr0 isn't set.
   }
@@ -1468,8 +1468,8 @@ void ToBooleanStub::Generate(MacroAssembler* masm) {
       Label not_undetectable;
       __ LoadlB(ip, FieldMemOperand(map, Map::kBitFieldOffset));
       STATIC_ASSERT((1 << Map::kIsUndetectable) < 0x8000);
-      __ LoadRR(r0, ip);
-      __ AndPImm(r0, Operand(1 << Map::kIsUndetectable));
+      __ mov(r0, Operand(1 << Map::kIsUndetectable));
+      __ AndP(r0, ip);
       __ beq(&not_undetectable /*, cr0*/);
       // Undetectable -> false.
       __ LoadImmP(tos_, Operand(0, RelocInfo::NONE));
@@ -2026,16 +2026,17 @@ void BinaryOpStub::GenerateSmiSmiOperation(MacroAssembler* masm) {
       Label mul_zero, mul_neg_zero;
 #if V8_TARGET_ARCH_S390X
       // Remove tag from both operands.
+      __ SmiUntag(r1, left);         // r1 = r3
       __ SmiUntag(ip, right);
-      __ SmiUntag(r0, left);
       // Do multiplication
-      // scratch1 = product (untagged)
-      // scratch2 = sign-extended higher 32 bits of product.
-      // FIXME:
-      __ Mul(scratch1, r0, ip);
+      __ mr_z(r0, ip);  // r0:r1 = r1 * ip
+
       // Check for overflowing the smi range - no overflow if higher 33 bits of
       // the result are identical.
-      __ TestIfInt32(scratch1, scratch2, ip);
+      __ lr(ip, r1);
+      __ sra(ip, Operand(31));
+      __ cr_z(ip, r0);
+      // TODO(JOHN): The above 3 instr expended from 31-bit TestIfInt32
       __ bne(&not_smi_result);
 #else
       // Remove tag from one of the operands. This way the multiplication result
@@ -2045,18 +2046,16 @@ void BinaryOpStub::GenerateSmiSmiOperation(MacroAssembler* masm) {
       // scratch1 = lower 32 bits of product.
       // scratch2 = higher 32 bits of product.
       __ mr_z(r0, left);  // r0:r1 = r1 * r3
-      // __ mullw(scratch1, left, ip);
-      // __ mulhw(scratch2, left, ip);
       // Check for overflowing the smi range - no overflow if higher 33 bits of
       // the result are identical.
       __ TestIfInt32(r0, scratch2, ip);
       __ bne(&not_smi_result);
 #endif
       // Go slow on zero result to handle -0.
-      __ Cmpi(r1, Operand::Zero());
+      __ chi(r1, Operand::Zero());
       __ beq(&mul_zero);
 #if V8_TARGET_ARCH_S390X
-      __ SmiTag(right, scratch1);
+      __ SmiTag(right, scratch2);
 #else
       __ LoadRR(right, scratch2);
 #endif
@@ -2119,7 +2118,7 @@ void BinaryOpStub::GenerateSmiSmiOperation(MacroAssembler* masm) {
       __ DivP(r0, r9);
 
       // if the result is zero, need to check -0 case
-      __ Cmpi(r0, Operand::Zero());
+      __ chi(r0, Operand::Zero());  // have to use 32-bit comparision
       __ beq(&check_neg_zero);
 
       __ SmiTag(right, r0);
@@ -2616,7 +2615,7 @@ void BinaryOpStub::GenerateInt32Stub(MacroAssembler* masm) {
         __ Sub(sp, Operand(8));
         __ StoreF(d0, MemOperand(sp, 0));
 #if V8_TARGET_ARCH_S390X
-        __ ld(scratch2, MemOperand(sp, 0));
+        __ lg(scratch2, MemOperand(sp, 0));
 #else
 #if __FLOAT_WORD_ORDER == __LITTLE_ENDIAN
         __ LoadlW(scratch2, MemOperand(sp, 4));
@@ -2736,7 +2735,7 @@ void BinaryOpStub::GenerateInt32Stub(MacroAssembler* masm) {
           break;
         }
         case Token::SHL:
-          __ AndPImm(r4, Operand(0x1f));
+          __ AndPI(r4, Operand(0x1f));
           __ LoadRR(scratch1, r4);
           __ ShiftLeftP(r4, r5, scratch1);
           break;
@@ -3015,7 +3014,7 @@ void TranscendentalCacheStub::Generate(MacroAssembler* masm) {
     __ LoadlW(r4, FieldMemOperand(r2, HeapNumber::kMantissaOffset));
   } else {
     // Input is untagged double in d2. Output goes to d2.
-    __ Sub(sp, Operand(8));
+    __ lay(sp, MemOperand(sp, -8));
     __ StoreF(d2, MemOperand(sp, 0));
 #if __FLOAT_WORD_ORDER == __LITTLE_ENDIAN
     __ LoadlW(r4, MemOperand(sp, 4));
@@ -3024,9 +3023,9 @@ void TranscendentalCacheStub::Generate(MacroAssembler* masm) {
     __ LoadlW(r4, MemOperand(sp));
     __ LoadlW(r5, MemOperand(sp, 4));
 #endif
-    __ AddP(sp, Operand(8));
+    __ la(sp, MemOperand(sp, 8));
   }
-    __ bind(&loaded);
+  __ bind(&loaded);
   // r4 = low 32 bits of double value
   // r5 = high 32 bits of double value
   // Compute hash (the shifts are arithmetic):
@@ -3040,7 +3039,7 @@ void TranscendentalCacheStub::Generate(MacroAssembler* masm) {
   __ sra(scratch0, Operand(8));
   __ XorP(r3, scratch0);
   ASSERT(IsPowerOf2(TranscendentalCache::SubCache::kCacheSize));
-  __ AndPImm(r3, Operand(TranscendentalCache::SubCache::kCacheSize - 1));
+  __ AndPI(r3, Operand(TranscendentalCache::SubCache::kCacheSize - 1));
 
   // r4 = low 32 bits of double value.
   // r5 = high 32 bits of double value.
@@ -3052,10 +3051,9 @@ void TranscendentalCacheStub::Generate(MacroAssembler* masm) {
   // cache_entry points to cache array.
   int cache_array_index
       = type_ * sizeof(isolate->transcendental_cache()->caches_[0]);
-  __ LoadP(cache_entry, MemOperand(cache_entry, cache_array_index), r0);
   // r2 points to the cache for the type type_.
   // If NULL, the cache hasn't been initialized yet, so go through runtime.
-  __ Cmpi(cache_entry, Operand(0, RelocInfo::NONE));
+  __ LoadAndTestP(cache_entry, MemOperand(cache_entry, cache_array_index));
   __ beq(&invalid_cache);
 
 #ifdef DEBUG
@@ -3381,8 +3379,8 @@ void MathPowStub::Generate(MacroAssembler* masm) {
 
   Label while_true, no_carry, loop_end;
   __ bind(&while_true);
-  __ LoadRR(scratch2, scratch);
-  __ AndPImm(scratch2, Operand(1));
+  __ mov(scratch2, Operand(1));
+  __ AndP(scratch2, scratch);
   __ beq(&no_carry /*, cr0*/);
   __ mdbr(double_result, double_scratch);
   __ bind(&no_carry);
@@ -3654,7 +3652,7 @@ void CEntryStub::GenerateCore(MacroAssembler* masm,
   // check for failure result
   Label failure_returned;
   STATIC_ASSERT(((kFailureTag + 1) & kFailureTagMask) == 0);
-#if defined(V8_TARGET_ARCH_PPC64) && !ABI_RETURNS_OBJECT_PAIRS_IN_REGS
+#if defined(V8_TARGET_ARCH_S390X) && !ABI_RETURNS_OBJECT_PAIRS_IN_REGS
   // If return value is on the stack, pop it to registers.
   if (result_size_ > 1) {
     ASSERT_EQ(2, result_size_);
@@ -3681,9 +3679,9 @@ void CEntryStub::GenerateCore(MacroAssembler* masm,
   Label retry;
   __ bind(&failure_returned);
   STATIC_ASSERT(Failure::RETRY_AFTER_GC == 0);
-  __ LoadRR(r0, r2);
-  __ AndPImm(r0,
+  __ mov(r0,
           Operand(((1 << kFailureTypeTagSize) - 1) << kFailureTagSize));
+  __ AndP(r0, r2);
   __ beq(&retry /*, cr0*/);
 
   // Special handling of out of memory exceptions.
@@ -4706,8 +4704,8 @@ void RegExpExecStub::Generate(MacroAssembler* masm) {
   __ LoadP(regexp_data, FieldMemOperand(r2, JSRegExp::kDataOffset));
   if (FLAG_debug_code) {
     STATIC_ASSERT(kSmiTagMask == 1);
-    __ LoadRR(r0, regexp_data);
-    __ AndPImm(r0, Operand(kSmiTagMask));
+    __ mov(r0, Operand(kSmiTagMask));
+    __ AndP(r0, regexp_data);
     __ Check(ne, "Unexpected type for RegExp data, FixedArray expected", cr0);
     __ CompareObjectType(regexp_data, r2, r2, FIXED_ARRAY_TYPE);
     __ Check(eq, "Unexpected type for RegExp data, FixedArray expected");
@@ -4790,10 +4788,10 @@ void RegExpExecStub::Generate(MacroAssembler* masm) {
   STATIC_ASSERT((kIsNotStringMask |
                   kStringRepresentationMask |
                   kShortExternalStringMask) == 0x93);
-  __ LoadRR(r3, r2);
-  __ AndPImm(r3, Operand(kIsNotStringMask |
+  __ mov(r3, Operand(kIsNotStringMask |
                           kStringRepresentationMask |
                           kShortExternalStringMask));
+  __ AndP(r3, r2);
   STATIC_ASSERT((kStringTag | kSeqStringTag) == 0);
   __ beq(&seq_string /*, cr0*/);
 
@@ -4819,8 +4817,8 @@ void RegExpExecStub::Generate(MacroAssembler* masm) {
   // Catch non-string subject or short external string.
   STATIC_ASSERT(kNotStringTag != 0 && kShortExternalStringTag !=0);
   STATIC_ASSERT((kNotStringTag | kShortExternalStringTag) < 0xffffu);
-  __ LoadRR(r0, r3);
-  __ AndPImm(r0, Operand(kIsNotStringMask | kShortExternalStringMask));
+  __ mov(r0, Operand(kIsNotStringMask | kShortExternalStringMask));
+  __ AndP(r0, r3);
   __ bne(&runtime /*, cr0*/);
 
   // String is sliced.
@@ -4841,8 +4839,8 @@ void RegExpExecStub::Generate(MacroAssembler* masm) {
   __ LoadlB(r2, FieldMemOperand(r2, Map::kInstanceTypeOffset));
   STATIC_ASSERT(kSeqStringTag == 0);
   STATIC_ASSERT(kStringRepresentationMask == 3);
-  __ LoadRR(r0, r2);
-  __ AndPImm(r0, Operand(kStringRepresentationMask));
+  __ mov(r0, Operand(kStringRepresentationMask));
+  __ AndP(r0, r2);
   __ bne(&external_string /*, cr0*/);
 
   __ bind(&seq_string);
@@ -5094,8 +5092,8 @@ void RegExpExecStub::Generate(MacroAssembler* masm) {
     // Assert that we do not have a cons or slice (indirect strings) here.
     // Sequential strings have already been ruled out.
     STATIC_ASSERT(kIsIndirectStringMask == 1);
-    __ LoadRR(r0, r2);
-    __ AndPImm(r0, Operand(kIsIndirectStringMask));
+    __ mov(r0, Operand(kIsIndirectStringMask));
+    __ AndP(r0, r2);
     __ Assert(eq, "external string expected, but not found", cr0);
   }
   __ LoadP(subject,
@@ -5448,8 +5446,8 @@ void StringCharCodeAtGenerator::GenerateFast(MacroAssembler* masm) {
   __ LoadP(result_, FieldMemOperand(object_, HeapObject::kMapOffset));
   __ LoadlB(result_, FieldMemOperand(result_, Map::kInstanceTypeOffset));
   // If the receiver is not a string trigger the non-string case.
-  __ LoadRR(r0, result_);
-  __ AndPImm(r0, Operand(kIsNotStringMask));
+  __ mov(r0, Operand(kIsNotStringMask));
+  __ AndP(r0, result_);
   __ bne(receiver_not_string_ /*, cr0*/);
 
   // If the index is non-smi trigger the non-smi case.
@@ -5636,8 +5634,8 @@ void StringHelper::GenerateCopyCharactersLong(MacroAssembler* masm,
   if (dest_always_aligned && FLAG_debug_code) {
     // Check that destination is actually word aligned if the flag says
     // that it is.
-    __ LoadRR(r0, dest);
-    __ AndPImm(r0, Operand(kPointerAlignmentMask));
+    __ mov(r0, Operand(kPointerAlignmentMask));
+    __ AndP(r0, dest);
     __ Check(eq, "Destination of copy not aligned.", cr0);
   }
 
@@ -5947,12 +5945,12 @@ void SubStringStub::Generate(MacroAssembler* masm) {
   // If the string is not indirect, it can only be sequential or external.
   STATIC_ASSERT(kIsIndirectStringMask == (kSlicedStringTag & kConsStringTag));
   STATIC_ASSERT(kIsIndirectStringMask != 0);
-  __ LoadRR(r0, r3);
-  __ AndPImm(r0, Operand(kIsIndirectStringMask));
+  __ mov(r0, Operand(kIsIndirectStringMask));
+  __ AndP(r0, r3);
   __ beq(&seq_or_external_string /*, cr0*/);
 
-  __ LoadRR(r0, r3);
-  __ AndPImm(r0, Operand(kSlicedNotConsMask));
+  __ mov(r0, Operand(kSlicedNotConsMask));
+  __ AndP(r0, r3);
   __ bne(&sliced_string /*, cr0*/);
   // Cons string.  Check whether it is flat, then fetch first part.
   __ LoadP(r7, FieldMemOperand(r2, ConsString::kSecondOffset));
@@ -5998,8 +5996,8 @@ void SubStringStub::Generate(MacroAssembler* masm) {
     Label two_byte_slice, set_slice_header;
     STATIC_ASSERT((kStringEncodingMask & kAsciiStringTag) != 0);
     STATIC_ASSERT((kStringEncodingMask & kTwoByteStringTag) == 0);
-    __ LoadRR(r0, r3);
-    __ AndPImm(r0, Operand(kStringEncodingMask));
+    __ mov(r0, Operand(kStringEncodingMask));
+    __ AndP(r0, r3);
     __ beq(&two_byte_slice /*, cr0*/);
     __ AllocateAsciiSlicedString(r2, r4, r8, r9, &runtime);
     __ b(&set_slice_header);
@@ -6021,15 +6019,15 @@ void SubStringStub::Generate(MacroAssembler* masm) {
   Label two_byte_sequential, sequential_string, allocate_result;
   STATIC_ASSERT(kExternalStringTag != 0);
   STATIC_ASSERT(kSeqStringTag == 0);
-  __ LoadRR(r0, r3);
-  __ AndPImm(r0, Operand(kExternalStringTag));
+  __ mov(r0, Operand(kExternalStringTag));
+  __ AndP(r0, r3);
   __ beq(&sequential_string /*, cr0*/);
 
   // Handle external string.
   // Rule out short external strings.
   STATIC_CHECK(kShortExternalStringTag != 0);
-  __ LoadRR(r0, r3);
-  __ AndPImm(r0, Operand(kShortExternalStringTag));
+  __ mov(r0, Operand(kShortExternalStringTag));
+  __ AndP(r0, r3);
   __ bne(&runtime /*, cr0*/);
   __ LoadP(r7, FieldMemOperand(r7, ExternalString::kResourceDataOffset));
   // r7 already points to the first character of underlying string.
@@ -6043,8 +6041,8 @@ void SubStringStub::Generate(MacroAssembler* masm) {
   __ bind(&allocate_result);
   // Sequential acii string.  Allocate the result.
   STATIC_ASSERT((kAsciiStringTag & kStringEncodingMask) != 0);
-  __ LoadRR(r0, r3);
-  __ AndPImm(r0, Operand(kStringEncodingMask));
+  __ mov(r0, Operand(kStringEncodingMask));
+  __ AndP(r0, r3);
   __ beq(&two_byte_sequential /*, cr0*/);
 
   // Allocate and copy the resulting ASCII string.
@@ -6275,11 +6273,11 @@ void StringAddStub::Generate(MacroAssembler* masm) {
     __ LoadlB(r7, FieldMemOperand(r7, Map::kInstanceTypeOffset));
     STATIC_ASSERT(kStringTag == 0);
     // If either is not a string, go to runtime.
-    __ LoadRR(r0, r6);
-    __ AndPImm(r0, Operand(kIsNotStringMask));
+    __ mov(r0, Operand(kIsNotStringMask));
+    __ AndP(r0, r6);
     __ bne(&call_runtime /*, cr0*/);
-    __ LoadRR(r0, r7);
-    __ AndPImm(r0, Operand(kIsNotStringMask));
+    __ mov(r0, Operand(kIsNotStringMask));
+    __ AndP(r0, r7);
     __ bne(&call_runtime /*, cr0*/);
   } else {
     // Here at least one of the arguments is definitely a string.
@@ -6405,11 +6403,11 @@ void StringAddStub::Generate(MacroAssembler* masm) {
   }
   Label non_ascii, allocated, ascii_data;
   STATIC_ASSERT(kTwoByteStringTag == 0);
-  __ LoadRR(r0, r6);
-  __ AndPImm(r0, Operand(kStringEncodingMask));
+  __ mov(r0, Operand(kStringEncodingMask));
+  __ AndP(r0, r6);
   __ beq(&non_ascii /*, cr0*/);
-  __ LoadRR(r0, r7);
-  __ AndPImm(r0, Operand(kStringEncodingMask));
+  __ mov(r0, Operand(kStringEncodingMask));
+  __ AndP(r0, r7);
   __ beq(&non_ascii /*, cr0*/);
 
   // Allocate an ASCII cons string.
@@ -6429,15 +6427,15 @@ void StringAddStub::Generate(MacroAssembler* masm) {
   // to contain only ASCII characters.
   // r6: first instance type.
   // r7: second instance type.
-  __ LoadRR(r0, r6);
-  __ AndPImm(r0, Operand(kAsciiDataHintMask));
+  __ mov(r0, Operand(kAsciiDataHintMask));
+  __ AndP(r0, r6);
   __ bne(&ascii_data /*, cr0*/);
-  __ LoadRR(r0, r7);
-  __ AndPImm(r0, Operand(kAsciiDataHintMask));
+  __ mov(r0, Operand(kAsciiDataHintMask));
+  __ AndP(r0, r7);
   __ bne(&ascii_data /*, cr0*/);
   __ XorP(r6, r7);
   STATIC_ASSERT(kAsciiStringTag != 0 && kAsciiDataHintTag != 0);
-  __ AndPImm(r6, Operand(kAsciiStringTag | kAsciiDataHintTag));
+  __ AndPI(r6, Operand(kAsciiStringTag | kAsciiDataHintTag));
   __ Cmpi(r6, Operand(kAsciiStringTag | kAsciiDataHintTag));
   __ beq(&ascii_data);
 
@@ -6468,14 +6466,14 @@ void StringAddStub::Generate(MacroAssembler* masm) {
   // Check whether both strings have same encoding
   __ LoadRR(r9, r7);
   __ XorP(r9, r6);
-  __ LoadRR(r0, r9);
-  __ AndPImm(r0, Operand(kStringEncodingMask));
+  __ mov(r0, Operand(kStringEncodingMask));
+  __ AndP(r0, r9);
   __ bne(&call_runtime /*, cr0*/);
   // TODO(JOHN): might be a problem here b/c addi didn't set RC
 
   STATIC_ASSERT(kSeqStringTag == 0);
-  __ LoadRR(r0, r6);
-  __ AndPImm(r0, Operand(kStringRepresentationMask));
+  __ mov(r0, Operand(kStringRepresentationMask));
+  __ AndP(r0, r6);
   __ bne(&external_string1 /*, cr0*/);
   STATIC_ASSERT(SeqAsciiString::kHeaderSize == SeqTwoByteString::kHeaderSize);
   __ LoadRR(r9, r2);
@@ -6484,15 +6482,15 @@ void StringAddStub::Generate(MacroAssembler* masm) {
   // External string: rule out short external string and load string resource.
   STATIC_ASSERT(kShortExternalStringTag != 0);
   __ bind(&external_string1);
-  __ LoadRR(r0, r6);
-  __ AndPImm(r0, Operand(kShortExternalStringMask));
+  __ mov(r0, Operand(kShortExternalStringMask));
+  __ AndP(r0, r6);
   __ bne(&call_runtime /*, cr0*/);
   __ LoadP(r9, FieldMemOperand(r2, ExternalString::kResourceDataOffset));
   __ bind(&first_prepared);
 
   STATIC_ASSERT(kSeqStringTag == 0);
-  __ LoadRR(r0, r7);
-  __ AndPImm(r0, Operand(kStringRepresentationMask));
+  __ mov(r0, Operand(kStringRepresentationMask));
+  __ AndP(r0, r7);
   __ bne(&external_string2 /*, cr0*/);
   STATIC_ASSERT(SeqAsciiString::kHeaderSize == SeqTwoByteString::kHeaderSize);
   __ AddP(r3, Operand(SeqAsciiString::kHeaderSize - kHeapObjectTag));
@@ -6500,8 +6498,8 @@ void StringAddStub::Generate(MacroAssembler* masm) {
   // External string: rule out short external string and load string resource.
   STATIC_ASSERT(kShortExternalStringTag != 0);
   __ bind(&external_string2);
-  __ LoadRR(r0, r7);
-  __ AndPImm(r0, Operand(kShortExternalStringMask));
+  __ mov(r0, Operand(kShortExternalStringMask));
+  __ AndP(r0, r7);
   __ bne(&call_runtime /*, cr0*/);
   __ LoadP(r3, FieldMemOperand(r3, ExternalString::kResourceDataOffset));
   __ bind(&second_prepared);
@@ -6514,8 +6512,8 @@ void StringAddStub::Generate(MacroAssembler* masm) {
   // r8: sum of lengths.
   // Both strings have the same encoding.
   STATIC_ASSERT(kTwoByteStringTag == 0);
-  __ LoadRR(r0, r7);
-  __ AndPImm(r0, Operand(kStringEncodingMask));
+  __ mov(r0, Operand(kStringEncodingMask));
+  __ AndP(r0, r7);
   __ beq(&non_ascii_string_add_flat_result /*, cr0*/);
 
   __ AllocateAsciiString(r2, r8, r6, r7, r1, &call_runtime);
@@ -6599,7 +6597,7 @@ void StringAddStub::GenerateConvertArgument(MacroAssembler* masm,
       arg, scratch1, scratch2, JS_VALUE_TYPE);  // map -> scratch1.
   __ bne(slow);
   __ LoadlB(scratch2, FieldMemOperand(scratch1, Map::kBitField2Offset));
-  __ AndPImm(scratch2,
+  __ AndPI(scratch2,
           Operand(1 << Map::kStringWrapperSafeForDefaultValueOf));
   __ Cmpi(scratch2,
          Operand(1 << Map::kStringWrapperSafeForDefaultValueOf));
@@ -6725,8 +6723,8 @@ void ICCompareStub::GenerateSymbols(MacroAssembler* masm) {
   __ LoadlB(tmp2, FieldMemOperand(tmp2, Map::kInstanceTypeOffset));
   STATIC_ASSERT(kSymbolTag != 0);
   __ AndP(tmp1, tmp2);
-  __ LoadRR(r0, tmp1);
-  __ AndPImm(r0, Operand(kIsSymbolMask));
+  __ mov(r0, Operand(kIsSymbolMask));
+  __ AndP(r0, tmp1);
   __ beq(&miss /*, cr0*/);
 
   // Symbols are compared by identity.
@@ -6772,8 +6770,8 @@ void ICCompareStub::GenerateStrings(MacroAssembler* masm) {
   STATIC_ASSERT(kNotStringTag != 0);
   __ LoadRR(tmp3, tmp2);
   __ OrP(tmp3, tmp1);
-  __ LoadRR(r0, tmp3);
-  __ AndPImm(r0, Operand(kIsNotStringMask));
+  __ mov(r0, Operand(kIsNotStringMask));
+  __ AndP(r0, tmp3);
   __ bne(&miss /*, cr0*/);
   // TODO(JOHN): might be a problem b/c cr0 is not set
 
@@ -6795,8 +6793,8 @@ void ICCompareStub::GenerateStrings(MacroAssembler* masm) {
     STATIC_ASSERT(kSymbolTag != 0);
     __ LoadRR(tmp3, tmp1);
     __ AndP(tmp3, tmp2);
-    __ LoadRR(r0, tmp3);
-    __ AndPImm(r0, Operand(kIsSymbolMask));
+    __ mov(r0, Operand(kIsSymbolMask));
+    __ AndP(r0, tmp3);
     __ beq(&is_symbol /*, cr0*/);
     // Make sure r2 is non-zero. At this point input operands are
     // guaranteed to be non-zero.
@@ -7010,8 +7008,8 @@ void StringDictionaryLookupStub::GenerateNegativeLookup(MacroAssembler* masm,
                                             HeapObject::kMapOffset));
       __ LoadlB(entity_name,
               FieldMemOperand(entity_name, Map::kInstanceTypeOffset));
-      __ LoadRR(r0, entity_name);
-      __ AndPImm(r0, Operand(kIsSymbolMask));
+      __ mov(r0, Operand(kIsSymbolMask));
+      __ AndP(r0, entity_name);
       __ beq(miss /*, cr0*/);
 
       __ bind(&the_hole);
@@ -7204,8 +7202,8 @@ void StringDictionaryLookupStub::Generate(MacroAssembler* masm) {
       __ LoadP(entry_key, FieldMemOperand(entry_key, HeapObject::kMapOffset));
       __ LoadlB(entry_key,
               FieldMemOperand(entry_key, Map::kInstanceTypeOffset));
-      __ LoadRR(r0, entry_key);
-      __ AndPImm(r0, Operand(kIsSymbolMask));
+      __ mov(r0, Operand(kIsSymbolMask));
+      __ AndP(r0, entry_key);
       __ beq(&maybe_in_dictionary /*, cr0*/);
     }
   }
