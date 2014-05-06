@@ -2042,11 +2042,15 @@ void FullCodeGenerator::EmitInlineSmiBinaryOp(BinaryOperation* expr,
 #if V8_TARGET_ARCH_S390X
       // Remove tag from both operands.
       __ SmiUntag(ip, right);
-      __ SmiUntag(r0, left);
-      __ Mul(scratch2, r0, ip);
+      __ SmiUntag(scratch2, left);
+      __ mr_z(scratch1, ip);
       // Check for overflowing the smi range - no overflow if higher 33 bits of
       // the result are identical.
-      __ TestIfInt32(scratch2, scratch1, ip);
+      __ lr(ip, scratch2);  // 32 bit load
+      __ sra(ip, Operand(31));
+      __ cr_z(ip, scratch1);  // 32 bit compare
+      // TODO(JOHN): The above 3 instr expended from 31-bit TestIfInt32
+      // __ TestIfInt32(scratch2, scratch1, ip);
       __ bne(&stub_call);
 #else
       __ SmiUntag(ip, right);
@@ -2058,7 +2062,7 @@ void FullCodeGenerator::EmitInlineSmiBinaryOp(BinaryOperation* expr,
       __ bne(&stub_call);
 #endif
       // Go slow on zero result to handle -0.
-      __ Cmpi(scratch2, Operand::Zero());
+      __ chi(scratch2, Operand::Zero());
       __ beq(&mul_zero);
 #if V8_TARGET_ARCH_S390X
       __ SmiTag(right, scratch2);
@@ -2619,8 +2623,8 @@ void FullCodeGenerator::EmitIsSmi(CallRuntime* expr) {
                          &if_true, &if_false, &fall_through);
 
   PrepareForBailoutBeforeSplit(expr, true, if_true, if_false);
-  __ LoadRR(r0, r2);
-  __ AndPImm(r0, Operand(kSmiTagMask));
+  __ mov(r0, Operand(kSmiTagMask));
+  __ AndP(r0, r2);
   Split(eq, if_true, if_false, fall_through, cr0);
 
   context()->Plug(if_true, if_false);
@@ -2668,8 +2672,8 @@ void FullCodeGenerator::EmitIsObject(CallRuntime* expr) {
   __ LoadP(r4, FieldMemOperand(r2, HeapObject::kMapOffset));
   // Undetectable objects behave like undefined when tested with typeof.
   __ LoadlB(r3, FieldMemOperand(r4, Map::kBitFieldOffset));
-  __ LoadRR(r0, r3);
-  __ AndPImm(r0, Operand(1 << Map::kIsUndetectable));
+  __ mov(r0, Operand(1 << Map::kIsUndetectable));
+  __ AndP(r0, r3);
   __ bne(if_false /*, cr0*/);
   __ LoadlB(r3, FieldMemOperand(r4, Map::kInstanceTypeOffset));
   __ Cmpi(r3, Operand(FIRST_NONCALLABLE_SPEC_OBJECT_TYPE));
@@ -2720,8 +2724,8 @@ void FullCodeGenerator::EmitIsUndetectableObject(CallRuntime* expr) {
   __ JumpIfSmi(r2, if_false);
   __ LoadP(r3, FieldMemOperand(r2, HeapObject::kMapOffset));
   __ LoadlB(r3, FieldMemOperand(r3, Map::kBitFieldOffset));
-  __ LoadRR(r0, r3);
-  __ AndPImm(r0, Operand(1 << Map::kIsUndetectable));
+  __ mov(r0, Operand(1 << Map::kIsUndetectable));
+  __ AndP(r0, r3);
   PrepareForBailoutBeforeSplit(expr, true, if_true, if_false);
   Split(ne, if_true, if_false, fall_through, cr0);
 
@@ -2747,8 +2751,8 @@ void FullCodeGenerator::EmitIsStringWrapperSafeForDefaultValueOf(
 
   __ LoadP(r3, FieldMemOperand(r2, HeapObject::kMapOffset));
   __ LoadlB(ip, FieldMemOperand(r3, Map::kBitField2Offset));
-  __ LoadRR(r0, ip);
-  __ AndPImm(r0, Operand(1 << Map::kStringWrapperSafeForDefaultValueOf));
+  __ mov(r0, Operand(1 << Map::kStringWrapperSafeForDefaultValueOf));
+  __ AndP(r0, ip);
   __ bne(if_true /*, cr0*/);
 
   // Check for fast case object. Generate false result for slow case object.
@@ -3721,10 +3725,15 @@ void FullCodeGenerator::EmitFastAsciiArrayJoin(CallRuntime* expr) {
   __ Sub(string_length, string_length, scratch1);
 #if V8_TARGET_ARCH_S390X
   __ SmiUntag(scratch1, scratch1);
-  __ Mul(scratch2, array_length, scratch1);
+  __ LoadRR(scratch2, array_length);
+  __ mr_z(r0, scratch1);  // r0:r1 = r1 * scratch1
   // Check for smi overflow. No overflow if higher 33 bits of 64-bit result are
   // zero.
-  __ ShiftRightImm(ip, scratch2, Operand(31), SetRC);
+  __ lr(ip, r1);
+  __ sra(ip, Operand(31));
+  __ cr_z(ip, r0);
+  // TODO(JOHN): The above 3 instr expended from 31-bit TestIfInt32
+  // __ TestIfInt32(scratch2, scratch1, ip);
   __ bne(&bailout /*, cr0*/);
   __ SmiTag(scratch2, scratch2);
 #else
@@ -3733,6 +3742,7 @@ void FullCodeGenerator::EmitFastAsciiArrayJoin(CallRuntime* expr) {
   __ mr_z(r0, scratch1);  // r0:r1 = r1 * scratch1
   // Check for smi overflow. No overflow if higher 33 bits of 64-bit result are
   // zero.
+  // TODO(john): use TestIfInt32
   __ Cmpi(r0, Operand::Zero());
   __ bne(&bailout);
   __ TestSignBit32(scratch2, r0);
@@ -4290,8 +4300,8 @@ void FullCodeGenerator::EmitLiteralCompareTypeof(Expression* expr,
     __ bge(if_false);
     __ LoadlB(r3, FieldMemOperand(r2, Map::kBitFieldOffset));
     STATIC_ASSERT((1 << Map::kIsUndetectable) < 0x8000);
-    __ LoadRR(r0, r3);
-    __ AndPImm(r0, Operand(1 << Map::kIsUndetectable));
+    __ mov(r0, Operand(1 << Map::kIsUndetectable));
+    __ AndP(r0, r3);
     Split(eq, if_true, if_false, fall_through, cr0);
   } else if (check->Equals(isolate()->heap()->boolean_symbol())) {
     __ CompareRoot(r2, Heap::kTrueValueRootIndex);
@@ -4309,8 +4319,8 @@ void FullCodeGenerator::EmitLiteralCompareTypeof(Expression* expr,
     // Check for undetectable objects => true.
     __ LoadP(r2, FieldMemOperand(r2, HeapObject::kMapOffset));
     __ LoadlB(r3, FieldMemOperand(r2, Map::kBitFieldOffset));
-    __ LoadRR(r0, r3);
-    __ AndPImm(r0, Operand(1 << Map::kIsUndetectable));
+    __ mov(r0, Operand(1 << Map::kIsUndetectable));
+    __ AndP(r0, r3);
     Split(ne, if_true, if_false, fall_through, cr0);
 
   } else if (check->Equals(isolate()->heap()->function_symbol())) {
@@ -4333,8 +4343,8 @@ void FullCodeGenerator::EmitLiteralCompareTypeof(Expression* expr,
     __ bgt(if_false);
     // Check for undetectable objects => false.
     __ LoadlB(r3, FieldMemOperand(r2, Map::kBitFieldOffset));
-    __ LoadRR(r0, r3);
-    __ AndPImm(r0, Operand(1 << Map::kIsUndetectable));
+    __ mov(r0, Operand(1 << Map::kIsUndetectable));
+    __ AndP(r0, r3);
     Split(eq, if_true, if_false, fall_through, cr0);
   } else {
     if (if_false != fall_through) __ b(if_false);
@@ -4470,7 +4480,7 @@ void FullCodeGenerator::EmitLiteralCompareNil(CompareOperation* expr,
     // It can be an undetectable object.
     __ LoadP(r3, FieldMemOperand(r2, HeapObject::kMapOffset));
     __ LoadlB(r3, FieldMemOperand(r3, Map::kBitFieldOffset));
-    __ AndPImm(r3, Operand(1 << Map::kIsUndetectable));
+    __ AndPI(r3, Operand(1 << Map::kIsUndetectable));
     __ Cmpi(r3, Operand(1 << Map::kIsUndetectable));
     Split(eq, if_true, if_false, fall_through);
   }
