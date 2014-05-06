@@ -573,8 +573,8 @@
             'tools/msvs/genfiles/node_perfctr_provider.rc',
           ]
         } ],
-        # Conditionally include v8 or v8ppc
-        [ 'node_shared_v8=="false" and target_arch!="ppc" and target_arch!="ppc64"', {
+        # Conditionally include v8 or v8ppc or v8z
+        [ 'node_shared_v8=="false" and target_arch!="ppc" and target_arch!="ppc64" and target_arch!="s390" and target_arch!="s390x"', {
           'sources': [
             'deps/v8/include/v8.h',
             'deps/v8/include/v8-debug.h',
@@ -588,7 +588,13 @@
           ],
           'dependencies': [ 'deps/v8ppc/tools/gyp/v8.gyp:v8' ],
         }],
-
+        [ 'node_shared_v8=="false" and (target_arch=="s390" or target_arch=="s390x")', {
+          'sources': [
+            'deps/v8z/include/v8.h',
+            'deps/v8z/include/v8-debug.h',
+          ],
+          'dependencies': [ 'deps/v8z/tools/gyp/v8.gyp:v8' ],
+        }],
         [ 'node_shared_zlib=="false"', {
           'dependencies': [ 'deps/zlib/zlib.gyp:zlib' ],
         }],
