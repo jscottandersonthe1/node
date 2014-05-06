@@ -500,13 +500,11 @@ void S390Debugger::Debug() {
           HeapObject* obj = reinterpret_cast<HeapObject*>(*cur);
           intptr_t value = *cur;
           Heap* current_heap = v8::internal::Isolate::Current()->heap();
-          if (current_heap->Contains(obj) || ((value & 1) == 0)) {
+          if ((value & 1) == 0) {
+            PrintF("(smi %d)", PlatformSmiTagging::SmiToInt(obj));
+          } else if (current_heap->Contains(obj)) {
             PrintF(" (");
-            if ((value & 1) == 0) {
-              PrintF("smi %d", PlatformSmiTagging::SmiToInt(obj));
-            } else {
-              obj->ShortPrint();
-            }
+            obj->ShortPrint();
             PrintF(")");
           }
           PrintF("\n");
@@ -1493,13 +1491,16 @@ void Simulator::SoftwareInterrupt(Instruction* instr) {
 #else
         int32_t lo_res = static_cast<int32_t>(result);
         int32_t hi_res = static_cast<int32_t>(result >> 32);
-        if (::v8::internal::FLAG_trace_sim) {
-          PrintF("Returned %08x\n", lo_res);
-        }
 #if __BYTE_ORDER == __BIG_ENDIAN
+        if (::v8::internal::FLAG_trace_sim) {
+          PrintF("Returned %08x\n", hi_res);
+        }
         set_register(r2, hi_res);
         set_register(r3, lo_res);
 #else
+        if (::v8::internal::FLAG_trace_sim) {
+          PrintF("Returned %08x\n", lo_res);
+        }
         set_register(r2, lo_res);
         set_register(r3, hi_res);
 #endif
@@ -1868,11 +1869,45 @@ bool Simulator::DecodeFourByte(Instruction* instr) {
   Opcode op = instr->S390OpcodeValue();
 
   switch (op) {
+    case EX: {
+      RXInstruction* rxinst = reinterpret_cast<RXInstruction*>(instr);
+      int r1 = rxinst->R1Value();
+      int b2 = rxinst->B2Value();
+      int x2 = rxinst->X2Value();
+      intptr_t b2_val = (b2 == 0) ? 0 : get_register(b2);
+      intptr_t x2_val = (x2 == 0) ? 0 : get_register(x2);
+      intptr_t d2_val = rxinst->D2Value();
+      int32_t  r1_val = get_low_register<int32_t>(r1);
+
+      SixByteInstr the_instr = Instruction::InstructionBits(
+          reinterpret_cast<const byte*>(b2_val + x2_val + d2_val));
+      int length = Instruction::InstructionLength(
+          reinterpret_cast<const byte*>(b2_val + x2_val + d2_val));
+
+      char new_instr_buf[8];
+      char *addr = reinterpret_cast<char *>(&new_instr_buf[0]);
+      the_instr |= static_cast<SixByteInstr>(r1_val & 0xff)
+                                        << (8 * length - 16);
+      Instruction::SetInstructionBits<SixByteInstr>(
+          reinterpret_cast<byte*>(addr), static_cast<SixByteInstr>(the_instr));
+      InstructionDecode(reinterpret_cast<Instruction*>(addr), false);
+      break;
+    }
     case LGR: {
       // Load Register (64)
       RREInstruction* rreinst = reinterpret_cast<RREInstruction*>(instr);
       int r1 = rreinst->R1Value();
       int r2 = rreinst->R2Value();
+      set_register(r1, get_register(r2));
+      break;
+    }
+    case LTGR: {
+      // Load Register (64)
+      RREInstruction* rreinst = reinterpret_cast<RREInstruction*>(instr);
+      int r1 = rreinst->R1Value();
+      int r2 = rreinst->R2Value();
+      int64_t r2_val = get_register(r2);
+      SetS390ConditionCode<int64_t>(r2_val, 0);
       set_register(r1, get_register(r2));
       break;
     }
@@ -2885,7 +2920,7 @@ bool Simulator::DecodeSixByte(Instruction* instr) {
       RILInstruction *rilInstr = reinterpret_cast<RILInstruction*>(instr);
       int r1 = rilInstr->R1Value();
       int64_t imm = static_cast<int64_t>(rilInstr->I2Value());
-      SetS390ConditionCode<int32_t>(get_register(r1), imm);
+      SetS390ConditionCode<int64_t>(get_register(r1), imm);
       break;
     }
 
@@ -3510,7 +3545,7 @@ bool Simulator::DecodeSixByteArithmetic(Instruction *instr) {
 }
 
 // Executes the current instruction.
-void Simulator::InstructionDecode(Instruction* instr) {
+void Simulator::InstructionDecode(Instruction* instr, bool auto_incr_pc) {
   if (v8::internal::FLAG_check_icache) {
     CheckICache(isolate_->simulator_i_cache(), instr);
   }
@@ -3537,7 +3572,7 @@ void Simulator::InstructionDecode(Instruction* instr) {
     processed = DecodeSixByte(instr);
 
   if (processed) {
-    if (!pc_modified_) {
+    if (!pc_modified_ && auto_incr_pc) {
       set_pc(reinterpret_cast<intptr_t>(instr) + instrLength);
     }
     return;

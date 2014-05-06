@@ -706,22 +706,6 @@ void Assembler::subfc(Register dst, Register src1, Register src2,
   xo_form(EXT2 | SUBFCX, dst, src2, src1, o, r);
 }
 
-void Assembler::subfic(Register dst, Register src, const Operand& imm) {
-  d_form(SUBFIC, dst, src, imm.imm_, true);
-}
-
-// Multiply low word
-void Assembler::mullw(Register dst, Register src1, Register src2,
-                    OEBit o, RCBit r) {
-  xo_form(EXT2 | MULLW, dst, src1, src2, o, r);
-}
-
-// Multiply hi word
-void Assembler::mulhw(Register dst, Register src1, Register src2,
-                    OEBit o, RCBit r) {
-  xo_form(EXT2 | MULHWX, dst, src1, src2, o, r);
-}
-
 // Divide word
 void Assembler::divw(Register dst, Register src1, Register src2,
                      OEBit o, RCBit r) {
@@ -756,77 +740,6 @@ void Assembler::stmy(Register r1, Register r2, const MemOperand& src) {
 void Assembler::stmg(Register r1, Register r2, const MemOperand& src) {
   rsy_form(STMG, r1, r2, src.rb(), src.offset());
 }
-
-#if V8_TARGET_ARCH_S390X
-// 64bit specific instructions
-void Assembler::ld(Register rd, const MemOperand &src) {
-  int offset = src.offset();
-  ASSERT(!(offset & 3) && is_int16(offset));
-  offset = kImm16Mask & offset;
-  emit(LD_ppc | rd.code()*B21 | src.rb().code()*B16 | offset);
-}
-
-void Assembler::ldx(Register rd, const MemOperand &src) {
-  Register rb = src.rb();
-  Register rx = src.rx();
-  emit(EXT2 | LDX | rd.code()*B21 | rb.code()*B16 | rx.code()*B11);
-}
-
-void Assembler::ldu(Register rd, const MemOperand &src) {
-  int offset = src.offset();
-  ASSERT(!(offset & 3) && is_int16(offset));
-  offset = kImm16Mask & offset;
-  emit(LD_ppc | rd.code()*B21 | src.rb().code()*B16 | offset | 1);
-}
-
-void Assembler::ldux(Register rd, const MemOperand &src) {
-  Register rb = src.rb();
-  Register rx = src.rx();
-  emit(EXT2 | LDUX | rd.code()*B21 | rb.code()*B16 | rx.code()*B11);
-}
-
-void Assembler::stdu(Register rs, const MemOperand &src) {
-  int offset = src.offset();
-  ASSERT(!(offset & 3) && is_int16(offset));
-  offset = kImm16Mask & offset;
-  emit(STD_ppc | rs.code()*B21 | src.rb().code()*B16 | offset | 1);
-}
-
-void Assembler::stdux(Register rs, const MemOperand &src) {
-  Register rb = src.rb();
-  Register rx = src.rx();
-  emit(EXT2 | STDUX | rs.code()*B21 | rb.code()*B16 | rx.code()*B11);
-}
-
-void Assembler::sradi(Register rb, Register rs, int sh, RCBit r) {
-  int sh0_4 = sh & 0x1f;
-  int sh5   = (sh >> 5) & 0x1;
-
-  emit(EXT2 | SRADIX | rs.code()*B21 | rb.code()*B16 | sh0_4*B11 | sh5*B1 | r);
-}
-
-void Assembler::srd(Register dst, Register src1, Register src2, RCBit r) {
-  x_form(EXT2 | SRDX, dst, src1, src2, r);
-}
-
-void Assembler::sld(Register dst, Register src1, Register src2, RCBit r) {
-  x_form(EXT2 | SLDX, dst, src1, src2, r);
-}
-
-void Assembler::srad(Register rb, Register rs, Register rx, RCBit r) {
-  x_form(EXT2 | SRAD, rb, rs, rx, r);
-}
-
-void Assembler::cntlzd_(Register rb, Register rs, RCBit rc) {
-  x_form(EXT2 | CNTLZDX, rb, rs, r0, rc);
-}
-
-void Assembler::divd(Register dst, Register src1, Register src2,
-                     OEBit o, RCBit r) {
-  xo_form(EXT2 | DIVD, dst, src1, src2, o, r);
-}
-#endif
-
 
 void Assembler::fake_asm(enum FAKE_OPCODE_T fopcode) {
   ASSERT(fopcode < fLastFaker);
@@ -2762,12 +2675,12 @@ void Assembler::alg(Register r1, const MemOperand& opnd) {
 
 // Add Logical Register-Register (32)
 void Assembler::alr(Register r1, Register r2) {
-  rr_form(ALR, r1, r1);
+  rr_form(ALR, r1, r2);
 }
 
 // Add Logical Register-Register (64)
 void Assembler::algr(Register r1, Register r2) {
-  rre_form(ALGR, r1, r1);
+  rre_form(ALGR, r1, r2);
 }
 
 // Add Logical Immediate (32)
@@ -3163,7 +3076,7 @@ void Assembler::lmg(Register r1, Register r2, const MemOperand& src) {
 
 // Move charactor - mem to mem operation
 void Assembler::mvc(const MemOperand& opnd1, const MemOperand& opnd2,
-                    Length length) {
+                    uint32_t length) {
     ss_form(MVC, length-1, opnd1.getBaseRegister(),
          opnd1.getDisplacement(), opnd2.getBaseRegister(),
          opnd2.getDisplacement());
