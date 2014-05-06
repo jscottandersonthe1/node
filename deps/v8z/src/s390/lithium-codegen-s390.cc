@@ -918,29 +918,31 @@ void LCodeGen::DoModI(LModI* instr) {
   } else {
     Register divisor = ToRegister(instr->right());
 
-    __ divw(scratch, dividend, divisor);
-
     // Check for x % 0.
     if (instr->hydrogen()->CheckFlag(HValue::kCanBeDivByZero)) {
         __ Cmpi(divisor, Operand::Zero());
         DeoptimizeIf(eq, instr->environment());
     }
 
-#if V8_TARGET_ARCH_S390X
-    __ lgfr(scratch, scratch);
-#endif
-    __ MulP(scratch, divisor);
-    __ Sub(result, dividend, scratch/*, LeaveOE, SetRC*/);
-    // Might break the branch below.
+    ASSERT(scratch.is(r1));
+    __ LoadRR(r0, dividend);
+    __ srda(r0, Operand(32));
+    __ dr(r0, divisor);     // R0:R1 = R1 / divisor - R0 remainder
 
+#if V8_TARGET_ARCH_S390X
+    __ lgfr(result, r0);
+#else
+    __ lr(result, r0);
+#endif
+
+    // Might break the branch below.
     if (instr->hydrogen()->CheckFlag(HValue::kBailoutOnMinusZero)) {
       __ Cmpi(dividend, Operand::Zero());
       __ bge(&done);
-      // TODO(the following function might need the cr result from sub above.)
+      __ Cmpi(result, Operand::Zero());
       DeoptimizeIf(eq, instr->environment(), cr0);
     }
   }
-
   __ bind(&done);
 }
 
@@ -950,8 +952,6 @@ void LCodeGen::DoDivI(LDivI* instr) {
   const Register right = ToRegister(instr->right());
   const Register scratch = scratch0();
   const Register result = ToRegister(instr->result());
-
-  __ divw(result, left, right);
 
   // Check for x / 0.
   if (instr->hydrogen()->CheckFlag(HValue::kCanBeDivByZero)) {
@@ -979,14 +979,19 @@ void LCodeGen::DoDivI(LDivI* instr) {
     __ bind(&left_not_min_int);
   }
 
+  ASSERT(scratch.is(r1));
+  ASSERT(!scratch.is(right));   // Following sequence implicitly kills scratch
+  __ LoadRR(r0, left);
+  __ srda(r0, Operand(32));
+  __ dr(r0, right);     // R0:R1 = R1 / divisor - R0 remainder - R1 quotient
 #if V8_TARGET_ARCH_S390X
-  __ lgfr(result, result);
+  __ lgfr(result, scratch);
+#else
+  __ lr(result, scratch);
 #endif
 
   // Deoptimize on non-zero remainder
-  __ Move(right, scratch);
-  __ MulP(scratch, result);
-  __ CmpRR(left, scratch);
+  __ chi(r0, Operand::Zero());    // Force 32-bit compare
   DeoptimizeIf(ne, instr->environment());
 }
 
@@ -1008,16 +1013,8 @@ void LCodeGen::DoMathFloorOfDiv(LMathFloorOfDiv* instr) {
       return;
 
     case -1: {
-      // OEBit oe;
-      if (instr->hydrogen()->CheckFlag(HValue::kCanOverflow)) {
-        __ LoadImmP(r0, Operand::Zero());  // clear xer
-        __ mtxer(r0);
-        // oe = SetOE;
-      } else {
-        // oe = LeaveOE;
-      }
       __ LoadComplementRR(result, dividend/*, oe, SetRC*/);
-      // TODO(john): might be a problem removing SetOE here.
+
       if (instr->hydrogen()->CheckFlag(HValue::kBailoutOnMinusZero)) {
         DeoptimizeIf(eq, instr->environment(), cr0);
       }
@@ -1077,8 +1074,12 @@ void LCodeGen::DoMathFloorOfDiv(LMathFloorOfDiv* instr) {
       DeoptimizeIf(eq, instr->environment());
     }
     __ mov(result, Operand(multiplier));
-    __ mullw(ip, result, dividend);
-    __ mulhw(result, result, dividend);
+    // r0:r1 = results * dividend   - r0/r1 are scratch regs
+    __ LoadRR(r1, result);
+    __ mr_z(r0, dividend);
+    // Move results back to result:ip
+    __ LoadRR(result, r0);
+    __ LoadRR(ip, r1);
 
     if (static_cast<int32_t>(multiplier) < 0) {
       __ Add(result, result, dividend);
@@ -1194,8 +1195,11 @@ void LCodeGen::DoMulI(LMulI* instr) {
       __ TestIfInt32(result, scratch, r0);
       DeoptimizeIf(ne, instr->environment());
 #else
-      __ mulhw(scratch, left, right);
-      __ mullw(result, left, right);
+      // r0:scratch = scratch * right
+      __ LoadRR(scratch, left);
+      __ mr_z(r0, right);
+      __ LoadRR(result, scratch);
+      __ LoadRR(scratch, r0);
       __ TestIfInt32(scratch, result, r0);
       DeoptimizeIf(ne, instr->environment());
 #endif
@@ -1233,17 +1237,20 @@ void LCodeGen::DoBitI(LBitI* instr) {
         is_uint16(ToInteger32(LConstantOperand::cast(right_op)))) {
       switch (instr->op()) {
         case Token::BIT_AND:
-          __ LoadRR(result, left);
+          if (!result.is(left))
+            __ LoadRR(result, left);
           __ AndPImm(result,
                   Operand(ToInteger32(LConstantOperand::cast(right_op))));
           break;
         case Token::BIT_OR:
-          __ LoadRR(result, left);
-          __ OrPImm(left,
+          if (!result.is(left))
+            __ LoadRR(result, left);
+          __ OrPImm(result,
                  Operand(ToInteger32(LConstantOperand::cast(right_op))));
           break;
         case Token::BIT_XOR:
-          __ LoadRR(result, left);
+          if (!result.is(left))
+            __ LoadRR(result, left);
           __ XorPImm(result,
                   Operand(ToInteger32(LConstantOperand::cast(right_op))));
           break;
@@ -1259,17 +1266,27 @@ void LCodeGen::DoBitI(LBitI* instr) {
   switch (instr->op()) {
     case Token::BIT_AND:
       if (right.is_reg()) {
-        __ LoadRR(result, left);
-        __ AndP(result, right.rm());
+        if (right.rm().is(result)) {
+          __ OrP(result, left);
+        } else {
+          __ LoadRR(result, left);
+          __ AndP(result, right.rm());
+        }
       } else {
-        __ LoadRR(result, left);
+        if (!result.is(left))
+          __ LoadRR(result, left);
         __ AndPImm(result, right);
       }
       break;
     case Token::BIT_OR:
       if (right.is_reg()) {
-        __ LoadRR(result, left);
+        if (right.rm().is(result)) {
+          __ OrP(result, left);
+        } else {
+        if (!result.is(left))
+          __ LoadRR(result, left);
         __ OrP(result, right.rm());
+        }
       } else {
         __ LoadRR(result, left);
         __ OrPImm(result, right);
@@ -1277,10 +1294,15 @@ void LCodeGen::DoBitI(LBitI* instr) {
       break;
     case Token::BIT_XOR:
       if (right.is_reg()) {
-        __ LoadRR(result, left);
-        __ XorP(result, right.rm());
+        if (right.rm().is(result)) {
+          __ XorP(result, left);
+        } else {
+          __ LoadRR(result, left);
+          __ XorP(result, right.rm());
+        }
       } else {
-        __ LoadRR(result, left);
+        if (!result.is(left))
+          __ LoadRR(result, left);
         __ XorPImm(result, right);
       }
       break;
@@ -1655,19 +1677,46 @@ void LCodeGen::DoArithmeticD(LArithmeticD* instr) {
   DoubleRegister left = ToDoubleRegister(instr->left());
   DoubleRegister right = ToDoubleRegister(instr->right());
   DoubleRegister result = ToDoubleRegister(instr->result());
-  __ ldr(result, left);
   switch (instr->op()) {
     case Token::ADD:
-      __ adbr(result, right);
+      if (result.is(right)) {   // Ensure we don't clobber right
+        __ adbr(result, left);
+      } else {
+        if (!result.is(left))
+          __ ldr(result, left);
+        __ adbr(result, right);
+      }
       break;
     case Token::SUB:
-      __ sdbr(result, right);
+      if (result.is(right)) {  // right = left - right
+        __ ldr(double_scratch0(), right);
+        __ ldr(result, left);
+        __ sdbr(result, double_scratch0());
+      } else {
+        if (!result.is(left))
+          __ ldr(result, left);
+        __ sdbr(result, right);
+      }
       break;
     case Token::MUL:
-      __ mdbr(result, right);
+      if (result.is(right)) {  // Ensure we don't clobber right
+        __ mdbr(result, left);
+      } else {
+        if (!result.is(left))
+          __ ldr(result, left);
+        __ mdbr(result, right);
+      }
       break;
     case Token::DIV:
-      __ ddbr(result, right);
+      if (result.is(right)) {  // right = left / right
+        __ ldr(double_scratch0(), right);
+        __ ldr(result, left);
+        __ ddbr(result, double_scratch0());
+      } else {
+        if (!result.is(left))
+          __ ldr(result, left);
+        __ ddbr(result, right);
+      }
       break;
     case Token::MOD: {
       // Save r2-r5 on the stack.
@@ -1721,11 +1770,11 @@ void LCodeGen::EmitBranch(int left_block, int right_block, Condition cond,
   if (right_block == left_block) {
     EmitGoto(left_block);
   } else if (left_block == next_block) {
-    __ b(NegateCondition(cond), chunk_->GetAssemblyLabel(right_block) /*, cr*/);
+    __ b(NegateCondition(cond), chunk_->GetAssemblyLabel(right_block));
   } else if (right_block == next_block) {
-    __ b(cond, chunk_->GetAssemblyLabel(left_block) /*, cr*/);
+    __ b(cond, chunk_->GetAssemblyLabel(left_block));
   } else {
-    __ b(cond, chunk_->GetAssemblyLabel(left_block) /*, cr*/);
+    __ b(cond, chunk_->GetAssemblyLabel(left_block));
     __ b(chunk_->GetAssemblyLabel(right_block));
   }
 }
@@ -1742,15 +1791,11 @@ void LCodeGen::DoBranch(LBranch* instr) {
     EmitBranch(true_block, false_block, ne);
   } else if (r.IsDouble()) {
     DoubleRegister reg = ToDoubleRegister(instr->value());
-    Register scratch = scratch0();
+    __ cdbr(reg, kDoubleRegZero);
 
     // Test the double value. Zero and NaN are false.
-    uint crBits = (1 << (31 - Assembler::encode_crbit(cr7, CR_EQ)) |
-                   1 << (31 - Assembler::encode_crbit(cr7, CR_FU)));
-    __ cdbr(reg, kDoubleRegZero);
-    __ mfcr(scratch);
-    __ AndPImm(scratch, Operand(crBits));
-    EmitBranch(true_block, false_block, eq, cr0);
+    Condition lt_gt = static_cast<Condition>(lt | gt);
+    EmitBranch(true_block, false_block, lt_gt);
   } else {
     ASSERT(r.IsTagged());
     Register reg = ToRegister(instr->value());
@@ -2281,7 +2326,9 @@ void LCodeGen::DoCmpMapAndBranch(LCmpMapAndBranch* instr) {
   int false_block = instr->false_block_id();
 
   __ LoadP(temp, FieldMemOperand(reg, HeapObject::kMapOffset));
-  __ Cmpi(temp, Operand(instr->map()));
+  // @TODO Revert once Cmpi relocation is fixed
+  __ mov(r0, Operand(instr->map()));
+  __ CmpRR(temp, r0);
   EmitBranch(true_block, false_block, eq);
 }
 
@@ -2636,7 +2683,10 @@ void LCodeGen::EmitLoadFieldOrConstantFunction(Register result,
     while (*current != heap->null_value()) {
       __ LoadHeapObject(result, current);
       __ LoadP(result, FieldMemOperand(result, HeapObject::kMapOffset));
-      __ Cmpi(result, Operand(Handle<Map>(current->map())));
+      // @TODO Revert to Cmpi once we fix relocations on those instructions
+      // __ Cmpi(result, Operand(Handle<Map>(current->map())));
+      __ mov(scratch0(), Operand(Handle<Map>(current->map())));
+      __ CmpRR(result, scratch0());
       DeoptimizeIf(ne, env);
       current =
           Handle<HeapObject>(HeapObject::cast(current->map()->prototype()));
@@ -2798,8 +2848,8 @@ void LCodeGen::DoAccessArgumentsAt(LAccessArgumentsAt* instr) {
   // Subtracting from length accounts for one of them add one more.
   __ Sub(length, length, index);
   __ AddPImm(length, Operand(1));
-  __ ShiftLeftImm(r0, length, Operand(kPointerSizeLog2));
-  __ LoadP(result, MemOperand(arguments, r0));
+  __ ShiftLeftImm(scratch0(), length, Operand(kPointerSizeLog2));
+  __ LoadP(result, MemOperand(arguments, scratch0()));
 }
 
 
@@ -3205,10 +3255,9 @@ void LCodeGen::DoApplyArguments(LApplyArguments* instr) {
   __ Cmpi(length, Operand::Zero());
   __ beq(&invoke);
   __ bind(&loop);
-  __ ShiftLeftImm(r0, length, Operand(kPointerSizeLog2));
-  __ LoadP(scratch, MemOperand(elements, r0));
+  __ ShiftLeftImm(r1, length, Operand(kPointerSizeLog2));
+  __ LoadP(scratch, MemOperand(elements, r1));
   __ push(scratch);
-  __ AddP(length, Operand(-1));
   __ BranchOnCount(length, &loop);
 
   __ bind(&invoke);
@@ -3546,14 +3595,14 @@ void LCodeGen::DoMathRound(LUnaryMathOperation* instr) {
 
   // Check sign of the result: if the sign changed, the input
   // value was in ]0.5, 0[ and the result should be -0.
-  __ Sub(sp, Operand(8));
+  __ lay(sp, MemOperand(sp, -8));
   __ StoreF(double_scratch0(), MemOperand(sp, 0));
 #if __FLOAT_WORD_ORDER == __LITTLE_ENDIAN
   __ LoadlW(result, MemOperand(sp, 4));
 #else
   __ LoadlW(result, MemOperand(sp, 0));
 #endif
-  __ AddP(sp, Operand(8));
+  __ la(sp, MemOperand(sp, 8));
   __ XorP(result, scratch/*, SetRC*/);
   __ ltr(result, result);
   // Safe to remove rc
@@ -3699,18 +3748,18 @@ void LCodeGen::DoRandom(LRandom* instr) {
   // state[0] = 18273 * (state[0] & 0xFFFF) + (state[0] >> 16)
   __ LoadRR(r5, r3);
   __ AndPImm(r5, Operand(0xFFFF));
-  __ LoadImmP(r6, Operand(18273));
-  __ MulP(r5, r6);
+//  __ LoadImmP(r6, Operand(18273));
+  __ MulP(r5, Operand(18273));
   __ srl(r3, Operand(16));
   __ Add(r3, r5, r3);
   // Save state[0].
   __ StoreW(r3, FieldMemOperand(r4, ByteArray::kHeaderSize));
 
   // state[1] = 36969 * (state[1] & 0xFFFF) + (state[1] >> 16)
-  __ LoadRR(r5, r3);
+  __ LoadRR(r5, r2);
   __ AndPImm(r5, Operand(0xFFFF));
-  __ mov(r6, Operand(36969));
-  __ MulP(r5, r6);
+//  __ mov(r6, Operand(36969));
+  __ MulP(r5, Operand(36969));
   __ srl(r2, Operand(16));
   __ Add(r2, r5, r2);
   // Save state[1].
@@ -3725,7 +3774,7 @@ void LCodeGen::DoRandom(LRandom* instr) {
   __ bind(deferred->exit());
 
   // Allocate temp stack space to for double
-  __ AddP(sp, Operand(-8));
+  __ lay(sp, MemOperand(sp, -8));
 
   // 0x41300000 is the top half of 1.0 x 2^20 as a double.
   __ iilf(r3, Operand(0x41300000));
@@ -3751,10 +3800,9 @@ void LCodeGen::DoRandom(LRandom* instr) {
 #endif
   __ LoadF(d8, MemOperand(sp, 0));
 
-  __ AddP(sp, Operand(8));
+  __ la(sp, MemOperand(sp, 8));
 
   // Subtract and store the result in the heap number.
-  // __ fsub(d7, d7, d8);
   __ sdbr(d7, d8);
 }
 
@@ -4248,7 +4296,10 @@ void LCodeGen::DoTransitionElementsKind(LTransitionElementsKind* instr) {
 
   Label not_applicable;
   __ LoadP(scratch, FieldMemOperand(object_reg, HeapObject::kMapOffset));
-  __ Cmpi(scratch, Operand(from_map));
+  // @TODO Revert to Cmpi once we fix its relocation
+  //  __ Cmpi(scratch, Operand(from_map));
+  __ mov(r0, Operand(from_map));
+  __ CmpRR(scratch, r0);
   __ bne(&not_applicable);
   __ mov(new_map_reg, Operand(to_map));
 

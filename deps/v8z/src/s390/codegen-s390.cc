@@ -334,7 +334,7 @@ void ElementsTransitionGenerator::GenerateDoubleToObject(
   __ AllocateHeapNumber(r4, r2, r3, r1, &gc_required);
   // r4: new heap number
 #if V8_TARGET_ARCH_S390X
-  __ ld(r2, MemOperand(r6, -8));
+  __ lg(r2, MemOperand(r6, -8));
   __ Add(r3, r4, Operand(-1));  // subtract tag for std
   __ stg(r2, MemOperand(r3, HeapNumber::kValueOffset));
 #else
@@ -409,8 +409,8 @@ void StringCharLoadGenerator::Generate(MacroAssembler* masm,
 
   // We need special handling for indirect strings.
   Label check_sequential;
-  __ LoadRR(r0, result);
-  __ AndPImm(r0, Operand(kIsIndirectStringMask));
+  __ mov(r0, Operand(kIsIndirectStringMask));
+  __ AndP(r0, result);
   __ beq(&check_sequential /*, cr0*/);
 
   // Dispatch on the indirect string shape: slice or cons.
@@ -450,8 +450,8 @@ void StringCharLoadGenerator::Generate(MacroAssembler* masm,
   Label external_string, check_encoding;
   __ bind(&check_sequential);
   STATIC_ASSERT(kSeqStringTag == 0);
-  __ LoadRR(r0, result);
-  __ AndPImm(r0, Operand(kStringRepresentationMask));
+  __ mov(r0, Operand(kStringRepresentationMask));
+  __ AndP(r0, result);
   __ bne(&external_string /*, cr0*/);
 
   // Prepare sequential strings
@@ -464,14 +464,14 @@ void StringCharLoadGenerator::Generate(MacroAssembler* masm,
   if (FLAG_debug_code) {
     // Assert that we do not have a cons or slice (indirect strings) here.
     // Sequential strings have already been ruled out.
-    __ LoadRR(r0, result);
-    __ AndPImm(r0, Operand(kIsIndirectStringMask));
+    __ mov(r0, Operand(kIsIndirectStringMask));
+    __ AndP(r0, result);
     __ Assert(eq, "external string expected, but not found", cr0);
   }
   // Rule out short external strings.
   STATIC_CHECK(kShortExternalStringTag != 0);
-  __ LoadRR(r0, result);
-  __ AndPImm(r0, Operand(kShortExternalStringMask));
+  __ mov(r0, Operand(kShortExternalStringMask));
+  __ AndP(r0, result);
   __ bne(call_runtime /*, cr0*/);
   __ LoadP(string,
            FieldMemOperand(string, ExternalString::kResourceDataOffset));
@@ -479,8 +479,8 @@ void StringCharLoadGenerator::Generate(MacroAssembler* masm,
   Label ascii, done;
   __ bind(&check_encoding);
   STATIC_ASSERT(kTwoByteStringTag == 0);
-  __ LoadRR(r0, result);
-  __ AndPImm(r0, Operand(kStringEncodingMask));
+  __ mov(r0, Operand(kStringEncodingMask));
+  __ AndP(r0, result);
   __ bne(&ascii /*, cr0*/);
   // Two-byte string.
   __ ShiftLeftImm(result, index, Operand(1));

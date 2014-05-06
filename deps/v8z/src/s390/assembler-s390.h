@@ -754,6 +754,8 @@ class Assembler : public AssemblerBase {
     larl(r, Operand(branch_offset(l, false)));
   }
 
+  void mvc(const MemOperand& opnd1, const MemOperand& opnd2, uint32_t length);
+
   // Data-processing instructions
 
   // S390 instruction generation
@@ -1387,7 +1389,6 @@ RRE_FORM(msgfr);
 RRE_FORM(msgr);
 RRE_FORM(msr);
 RXY_FORM(msy);
-SS1_FORM(mvc);
 SS1_FORM(mvcin);
 SS4_FORM(mvck);
 RR_FORM(mvcl);
@@ -1725,16 +1726,9 @@ SS2_FORM(zap);
 // end of S390instructions
 
   // PowerPC
-  void subfic(Register dst, Register src, const Operand& imm);
 
   void subfc(Register dst, Register src1, Register src2,
            OEBit s = LeaveOE, RCBit r = LeaveRC);
-
-  void mullw(Register dst, Register src1, Register src2,
-               OEBit o = LeaveOE, RCBit r = LeaveRC);
-
-  void mulhw(Register dst, Register src1, Register src2,
-               OEBit o = LeaveOE, RCBit r = LeaveRC);
 
   void divw(Register dst, Register src1, Register src2,
             OEBit o = LeaveOE, RCBit r = LeaveRC);
@@ -1747,20 +1741,7 @@ SS2_FORM(zap);
   void lis(Register dst, const Operand& imm);
 
 #if V8_TARGET_ARCH_S390X
-  void ld(Register rd, const MemOperand &src);
-  void ldx(Register rd, const MemOperand &src);
-  void ldu(Register rd, const MemOperand &src);
-  void ldux(Register rd, const MemOperand &src);
   void stg(Register rs, const MemOperand &src);
-  void stdu(Register rs, const MemOperand &src);
-  void stdux(Register rs, const MemOperand &src);
-  void sradi(Register rb, Register rs, int sh, RCBit r = LeaveRC);
-  void srd(Register dst, Register src1, Register src2, RCBit r = LeaveRC);
-  void sld(Register dst, Register src1, Register src2, RCBit r = LeaveRC);
-  void srad(Register dst, Register src1, Register src2, RCBit r = LeaveRC);
-  void cntlzd_(Register dst, Register src, RCBit rc = LeaveRC);
-  void divd(Register dst, Register src1, Register src2,
-            OEBit o = LeaveOE, RCBit r = LeaveRC);
 #endif
 
   void rlwimi(Register rb, Register rs, int sh, int mb, int me,
