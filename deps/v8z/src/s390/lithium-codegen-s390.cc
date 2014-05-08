@@ -912,9 +912,9 @@ void LCodeGen::DoModI(LModI* instr) {
     __ LoadComplementRR(result, result);
     __ b(&done);
     __ bind(&positive_dividend);
-    __ mov(scratch, Operand(divisor - 1));
-    __ LoadRR(result, scratch);
-    __ AndP(result, dividend);
+    if (!dividend.is(result))
+      __ LoadRR(result, dividend);
+    __ AndPI(result, Operand(divisor - 1));
   } else {
     Register divisor = ToRegister(instr->right());
 
@@ -1267,7 +1267,7 @@ void LCodeGen::DoBitI(LBitI* instr) {
     case Token::BIT_AND:
       if (right.is_reg()) {
         if (right.rm().is(result)) {
-          __ OrP(result, left);
+          __ AndP(result, left);
         } else {
           __ LoadRR(result, left);
           __ AndP(result, right.rm());
@@ -5000,12 +5000,18 @@ void LCodeGen::DoClampTToUint8(LClampTToUint8* instr) {
 
   // Check for heap number
   __ LoadP(scratch, FieldMemOperand(input_reg, HeapObject::kMapOffset));
-  __ Cmpi(scratch, Operand(factory()->heap_number_map()));
+  // @TODO Replace with Cmpi again once we fix relocations on Cmpi
+  //  __ Cmpi(scratch, Operand(factory()->heap_number_map()));
+  __ mov(r0, Operand(factory()->heap_number_map()));
+  __ CmpRR(scratch, r0);
   __ beq(&heap_number);
 
   // Check for undefined. Undefined is converted to zero for clamping
   // conversions.
-  __ Cmpi(input_reg, Operand(factory()->undefined_value()));
+  // @TODO Replace with Cmp again once we fix relocations on Cmpi
+  //  __ Cmpi(input_reg, Operand(factory()->undefined_value()));
+  __ mov(r0, Operand(factory()->undefined_value()));
+  __ CmpRR(input_reg, r0);
   DeoptimizeIf(ne, instr->environment());
   __ LoadImmP(result_reg, Operand::Zero());
   __ b(&done);
