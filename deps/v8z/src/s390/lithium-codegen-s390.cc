@@ -167,7 +167,7 @@ bool LCodeGen::GeneratePrologue() {
       __ push(r4);
       __ BranchOnCount(r2, &loop);
     } else {
-      __ AddP(sp, Operand(-slots * kPointerSize));
+      __ lay(sp, MemOperand(sp, (-slots * kPointerSize)));
     }
   }
 
@@ -1191,7 +1191,9 @@ void LCodeGen::DoMulI(LMulI* instr) {
     if (can_overflow) {
       // scratch:result = left * right.
 #if V8_TARGET_ARCH_S390X
-      __ Mul(result, left, right);
+      if (!result.is(left))
+        __ LoadRR(result, left);
+      __ msgr(result, right);
       __ TestIfInt32(result, scratch, r0);
       DeoptimizeIf(ne, instr->environment());
 #else
@@ -1239,7 +1241,7 @@ void LCodeGen::DoBitI(LBitI* instr) {
         case Token::BIT_AND:
           if (!result.is(left))
             __ LoadRR(result, left);
-          __ AndPImm(result,
+          __ AndPI(result,
                   Operand(ToInteger32(LConstantOperand::cast(right_op))));
           break;
         case Token::BIT_OR:
@@ -1275,7 +1277,7 @@ void LCodeGen::DoBitI(LBitI* instr) {
       } else {
         if (!result.is(left))
           __ LoadRR(result, left);
-        __ AndPImm(result, right);
+        __ AndPI(result, right);
       }
       break;
     case Token::BIT_OR:
@@ -1323,7 +1325,7 @@ void LCodeGen::DoShiftI(LShiftI* instr) {
   if (right_op->IsRegister()) {
     // Mask the right_op operand.
     __ LoadRR(scratch, ToRegister(right_op));
-    __ AndPImm(scratch, Operand(0x1F));
+    __ AndPI(scratch, Operand(0x1F));
     switch (instr->op()) {
       case Token::SAR:
         __ LoadRR(result, left);
@@ -1336,7 +1338,7 @@ void LCodeGen::DoShiftI(LShiftI* instr) {
         if (instr->can_deopt()) {
           __ LoadRR(result, left);
           __ srl(result, scratch);
-          __ ltr(result, result);  // Set the <,==,> condition
+          __ LoadAndTestRR(result, result);  // Set the <,==,> condition
 #if V8_TARGET_ARCH_S390X
           __ lgfr(result, result/*, SetRC*/);
           // Should be okay to remove SetRC
@@ -1527,7 +1529,7 @@ void LCodeGen::DoDateField(LDateField* instr) {
   ASSERT(!scratch.is(scratch0()));
   ASSERT(!scratch.is(object));
 
-  __ TestIfSmi(object, r0);
+  __ TestIfSmi(object);
   DeoptimizeIf(eq, instr->environment(), cr0);
   __ CompareObjectType(object, scratch, scratch, JS_DATE_TYPE);
   DeoptimizeIf(ne, instr->environment());
@@ -1636,6 +1638,7 @@ void LCodeGen::DoMathMinMax(LMathMinMax* instr) {
     __ b(&return_right);
 
     __ bind(&check_zero);
+    __ lzdr(kDoubleRegZero);
     __ cdbr(left_reg, kDoubleRegZero);
     __ bne(&return_left);  // left == right != 0.
 
@@ -1791,6 +1794,7 @@ void LCodeGen::DoBranch(LBranch* instr) {
     EmitBranch(true_block, false_block, ne);
   } else if (r.IsDouble()) {
     DoubleRegister reg = ToDoubleRegister(instr->value());
+    __ lzdr(kDoubleRegZero);
     __ cdbr(reg, kDoubleRegZero);
 
     // Test the double value. Zero and NaN are false.
@@ -1839,7 +1843,7 @@ void LCodeGen::DoBranch(LBranch* instr) {
         __ JumpIfSmi(reg, true_label);
       } else if (expected.NeedsMap()) {
         // If we need a map later and have a Smi -> deopt.
-        __ TestIfSmi(reg, r0);
+        __ TestIfSmi(reg);
         DeoptimizeIf(eq, instr->environment(), cr0);
       }
 
@@ -1880,6 +1884,7 @@ void LCodeGen::DoBranch(LBranch* instr) {
         __ CompareRoot(map, Heap::kHeapNumberMapRootIndex);
         __ bne(&not_heap_number);
         __ LoadF(dbl_scratch, FieldMemOperand(reg, HeapNumber::kValueOffset));
+        __ lzdr(kDoubleRegZero);
         __ cdbr(dbl_scratch, kDoubleRegZero);
         __ bunordered(false_label);  // NaN -> false.
         __ beq(false_label);  // +0, -0 -> false.
@@ -2113,7 +2118,7 @@ void LCodeGen::DoIsSmiAndBranch(LIsSmiAndBranch* instr) {
   int false_block = chunk_->LookupDestination(instr->false_block_id());
 
   Register input_reg = EmitLoadRegister(instr->value(), ip);
-  __ TestIfSmi(input_reg, r0);
+  __ TestIfSmi(input_reg);
   EmitBranch(true_block, false_block, eq, cr0);
 }
 
@@ -2457,7 +2462,7 @@ void LCodeGen::DoDeferredInstanceOfKnownGlobal(LInstanceOfKnownGlobal* instr,
   ASSERT(temp.is(r6));
   __ LoadHeapObject(InstanceofStub::right(), instr->function());
 #if V8_TARGET_ARCH_S390X
-  static const int kAdditionalDelta = 26;
+  static const int kAdditionalDelta = 32;
 #else
   static const int kAdditionalDelta = 18;
 #endif
@@ -2515,7 +2520,7 @@ void LCodeGen::DoReturn(LReturn* instr) {
   int32_t sp_delta = (GetParameterCount() + 1) * kPointerSize;
   __ LoadRR(sp, fp);
   __ Pop(r14, fp);
-  __ AddP(sp, Operand(sp_delta));
+  __ la(sp, MemOperand(sp, sp_delta));
   __ Ret();
 }
 
@@ -2885,7 +2890,7 @@ void LCodeGen::DoLoadKeyedFastElement(LLoadKeyedFastElement* instr) {
   // Check for the hole value.
   if (instr->hydrogen()->RequiresHoleCheck()) {
     if (IsFastSmiElementsKind(instr->hydrogen()->elements_kind())) {
-      __ TestIfSmi(result, r0);
+      __ TestIfSmi(result);
       DeoptimizeIf(ne, instr->environment(), cr0);
     } else {
       __ LoadRoot(scratch, Heap::kTheHoleValueRootIndex);
@@ -3211,7 +3216,7 @@ void LCodeGen::DoWrapReceiver(LWrapReceiver* instr) {
   __ beq(&global_object);
 
   // Deoptimize if the receiver is not a JS object.
-  __ TestIfSmi(receiver, r0);
+  __ TestIfSmi(receiver);
   DeoptimizeIf(eq, instr->environment(), cr0);
   __ CompareObjectType(receiver, scratch, scratch, FIRST_SPEC_OBJECT_TYPE);
   DeoptimizeIf(lt, instr->environment());
@@ -3543,7 +3548,7 @@ void LCodeGen::DoMathFloor(LUnaryMathOperation* instr) {
 #else
     __ LoadlW(scratch, MemOperand(sp, 0));
 #endif
-    __ AddP(sp, Operand(8));
+    __ la(sp, MemOperand(sp, 8));
     __ TestSignBit32(scratch, r0);
     DeoptimizeIf(ne, instr->environment(), cr0);
     __ bind(&done);
@@ -3566,7 +3571,7 @@ void LCodeGen::DoMathRound(LUnaryMathOperation* instr) {
 #else
   __ LoadlW(result, MemOperand(sp, 0));
 #endif
-  __ AddP(sp, Operand(8));
+  __ la(sp, MemOperand(sp, 8));
   __ ExtractBitMask(scratch, result, HeapNumber::kExponentMask);
 
   // If the number is in ]-0.5, +0.5[, the result is +/- 0.
@@ -3604,7 +3609,7 @@ void LCodeGen::DoMathRound(LUnaryMathOperation* instr) {
 #endif
   __ la(sp, MemOperand(sp, 8));
   __ XorP(result, scratch/*, SetRC*/);
-  __ ltr(result, result);
+  __ LoadAndTestRR(result, result);
   // Safe to remove rc
   if (instr->hydrogen()->CheckFlag(HValue::kBailoutOnMinusZero)) {
     DeoptimizeIf(lt, instr->environment(), cr0);
@@ -3635,7 +3640,7 @@ void LCodeGen::DoMathRound(LUnaryMathOperation* instr) {
 #else
     __ LoadlW(scratch, MemOperand(sp, 0));
 #endif
-    __ AddP(sp, Operand(8));
+    __ la(sp, MemOperand(sp, 8));
     __ TestSignBit32(scratch, r0);
     DeoptimizeIf(ne, instr->environment(), cr0);
   }
@@ -3669,6 +3674,7 @@ void LCodeGen::DoMathPowHalf(LUnaryMathOperation* instr) {
   // Add +0 to convert -0 to +0.
   __ bind(&skip);
   __ ldr(result, input);
+  __ lzdr(kDoubleRegZero);
   __ adbr(result, kDoubleRegZero);
   __ sqdbr(result, result);
   __ bind(&done);
@@ -3747,7 +3753,7 @@ void LCodeGen::DoRandom(LRandom* instr) {
 
   // state[0] = 18273 * (state[0] & 0xFFFF) + (state[0] >> 16)
   __ LoadRR(r5, r3);
-  __ AndPImm(r5, Operand(0xFFFF));
+  __ AndPI(r5, Operand(0xFFFF));
 //  __ LoadImmP(r6, Operand(18273));
   __ MulP(r5, Operand(18273));
   __ srl(r3, Operand(16));
@@ -3757,7 +3763,7 @@ void LCodeGen::DoRandom(LRandom* instr) {
 
   // state[1] = 36969 * (state[1] & 0xFFFF) + (state[1] >> 16)
   __ LoadRR(r5, r2);
-  __ AndPImm(r5, Operand(0xFFFF));
+  __ AndPI(r5, Operand(0xFFFF));
 //  __ mov(r6, Operand(36969));
   __ MulP(r5, Operand(36969));
   __ srl(r2, Operand(16));
@@ -4056,10 +4062,10 @@ void LCodeGen::DeoptIfTaggedButNotSmi(LEnvironment* environment,
                                       LOperand* operand) {
   if (value->representation().IsTagged() && !value->type().IsSmi()) {
     if (operand->IsRegister()) {
-      __ TestIfSmi(ToRegister(operand), r0);
+      __ TestIfSmi(ToRegister(operand));
     } else {
       __ mov(ip, ToOperand(operand));
-      __ TestIfSmi(ip, r0);
+      __ TestIfSmi(ip);
     }
     DeoptimizeIf(ne, environment, cr0);
   }
@@ -4245,11 +4251,11 @@ void LCodeGen::DoStoreKeyedSpecializedArrayElement(
       case EXTERNAL_PIXEL_ELEMENTS:
       case EXTERNAL_BYTE_ELEMENTS:
       case EXTERNAL_UNSIGNED_BYTE_ELEMENTS:
-        __ stc(value, mem_operand);
+        __ StoreByte(value, mem_operand, r0);
         break;
       case EXTERNAL_SHORT_ELEMENTS:
       case EXTERNAL_UNSIGNED_SHORT_ELEMENTS:
-          __ sth(value, mem_operand);
+          __ StoreHalfWord(value, mem_operand, r0);
         break;
       case EXTERNAL_INT_ELEMENTS:
       case EXTERNAL_UNSIGNED_INT_ELEMENTS:
@@ -4634,11 +4640,9 @@ void LCodeGen::DoSmiUntag(LSmiUntag* instr) {
   Register result = ToRegister(instr->result());
   if (instr->needs_check()) {
     STATIC_ASSERT(kHeapObjectTag == 1);
-    // If the input is a HeapObject, value of scratch won't be zero.
-    __ LoadRR(scratch, input);
-    __ AndPImm(scratch, Operand(kHeapObjectTag));
-    __ SmiUntag(result, input);
+    __ tmll(input, Operand(kHeapObjectTag));
     DeoptimizeIf(ne, instr->environment(), cr0);
+    __ SmiUntag(result, input);
   } else {
     __ SmiUntag(result, input);
   }
@@ -4691,7 +4695,7 @@ void LCodeGen::EmitNumberUntagD(Register input_reg,
     __ LoadlW(ip, MemOperand(sp, 4));
     __ LoadlW(scratch, MemOperand(sp, 0));
 #endif
-    __ AddP(sp, Operand(8));
+    __ la(sp, MemOperand(sp, 8));
 
     __ Cmpi(ip, Operand::Zero());
     __ bne(&done);
@@ -4867,14 +4871,14 @@ void LCodeGen::DoDoubleToI(LDoubleToI* instr) {
 
 void LCodeGen::DoCheckSmi(LCheckSmi* instr) {
   LOperand* input = instr->value();
-  __ TestIfSmi(ToRegister(input), r0);
+  __ TestIfSmi(ToRegister(input));
   DeoptimizeIf(ne, instr->environment(), cr0);
 }
 
 
 void LCodeGen::DoCheckNonSmi(LCheckNonSmi* instr) {
   LOperand* input = instr->value();
-  __ TestIfSmi(ToRegister(input), r0);
+  __ TestIfSmi(ToRegister(input));
   DeoptimizeIf(eq, instr->environment(), cr0);
 }
 
@@ -4911,11 +4915,11 @@ void LCodeGen::DoCheckInstanceType(LCheckInstanceType* instr) {
 
     if (IsPowerOf2(mask)) {
       ASSERT(tag == 0 || IsPowerOf2(tag));
-      __ LoadRR(r0, scratch);
-      __ AndPImm(r0, Operand(mask));
+      __ mov(r0, Operand(mask));
+      __ AndP(scratch, r0);
       DeoptimizeIf(tag == 0 ? ne : eq, instr->environment(), cr0);
     } else {
-      __ AndPImm(scratch, Operand(mask));
+      __ AndPI(scratch, Operand(mask));
       __ Cmpi(scratch, Operand(tag));
       DeoptimizeIf(ne, instr->environment());
     }
@@ -5728,7 +5732,7 @@ void LCodeGen::DoForInPrepareMap(LForInPrepareMap* instr) {
   __ CmpRR(r2, null_value);
   DeoptimizeIf(eq, instr->environment());
 
-  __ TestIfSmi(r2, r0);
+  __ TestIfSmi(r2);
   DeoptimizeIf(eq, instr->environment(), cr0);
 
   STATIC_ASSERT(FIRST_JS_PROXY_TYPE == FIRST_SPEC_OBJECT_TYPE);
