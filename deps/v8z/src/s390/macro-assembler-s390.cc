@@ -233,7 +233,7 @@ void MacroAssembler::Ret() {
 
 void MacroAssembler::Drop(int count) {
   if (count > 0) {
-    AddP(sp, Operand(count * kPointerSize));
+    la(sp, MemOperand(sp, count * kPointerSize));
   }
 }
 
@@ -520,7 +520,7 @@ void MacroAssembler::PopSafepointRegisters() {
   const int num_unsaved = kNumSafepointRegisters - kNumSafepointSavedRegisters;
   MultiPop(kSafepointSavedRegisters);
   if (num_unsaved > 0) {
-    AddP(sp, Operand(num_unsaved * kPointerSize));
+    la(sp, MemOperand(sp, num_unsaved * kPointerSize));
   }
 }
 
@@ -740,7 +740,7 @@ void MacroAssembler::LeaveExitFrame(bool save_doubles,
 
   if (argument_count.is_valid()) {
     ShiftLeftImm(argument_count, argument_count, Operand(kPointerSizeLog2));
-    AddP(sp, argument_count);
+    la(sp, MemOperand(sp, argument_count));
   }
 }
 
@@ -1927,7 +1927,7 @@ void MacroAssembler::AddAndCheckForOverflow(Register dst,
     LoadRR(overflow_dst, dst);
     XorP(overflow_dst, right);
     AndP(overflow_dst, scratch/*, SetRC*/);
-    ltr(overflow_dst, overflow_dst);
+    LoadAndTestRR(overflow_dst, overflow_dst);
     // Should be okay to remove rc
   } else if (dst.is(right)) {
     LoadRR(scratch, right);           // Preserve right.
@@ -1936,7 +1936,7 @@ void MacroAssembler::AddAndCheckForOverflow(Register dst,
     LoadRR(overflow_dst, dst);
     XorP(overflow_dst, left);
     AndP(overflow_dst, scratch/*, SetRC*/);
-    ltr(overflow_dst, overflow_dst);
+    LoadAndTestRR(overflow_dst, overflow_dst);
     // Should be okay to remove rc
   } else {
     Add(dst, left, right);
@@ -1945,7 +1945,7 @@ void MacroAssembler::AddAndCheckForOverflow(Register dst,
     LoadRR(scratch, dst);
     XorP(scratch, right);
     AndP(overflow_dst, scratch/*, SetRC*/);
-    ltr(overflow_dst, overflow_dst);
+    LoadAndTestRR(overflow_dst, overflow_dst);
     // Should be okay to remove rc
   }
 }
@@ -1969,7 +1969,7 @@ void MacroAssembler::SubAndCheckForOverflow(Register dst,
     XorP(overflow_dst, scratch);
     XorP(scratch, right);
     AndP(overflow_dst, scratch/*, SetRC*/);
-    ltr(overflow_dst, overflow_dst);
+    LoadAndTestRR(overflow_dst, overflow_dst);
     // Should be okay to remove rc
   } else if (dst.is(right)) {
     LoadRR(scratch, right);           // Preserve right.
@@ -1978,7 +1978,7 @@ void MacroAssembler::SubAndCheckForOverflow(Register dst,
     XorP(overflow_dst, left);
     XorP(scratch, left);
     AndP(overflow_dst, scratch/*, SetRC*/);
-    ltr(overflow_dst, overflow_dst);
+    LoadAndTestRR(overflow_dst, overflow_dst);
     // Should be okay to remove rc
   } else {
     Sub(dst, left, right);
@@ -1987,7 +1987,7 @@ void MacroAssembler::SubAndCheckForOverflow(Register dst,
     LoadRR(scratch, right);
     XorP(scratch, left);
     AndP(overflow_dst, scratch/*, SetRC*/);
-    ltr(overflow_dst, overflow_dst);
+    LoadAndTestRR(overflow_dst, overflow_dst);
     // Should be okay to remove rc
   }
 }
@@ -2270,7 +2270,7 @@ bool MacroAssembler::AllowThisStubCall(CodeStub* stub) {
 
 void MacroAssembler::IllegalOperation(int num_arguments) {
   if (num_arguments > 0) {
-    AddP(sp, Operand(num_arguments * kPointerSize));
+    la(sp, MemOperand(sp, num_arguments * kPointerSize));
   }
   LoadRoot(r0, Heap::kUndefinedValueRootIndex);
 }
@@ -2355,11 +2355,17 @@ void MacroAssembler::EmitVFPTruncate(VFPRoundingMode rounding_mode,
     Push(r0, r1, result);
   }
 
+#if V8_TARGET_ARCH_S390X
+  // The result is a 32-bit integer when the high 33 bits of the
+  // result are identical.
+  TestIfInt32(result, r0, r1);
+#else
   // The result is a 32-bit integer when the high 33 bits of the
   // result are identical.
   LoadRR(r0, result);
   srda(r0, Operand(32));
   TestIfInt32(r0, r1, result);
+#endif
 
   // Restore reg values.
   if (r1.is(result)) {
@@ -2928,7 +2934,7 @@ void MacroAssembler::SmiTagCheckOverflow(Register reg, Register overflow) {
   LoadRR(overflow, reg);  // Save original value.
   SmiTag(reg);
   XorP(overflow, reg/*, SetRC*/);
-  ltr(overflow, overflow);
+  LoadAndTestRR(overflow, overflow);
   // Overflow if (value ^ 2 * value) < 0.
   // Safe to remove rc
 }
@@ -2947,7 +2953,7 @@ void MacroAssembler::SmiTagCheckOverflow(Register dst,
     SmiTag(dst, src);
     LoadRR(overflow, src);
     XorP(overflow, dst/*, SetRC*/);  // Overflow if (value ^ 2 * value) < 0.
-    ltr(overflow, overflow);
+    LoadAndTestRR(overflow, overflow);
     // safe to remove rc
   }
 }
@@ -2982,7 +2988,7 @@ void MacroAssembler::UntagAndJumpIfNotSmi(
   STATIC_ASSERT(kSmiTagSize == 1);
   TestBit(src, 0, r0);
   SmiUntag(dst, src);
-  ltr(r0, r0);
+  LoadAndTestRR(r0, r0);
   bne(non_smi_case);
 }
 
@@ -3387,7 +3393,7 @@ void MacroAssembler::CallCFunctionHelper(Register function,
     // Load the original stack pointer (pre-alignment) from the stack
     LoadP(sp, MemOperand(sp, stack_passed_arguments * kPointerSize), r0);
   } else {
-    AddP(sp, Operand((stack_passed_arguments +
+    la(sp, MemOperand(sp, (stack_passed_arguments +
                           kNumRequiredStackFrameSlots) * kPointerSize));
   }
 }
@@ -3785,14 +3791,6 @@ void MacroAssembler::ClampUint8(Register output_reg, Register input_reg) {
   bind(&done);
 }
 
-void MacroAssembler::SetRoundingMode(VFPRoundingMode RN) {
-  mtfsfi(7, RN);
-}
-
-void MacroAssembler::ResetRoundingMode() {
-  mtfsfi(7, kRoundToNearest);  // reset (default is kRoundToNearest)
-}
-
 void MacroAssembler::ClampDoubleToUint8(Register result_reg,
                                         DoubleRegister input_reg,
                                         DoubleRegister temp_double_reg,
@@ -3990,8 +3988,11 @@ void MacroAssembler::Mul(Register dst, Register src1, Register src2) {
 void MacroAssembler::DivP(Register dividend, Register divider) {
   // have to make sure the src and dst are reg pairs
   ASSERT(dividend.code() % 2 == 0);
-  // let 64bit and 32bit uses the same instruction
+#if V8_TARGET_ARCH_S390X
+  dsgr(dividend, divider);
+#else
   dr(dividend, divider);
+#endif
 }
 
 void MacroAssembler::MulP(Register dst, const Operand& opnd) {
@@ -4388,7 +4389,7 @@ void MacroAssembler::LoadSmiLiteral(Register dst, Smi *smi) {
 void MacroAssembler::LoadDoubleLiteral(DoubleRegister result,
                                        double value,
                                        Register scratch) {
-  AddP(sp, Operand(-8));  // reserve 1 temp double on the stack
+  lay(sp, MemOperand(sp, -8));  // reserve 1 temp double on the stack
 
   // avoid gcc strict aliasing error using union cast
   union {
@@ -4412,7 +4413,7 @@ void MacroAssembler::LoadDoubleLiteral(DoubleRegister result,
 #endif
   LoadF(result, MemOperand(sp, 0));
 
-  AddP(sp, Operand(8));  // restore the stack ptr
+  la(sp, MemOperand(sp, 8));  // restore the stack ptr
 }
 
 void MacroAssembler::Cmp(Register src1, Register src2) {
@@ -4700,6 +4701,7 @@ void MacroAssembler::StoreHalfWord(Register src, const MemOperand& mem,
   } else if (is_int20(offset)) {
     sthy(src, mem);
   } else {
+    ASSERT(!scratch.is(no_reg));
     LoadIntLiteral(scratch, offset);
     sth(src, MemOperand(base, scratch));
   }
@@ -4717,6 +4719,7 @@ void MacroAssembler::StoreByte(Register src, const MemOperand& mem,
   } else if (is_int20(offset)) {
     stcy(src, mem);
   } else {
+    ASSERT(!scratch.is(no_reg));
     LoadIntLiteral(scratch, offset);
     stc(src, MemOperand(base, scratch));
   }
@@ -4806,7 +4809,7 @@ void MacroAssembler::ClearRightImm(Register dst, Register src,
 
   // S390 AND instr clobbers source.  Make a copy if necessary
   if (!dst.is(src))
-    lr(dst, src);
+    LoadRR(dst, src);
 
   if (numBitsToClear <= 16) {
     nill(dst, Operand(static_cast<uint16_t>(hexMask)));

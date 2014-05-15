@@ -725,13 +725,6 @@ class Assembler : public AssemblerBase {
   // Aligns code to something that's optimal for a jump target for the platform.
   void CodeTargetAlign();
 
-  // Branch instructions
-  void bclr(BOfield bo, LKBit lk);
-  // void blr();
-
-  void bcctr(BOfield bo, LKBit lk);
-  void bcr();
-
   void breakpoint(bool do_print) {
     if (do_print) {
       printf("DebugBreak is inserted to %p\n", pc_);
@@ -1347,7 +1340,6 @@ RXE_FORM(lxeb);
 RRE_FORM(lxebr);
 RRE_FORM(lxr);
 RXY_FORM(ly);
-RRE_FORM(lzdr);
 RRE_FORM(lzer);
 RRE_FORM(lzxr);
 RX_FORM(m);
@@ -1707,6 +1699,7 @@ SS2_FORM(zap);
   void cdbr(DoubleRegister r1, DoubleRegister r2);
   void adb(DoubleRegister r1, const MemOperand& opnd);
   void adbr(DoubleRegister r1, DoubleRegister r2);
+  void lzdr(DoubleRegister r1);
   void sdb(DoubleRegister r1, const MemOperand& opnd);
   void sdbr(DoubleRegister r1, DoubleRegister r2);
   void mdb(DoubleRegister r1, const MemOperand& opnd);
@@ -1724,50 +1717,11 @@ SS2_FORM(zap);
   void brctg(Register r1, const Operand& opnd);
 
 // end of S390instructions
-
-  // PowerPC
-
-  void subfc(Register dst, Register src1, Register src2,
-           OEBit s = LeaveOE, RCBit r = LeaveRC);
-
-  void divw(Register dst, Register src1, Register src2,
-            OEBit o = LeaveOE, RCBit r = LeaveRC);
-
-  void addic(Register dst, Register src, const Operand& imm);
-
-  void andis(Register rb, Register rs, const Operand& imm);
-  void nor(Register dst, Register src1, Register src2, RCBit r = LeaveRC);
-  void lhi(Register dst, const Operand& imm);
-  void lis(Register dst, const Operand& imm);
+void lhi(Register dst, const Operand& imm);
 
 #if V8_TARGET_ARCH_S390X
   void stg(Register rs, const MemOperand &src);
 #endif
-
-  void rlwimi(Register rb, Register rs, int sh, int mb, int me,
-              RCBit rc = LeaveRC);
-
-  void cntlzw_(Register dst, Register src, RCBit rc = LeaveRC);
-  // end PowerPC
-
-  // Multiply instructions
-
-  // PowerPC
-  void mul(Register dst, Register src1, Register src2,
-           OEBit s = LeaveOE, RCBit r = LeaveRC);
-
-  // Miscellaneous arithmetic instructions
-
-  // Special register access
-  // PowerPC
-  void mtxer(Register src);
-  void mcrfs(int bf, int bfa);
-  void mfcr(Register dst);
-
-  void fake_asm(enum FAKE_OPCODE_T fopcode);
-  void marker_asm(int mcode);
-  void function_descriptor();
-  // end PowerPC
 
   // Exception-generating instructions and debugging support
   void stop(const char* msg,
@@ -1776,34 +1730,6 @@ SS2_FORM(zap);
             CRegister cr = cr7);
 
   void bkpt(uint32_t imm16);  // v5 and above
-
-  // Informational messages when simulating
-  void info(const char* msg,
-            Condition cond = al,
-            int32_t code = kDefaultStopCode,
-            CRegister cr = cr7);
-
-  void dcbf(Register rb, Register rx);
-  void sync();
-  void icbi(Register rb, Register rx);
-  void isync();
-
-  // Support for floating point
-  void lfdu(const DoubleRegister frt, const MemOperand& src);
-  void lfdux(const DoubleRegister frt, const MemOperand& src);
-  void lfs(const DoubleRegister frt, const MemOperand& src);
-  void lfsu(const DoubleRegister frt, const MemOperand& src);
-  void lfsx(const DoubleRegister frt, const MemOperand& src);
-  void lfsux(const DoubleRegister frt, const MemOperand& src);
-  void fsel(const DoubleRegister frt, const DoubleRegister fra,
-            const DoubleRegister frc, const DoubleRegister frb,
-            RCBit rc = LeaveRC);
-  void mtfsfi(int bf, int immediate, RCBit rc = LeaveRC);
-  void mffs(const DoubleRegister frt, RCBit rc = LeaveRC);
-  void mtfsf(const DoubleRegister frb, bool L = 1, int FLM = 0, bool W = 0,
-             RCBit rc = LeaveRC);
-
-  // Pseudo instructions
 
   // Different nop operations are used by the code generator to detect certain
   // states of the generated code.
@@ -2135,17 +2061,6 @@ SS2_FORM(zap);
                         Register r2);
 
   inline void CheckTrampolinePoolQuick();
-
-  // Instruction generation
-  void a_form(Instr instr, DoubleRegister frt, DoubleRegister fra,
-              DoubleRegister frb, RCBit r);
-  void d_form(Instr instr, Register rt, Register rb, const intptr_t val,
-              bool signed_disp);
-  void x_form(Instr instr, Register rb, Register rs, Register rx, RCBit r);
-  void xo_form(Instr instr, Register rt, Register rb, Register rx,
-               OEBit o, RCBit r);
-  void md_form(Instr instr, Register rb, Register rs, int shift, int maskbit,
-               RCBit r);
 
   // Labels
   void print(Label* L);
