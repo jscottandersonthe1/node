@@ -44,7 +44,7 @@
 
 #if defined(USE_SIMULATOR)
 
-// Only build the simulator if not compiling for real PPC hardware.
+// Only build the simulator if not compiling for real s390 hardware.
 namespace v8 {
 namespace internal {
 
@@ -802,9 +802,9 @@ void Simulator::CheckICache(v8::internal::HashMap* i_cache,
   char* cached_line = cache_page->CachedData(offset & ~CachePage::kLineMask);
   if (cache_hit) {
     // Check that the data in memory matches the contents of the I-cache.
-    CHECK(memcmp(reinterpret_cast<void*>(instr),
+    CHECK_EQ(memcmp(reinterpret_cast<void*>(instr),
                  cache_page->CachedData(offset),
-                 Instruction::kInstrSize) == 0);
+                 Instruction::kInstrSize), 0);
   } else {
     // Cache miss.  Load memory into the cache.
     memcpy(cached_line, line, CachePage::kLineLength);
@@ -2451,6 +2451,28 @@ bool Simulator::DecodeFourByteArithmetic(Instruction* instr) {
       }
       break;
     }
+
+/*
+    case DSR:
+    case DSGR: {
+      RREInstruction * rreinst = reinterpret_cast<RREInstruction*>(instr);
+      int r1 = rreinst->R1Value();
+      int r2 = rreinst->R2Value();
+      if (op == DSR) {
+        int32_t r1_val = get_low_register<int32_t>(r1);
+        int32_t r2_val = get_low_register<int32_t>(r2);
+        set_low_register(r1, r1_val / r2_val);
+      }
+      if (op == DSGR) {
+        intptr_t r1_val = get_register(r1);
+        intptr_t r2_val = get_register(r2);
+        set_register(r1, r1_val / r2_val);
+      } else {
+        UNREACHABLE();
+      }
+      break;
+    }
+*/
     case MSR:
     case MSGR: {  // they do not set overflow code
       RREInstruction * rreinst = reinterpret_cast<RREInstruction*>(instr);
@@ -2753,34 +2775,56 @@ bool Simulator::DecodeFourByteFloatingPoint(Instruction* instr) {
     case TMLL: {
       RIInstruction* riinst = reinterpret_cast<RIInstruction*>(instr);
       int r1 = riinst->R1Value();
-      int i  = riinst->I2Value() & 0x0000FFFF;
-      if (i == 0) {
+      int mask = riinst->I2Value() & 0x0000FFFF;
+      if (mask == 0) {
         condition_reg_ = 0x0;
         break;
       }
       uint32_t r1_val = get_low_register<uint32_t>(r1);
       r1_val = r1_val & 0x0000FFFF;  // uses only the last 16bits
 
-      bool mask_is_zero = true;
-      for (int j = 15; j > 0; --j) {
-        if (i & (1 << j)) {
-          if (r1_val & (1 << j)) {
-            // first bit is one
-            condition_reg_ = CC_GT;
-          } else {
-            // first bit is zero
-            condition_reg_ = CC_LT;
+      // Test if all selected bits are Zero
+      bool allSelectedBitsAreZeros = true;
+      for (int i = 0; i < 15; i++) {
+        if (mask & (1 << i)) {
+          if (r1_val & (1 << i)) {
+            allSelectedBitsAreZeros = false;
+            break;
           }
-          mask_is_zero = false;
-          break;
         }
       }
+      if (allSelectedBitsAreZeros) {
+        condition_reg_ = 0x8;
+        break;  // Done!
+      }
 
-      if (mask_is_zero) {
-        condition_reg_ = CC_EQ;
-      } else {
-        if ((r1_val & i) == 0) {
-          condition_reg_ = CC_EQ;
+      // Test if all selected bits are one
+      bool allSelectedBitsAreOnes = true;
+      for (int i = 0; i < 15; i++) {
+        if (mask & (1 << i)) {
+          if (!(r1_val & (1 << i))) {
+            allSelectedBitsAreOnes = false;
+            break;
+          }
+        }
+      }
+      if (allSelectedBitsAreOnes) {
+        condition_reg_ = 0x1;
+        break;  // Done!
+      }
+
+      // Now we know selected bits mixed zeros and ones
+      // Test if the leftmost bit is zero or one
+      for (int i = 14; i >= 0; i--) {
+        if (mask & (1 << i)) {
+          if (r1_val & (1 << i)) {
+            // leftmost bit is one
+            condition_reg_ = 0x2;
+          } else {
+            // leftmost bit is zero
+            condition_reg_ = 0x4;
+          }
+          break;  // Done!
         }
       }
       break;
