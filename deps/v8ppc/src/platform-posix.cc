@@ -96,6 +96,59 @@ void OS::Guard(void* address, const size_t size) {
 }
 #endif  // __CYGWIN__
 
+// For our illumos/Solaris mmap hint, we pick a random address in the bottom
+// half of the top half of the address space (that is, the third quarter).
+// Because we do not MAP_FIXED, this will be treated only as a hint -- the
+// system will not fail to mmap() because something else happens to already be
+// mapped at our random address. We deliberately set the hint high enough to
+// get well above the system's break (that is, the heap); illumos and Solaris
+// will try the hint and if that fails allocate as if there were no hint at
+// all. The high hint prevents the break from getting hemmed in at low values,
+// ceding half of the address space to the system heap.
+
+// On all other 32bit platforms the range 0x20000000 - 0x60000000 is relatively
+// unpopulated across a variety of ASLR modes (PAE kernel, NX compat mode, etc)
+// and on macos 10.6 and 10.7.
+
+#ifdef V8_TARGET_ARCH_X64
+  // Currently available CPUs have 48 bits of virtual addressing.  Truncate
+  // the hint address to 46 bits to give the kernel a fighting chance of
+  // fulfilling our placement request.
+# define V8_ASLR_MEMORY_MASK V8_UINT64_C(0x3ffffffff000)
+# ifdef __sun
+#   define V8_ASLR_MEMORY_SHIFT 0x400000000000ULL
+# else
+#   define V8_ASLR_MEMORY_SHIFT 0
+# endif // __sun
+#elif defined(V8_TARGET_ARCH_PPC64)
+# ifdef _AIX
+    // AIX: 64 bits of virtual addressing, but we limit address range to:
+    //   a) minimize Segment Lookaside Buffer (SLB) misses and
+    //   b) avoid losing precision if address is stored as a double.
+    // Use extra address space to isolate the mmap regions.
+#   define V8_ASLR_MEMORY_MASK  V8_UINT64_C(0x3ffff000)
+#   define V8_ASLR_MEMORY_SHIFT V8_UINT64_C(0x400000000000)
+# elif __BYTE_ORDER == __BIG_ENDIAN
+    // Big-endian Linux: 44 bits of virtual addressing.
+#   define V8_ASLR_MEMORY_MASK  V8_UINT64_C(0x03fffffff000)
+#   define V8_ASLR_MEMORY_SHIFT 0
+# else
+    // Little-endian Linux: 48 bits of virtual addressing.
+#   define V8_ASLR_MEMORY_MASK  V8_UINT64_C(0x3ffffffff000)
+#   define V8_ASLR_MEMORY_SHIFT 0
+# endif
+#else
+# define V8_ASLR_MEMORY_MASK  0x3ffff000
+# ifdef __sun
+#   define V8_ASLR_MEMORY_SHIFT 0x80000000
+# elif defined(_AIX)
+  // The range 0x30000000 - 0xD0000000 is available on AIX;
+  // choose the upper range.
+#   define V8_ASLR_MEMORY_SHIFT 0x90000000
+# else
+#   define V8_ASLR_MEMORY_SHIFT 0x20000000
+# endif
+#endif // V8_TARGET_ARCH_X64
 
 void* OS::GetRandomMmapAddr() {
   Isolate* isolate = Isolate::UncheckedCurrent();
@@ -103,57 +156,15 @@ void* OS::GetRandomMmapAddr() {
   // CpuFeatures::Probe. We don't care about randomization in this case because
   // the code page is immediately freed.
   if (isolate != NULL) {
-#ifdef V8_HOST_ARCH_64_BIT
+#if defined(V8_TARGET_ARCH_X64) || defined(V8_TARGET_ARCH_PPC64)
     uint64_t rnd1 = V8::RandomPrivate(isolate);
     uint64_t rnd2 = V8::RandomPrivate(isolate);
     uint64_t raw_addr = (rnd1 << 32) ^ rnd2;
-#endif
-#ifdef V8_TARGET_ARCH_X64
-    // Currently available CPUs have 48 bits of virtual addressing.  Truncate
-    // the hint address to 46 bits to give the kernel a fighting chance of
-    // fulfilling our placement request.
-    raw_addr &= V8_UINT64_C(0x3ffffffff000);
-#elif defined(V8_TARGET_ARCH_PPC64)
-# ifdef _AIX
-    // AIX: 64 bits of virtual addressing, but we limit address range to:
-    //   a) minimize Segment Lookaside Buffer (SLB) misses and
-    //   b) avoid losing precision if address is stored as a double.
-    raw_addr &= V8_UINT64_C(0x3ffff000);
-    // Use extra address space to isolate the mmap regions.
-    raw_addr += V8_UINT64_C(0x400000000000);
-# elif __BYTE_ORDER == __BIG_ENDIAN
-    // Big-endian Linux: 44 bits of virtual addressing.
-    raw_addr &= V8_UINT64_C(0x03fffffff000);
-# else
-    // Little-endian Linux: 48 bits of virtual addressing.
-    raw_addr &= V8_UINT64_C(0x3ffffffff000);
-# endif
 #else
     uint32_t raw_addr = V8::RandomPrivate(isolate);
-
-    raw_addr &= 0x3ffff000;
-# ifdef __sun
-    // For our Solaris/illumos mmap hint, we pick a random address in the bottom
-    // half of the top half of the address space (that is, the third quarter).
-    // Because we do not MAP_FIXED, this will be treated only as a hint -- the
-    // system will not fail to mmap() because something else happens to already
-    // be mapped at our random address. We deliberately set the hint high enough
-    // to get well above the system's break (that is, the heap); Solaris and
-    // illumos will try the hint and if that fails allocate as if there were
-    // no hint at all. The high hint prevents the break from getting hemmed in
-    // at low values, ceding half of the address space to the system heap.
-    raw_addr += 0x80000000;
-# elif defined(_AIX)
-    // The range 0x30000000 - 0xD0000000 is available on AIX;
-    // choose the upper range.
-    raw_addr += 0x90000000;
-# else
-    // The range 0x20000000 - 0x60000000 is relatively unpopulated across a
-    // variety of ASLR modes (PAE kernel, NX compat mode, etc) and on macos
-    // 10.6 and 10.7.
-    raw_addr += 0x20000000;
-# endif
 #endif
+    raw_addr &= V8_ASLR_MEMORY_MASK;
+    raw_addr += V8_ASLR_MEMORY_SHIFT;
     return reinterpret_cast<void*>(raw_addr);
   }
   return NULL;
