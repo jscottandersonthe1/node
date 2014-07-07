@@ -35,7 +35,7 @@
 // Copyright 2012 the V8 project authors. All rights reserved.
 
 //
-// Copyright IBM Corp. 2012, 2013. All rights reserved.
+// Copyright IBM Corp. 2012-2014. All rights reserved.
 //
 
 #include "v8.h"
@@ -62,9 +62,9 @@ static unsigned CpuFeaturesImpliedByCompiler() {
 
 #if !defined(_AIX)
 // This function uses types in elf.h
-static bool is_processor(const char* p) {
+static bool supportsSTFLE() {
   static bool read_tried = false;
-  static char *auxv_cpu_type = NULL;
+  static uint32_t auxv_hwcap = 0;
 
   if (!read_tried) {
     // Open the AUXV (auxilliary vector) psuedo-file
@@ -88,9 +88,10 @@ static bool is_processor(const char* p) {
              auxv_element+sizeof(auxv_element) <= buffer+bytes_read &&
              auxv_element->a_type != AT_NULL;
              auxv_element++) {
-          if (auxv_element->a_type == AT_PLATFORM) {
-            /* Note: Both auxv_cpu_type and buffer are static */
-            auxv_cpu_type = reinterpret_cast<char*>(auxv_element->a_un.a_val);
+          // We are looking for HWCAP entry in AUXV to search for STFLE support
+          if (auxv_element->a_type == AT_HWCAP) {
+            /* Note: Both auxv_hwcap and buffer are static */
+            auxv_hwcap = auxv_element->a_un.a_val;
             goto done_reading;
           }
         }
@@ -100,10 +101,15 @@ static bool is_processor(const char* p) {
     }
   }
 
-  if (auxv_cpu_type == NULL) {
+  // Did not find result
+  if (0 == auxv_hwcap) {
     return false;
   }
-  return (strcmp(auxv_cpu_type, p) == 0);
+
+  // HWCAP_S390_STFLE is defined to be 4 in include/asm/elf.h.  Currently
+  // hardcoded in case that include file does not exist.
+  const uint32_t HWCAP_S390_STFLE = 4;
+  return (auxv_hwcap & HWCAP_S390_STFLE);
 }
 #endif
 
@@ -125,19 +131,48 @@ void CpuFeatures::Probe() {
     return;
   }
 
-  // Detect whether frim instruction is supported (POWER5+)
-  // For now we will just check for processors we know do not
-  // support it
-#if !defined(_AIX)
-  if (!is_processor("ppc970") /* G5 */ && !is_processor("ppc7450") /* G4 */) {
-    // Assume support
-    supported_ |= (1u << FPU);
+  static bool performSTFLE = supportsSTFLE();
+  // The base architecture is z9, which should include STFLE support.
+  ASSERT(performSTFLE);
+
+  // Need to define host, as we are generating inlined S390 assembly to test
+  // for facilities.  Disabling detection when running native sim, as we
+  // currently do not have support for the distinct operands instructions
+#if defined(V8_HOST_ARCH_S390) && !defined(USE_SIMULATOR)
+  if (performSTFLE) {
+     // STFLE D(B) requires:
+     //    GPR0 to specify # of double words to update minus 1.
+     //      i.e. GPR0 = 0 for 1 doubleword
+     //    D(B) to specify to memory location to store the facilities bits
+     // The facilities we are checking for are:
+     //   Bit 45 - Distinct Operands for instructions like ARK, SRK, etc.
+     // As such, we require only 1 double word
+     int64_t facilities[1];
+     facilities[0] = 0;
+     // LHI sets up GPR0
+     // STFLE is specified as .insn, as opcode is not recognized.
+     // We register the instructions kill r0 (LHI) and the CC (STFLE).
+     asm volatile("lhi   0,0\n"
+                  ".insn s,0xb2b00000,%0\n"
+                  : "=Q" (facilities) : : "cc", "r0");
+
+     // Test for Distinct Operands Facility - Bit 45
+     if (facilities[0] & (1lu << (63 - 45))) {
+        supported_ |= (1u << DISTINCT_OPS);
+     }
+     // Test for General Instruction Extension Facility - Bit 34
+     if (facilities[0] & (1lu << (63 - 34))) {
+        supported_ |= (1u << GENERAL_INSTR_EXT);
+     }
   }
 #else
-  // Fallback: assume frim is supported -- will implement processor
-  // detection for other S390 platforms in is_processor() if required
-  supported_ |= (1u << FPU);
+  // All distinct ops instructions can be simulated
+  supported_ |= (1u << DISTINCT_OPS);
+  // RISBG can be simulated
+  supported_ |= (1u << GENERAL_INSTR_EXT);
+  USE(performSTFLE);  // To avoid assert
 #endif
+  supported_ |= (1u << FPU);
 }
 
 Register ToRegister(int num) {
@@ -324,13 +359,6 @@ Condition Assembler::GetCondition(Instr instr) {
   return al;
 }
 
-// PowerPC
-bool Assembler::IsBranch(Instr instr) {
-  return ((instr & kOpcodeMask) == BCX);
-}
-
-// end PowerPC
-
 Register Assembler::GetRA(Instr instr) {
   Register reg;
   reg.code_ = Instruction::RAValue(instr);
@@ -358,12 +386,9 @@ bool Assembler::Is32BitLoadIntoIP(SixByteInstr instr) {
 #endif
 
 bool Assembler::IsCmpRegister(Instr instr) {
+  // @TODO Re-enable this properly
   ASSERT(false);
   return Instruction::S390OpcodeValue(reinterpret_cast<byte*>(&instr)) == CR;
-}
-
-bool Assembler::IsRlwinm(Instr instr) {
-  return ((instr & kOpcodeMask) == RLWINMX);
 }
 
 // Labels refer to positions in the (to be) generated code.
@@ -376,10 +401,8 @@ bool Assembler::IsRlwinm(Instr instr) {
 // to be generated; pos() is the position of the last
 // instruction using the label.
 
-
 // The link chain is terminated by a negative code position (must be aligned)
 const int kEndOfChain = -4;
-
 
 int Assembler::target_at(int pos)  {
   SixByteInstr instr = instr_at(pos);
@@ -392,7 +415,8 @@ int Assembler::target_at(int pos)  {
     if (imm16 == 0)
       return kEndOfChain;
     return pos + imm16;
-  } else if (BRCL == opcode || LARL == opcode || BRASL == opcode) {
+  } else if (LLILF == opcode || BRCL == opcode
+      || LARL == opcode || BRASL == opcode) {
     int32_t imm32 = static_cast<int32_t>(
         instr & (static_cast<uint64_t>(0xffffffff)));
     imm32 <<= 1;   // BRCL immediate is in # of halfwords
@@ -422,8 +446,15 @@ void Assembler::target_at_put(int pos, int target_pos) {
     instr &= (~static_cast<uint64_t>(0xffffffff));
     instr_at_put<SixByteInstr>(pos, instr | (imm32 >> 1));
     return;
+  } else if (LLILF == opcode) {
+    ASSERT(target_pos == kEndOfChain || target_pos >= 0);
+    // Emitted label constant, not part of a branch.
+    // Make label relative to Code* of generated Code object.
+    int32_t imm32 = target_pos + (Code::kHeaderSize - kHeapObjectTag);
+    instr &= (~static_cast<uint64_t>(0xffffffff));
+    instr_at_put<SixByteInstr>(pos, instr | imm32);
+    return;
   }
-
   ASSERT(false);
 }
 
@@ -434,11 +465,13 @@ int Assembler::max_reach_from(int pos) {
   // the values below + 1, given offset is # of halfwords
   if (BRC == opcode || BRCT == opcode || BRCTG == opcode) {
     return 16;
-  } else if (BRCL == opcode || LARL == opcode || BRASL == opcode) {
+  } else if (LLILF == opcode || BRCL == opcode
+      || LARL == opcode || BRASL == opcode) {
     return 31;  // Using 31 as workaround instead of 32 as
                 // is_intn(x,32) doesn't work on 32-bit platforms.
+                // llilf: Emitted label constant, not part of
+                //        a branch (regexp PushBacktrack).
   }
-
   ASSERT(false);
   return 16;
 }
@@ -545,11 +578,12 @@ int Assembler::branch_offset(Label* L, bool jump_elimination_allowed) {
 }
 
 
-void Assembler::label_at_put(Label* L, int at_offset) {
+void Assembler::load_label_offset(Register r1, Label* L) {
   int target_pos;
+  int constant;
   if (L->is_bound()) {
     target_pos = L->pos();
-    instr_at_put(at_offset, target_pos + (Code::kHeaderSize - kHeapObjectTag));
+    constant = target_pos + (Code::kHeaderSize - kHeapObjectTag);
   } else {
     if (L->is_linked()) {
       target_pos = L->pos();  // L's link
@@ -558,18 +592,19 @@ void Assembler::label_at_put(Label* L, int at_offset) {
       // However, using branch to self to mark the first reference
       // should avoid most instances of branch offset overflow.  See
       // target_at() for where this is converted back to kEndOfChain.
-      target_pos = at_offset;
+      target_pos = pc_offset();
       if (!trampoline_emitted_) {
         unbound_labels_count_++;
         next_buffer_check_ -= kTrampolineSlotsSize;
       }
     }
-    L->link_to(at_offset);
+    L->link_to(pc_offset());
 
-    Instr constant = target_pos - at_offset;
-    ASSERT(is_int16(constant));
-    instr_at_put(at_offset, constant);
+    constant = target_pos - pc_offset();
+    // ASSERT(is_int31(constant));
+    // instr_at_put(at_offset, constant);
   }
+  llilf(r1, Operand(constant));
 }
 
 // Pseudo op - branch on condition
@@ -824,11 +859,6 @@ void Assembler::ri_form(Opcode op, Condition m1, const Operand& i2) {
 //    | OpCode | R1 | R2 |   I3   |    I4   |   I5   | OpCode |
 //    +--------+----+----+------------------+--------+--------+
 //    0        8    12   16      24         32       40      47
-#define RIE_F_FORM_EMIT(name, op) \
-void Assembler::name(Register r1, Register r2, const Operand &i3, \
-                     const Operand& i4, const Operand& i5) {\
-  rie_f_form(op, r1, r2, i3, i4, i5);\
-}
 void Assembler::rie_f_form(Opcode op, Register r1, Register r2,
          const Operand &i3, const Operand& i4, const Operand& i5) {
     ASSERT(is_uint16(op));
@@ -858,11 +888,11 @@ void Assembler::name(Register r1, Register r3, \
 void Assembler::rie_form(Opcode op, Register r1, Register r3,
                      const Operand& i2) {
     ASSERT(is_uint16(op));
-    ASSERT(is_uint16(i2.imm_));
+    ASSERT(is_int16(i2.imm_));
     uint64_t code = (static_cast<uint64_t>(op & 0xFF00)) * B32       |
                     (static_cast<uint64_t>(r1.code())) * B36         |
                     (static_cast<uint64_t>(r3.code())) * B32         |
-                    (static_cast<uint64_t>(i2.imm_)) * B16           |
+                    (static_cast<uint64_t>(i2.imm_ & 0xFFFF)) * B16  |
                     (static_cast<uint64_t>(op & 0x00FF));
     emit6bytes(code);
 }
@@ -1537,15 +1567,19 @@ void Assembler::ssf_form(Opcode op, Register r3, Register b1, Disp d1,
 
 //  RRF1 format: <insn> R1,R2,R3
 //    +------------------+----+----+----+----+
-//    |      OpCode      | R1 |    | R3 | R2 |
+//    |      OpCode      | R3 |    | R1 | R2 |
 //    +------------------+----+----+----+----+
 //    0                  16   20   24   28  31
 #define RRF1_FORM_EMIT(name, op)\
-void Assembler::name(Register r1, Register r3, Register r2) {\
-    rrf1_form(op << 16 | r1.code()*B12 | r3.code()*B4 | r2.code());\
+void Assembler::name(Register r1, Register r2, Register r3) {\
+    rrf1_form(op << 16 | r3.code()*B12 | r1.code()*B4 | r2.code());\
+}
+void Assembler::rrf1_form(Opcode op, Register r1, Register r2, Register r3) {
+  uint32_t code = op << 16 | r3.code()*B12 | r1.code()*B4 | r2.code();
+  emit4bytes(code);
 }
 void Assembler::rrf1_form(uint32_t code) {
-    emit4bytes(code);
+  emit4bytes(code);
 }
 
 //  RRF2 format: <insn> R1,R2,M3
@@ -1606,7 +1640,6 @@ RRE_FORM_EMIT(agfr, AGFR)
 SIY_FORM_EMIT(agsi, AGSI)
 RRF1_FORM_EMIT(ahhhr, AHHHR)
 RRF1_FORM_EMIT(ahhlr, AHHLR)
-RIE_FORM_EMIT(ahik, AHIK)
 RIL1_FORM_EMIT(aih, AIH)
 RXY_FORM_EMIT(alc, ALC)
 RXY_FORM_EMIT(alcg, ALCG)
@@ -1624,7 +1657,6 @@ SIY_FORM_EMIT(alsi, ALSI)
 RIL1_FORM_EMIT(alsih, ALSIH)
 RIL1_FORM_EMIT(alsihn, ALSIHN)
 SS2_FORM_EMIT(ap, AP)
-RRF1_FORM_EMIT(ark, ARK)
 SIY_FORM_EMIT(asi, ASI)
 RRE_FORM_EMIT(axbr, AXBR)
 RRF1_FORM_EMIT(axtr, AXTR)
@@ -1852,7 +1884,6 @@ RR_FORM_EMIT(lcr, LCR)
 RRE_FORM_EMIT(lcxbr, LCXBR)
 RRE_FORM_EMIT(ldebr, LDEBR)
 RRF2_FORM_EMIT(ldetr, LDETR)
-RRE_FORM_EMIT(ldgr, LDGR)
 RRE_FORM_EMIT(ldxbr, LDXBR)
 RRF2_FORM_EMIT(ldxbra, LDXBRA)
 RRF2_FORM_EMIT(ldxtr, LDXTR)
@@ -1868,7 +1899,6 @@ RXY_FORM_EMIT(lfh, LFH)
 RXY_FORM_EMIT(lfhat, LFHAT)
 S_FORM_EMIT(lfpc, LFPC)
 RXY_FORM_EMIT(lgat, LGAT)
-RRE_FORM_EMIT(lgdr, LGDR)
 RXY_FORM_EMIT(lgf, LGF)
 RIL1_FORM_EMIT(lgfi, LGFI)
 RIL1_FORM_EMIT(lgfrl, LGFRL)
@@ -1999,7 +2029,6 @@ RIL1_FORM_EMIT(nilf, NILF)
 RI1_FORM_EMIT(nilh, NILH)
 RI1_FORM_EMIT(nill, NILL)
 SIY_FORM_EMIT(niy, NIY)
-RRF1_FORM_EMIT(nrk, NRK)
 RXY_FORM_EMIT(ntstg, NTSTG)
 SS1_FORM_EMIT(oc, OC)
 SI_FORM_EMIT(oi, OI)
@@ -2010,7 +2039,6 @@ RIL1_FORM_EMIT(oilf, OILF)
 RI1_FORM_EMIT(oilh, OILH)
 RI1_FORM_EMIT(oill, OILL)
 SIY_FORM_EMIT(oiy, OIY)
-RRF1_FORM_EMIT(ork, ORK)
 SS2_FORM_EMIT(pack, PACK)
 RRE_FORM_EMIT(pcc, PCC)
 RXY_FORM_EMIT(pfd, PFD)
@@ -2024,8 +2052,6 @@ RRF1_FORM_EMIT(ppa, PPA)
 RRF1_FORM_EMIT(qadtr, QADTR)
 RRF1_FORM_EMIT(qaxtr, QAXTR)
 S_FORM_EMIT(rchp, RCHP)
-RIE_F_FORM_EMIT(risbg, RISBG)
-RIE_F_FORM_EMIT(risbgn, RISBGN)
 RIE_FORM_EMIT(risbhg, RISBHG)
 RIE_FORM_EMIT(risblg, RISBLG)
 RSY1_FORM_EMIT(rll, RLL)
@@ -2061,7 +2087,6 @@ RIL1_FORM_EMIT(slfi, SLFI)
 RXY_FORM_EMIT(slgf, SLGF)
 RIL1_FORM_EMIT(slgfi, SLGFI)
 RRE_FORM_EMIT(slgfr, SLGFR)
-RRF1_FORM_EMIT(slgrk, SLGRK)
 RRF1_FORM_EMIT(slhhhr, SLHHHR)
 RRF1_FORM_EMIT(slhhlr, SLHHLR)
 RXF_FORM_EMIT(slxt, SLXT)
@@ -2072,7 +2097,6 @@ RRE_FORM_EMIT(sqebr, SQEBR)
 RRE_FORM_EMIT(sqxbr, SQXBR)
 RS1_FORM_EMIT(srdl, SRDL)
 RXF_FORM_EMIT(srdt, SRDT)
-RRF1_FORM_EMIT(srk, SRK)
 S_FORM_EMIT(srnm, SRNM)
 S_FORM_EMIT(srnmb, SRNMB)
 S_FORM_EMIT(srnmt, SRNMT)
@@ -2126,14 +2150,12 @@ RXE_FORM_EMIT(tdgxt, TDGXT)
 S_FORM_EMIT(tend, TEND)
 RRE_FORM_EMIT(thder, THDER)
 RRE_FORM_EMIT(thdr, THDR)
-SI_FORM_EMIT(tm, TM)
 RI1_FORM_EMIT(tmh, TMH)
 RI1_FORM_EMIT(tmhh, TMHH)
 RI1_FORM_EMIT(tmhl, TMHL)
 RI1_FORM_EMIT(tml, TML)
 RI1_FORM_EMIT(tmlh, TMLH)
 RI1_FORM_EMIT(tmll, TMLL)
-SIY_FORM_EMIT(tmy, TMY)
 RSL_FORM_EMIT(tp, TP)
 S_FORM_EMIT(tpi, TPI)
 SS1_FORM_EMIT(tr, TR)
@@ -2158,7 +2180,6 @@ SI_FORM_EMIT(xi, XI)
 RIL1_FORM_EMIT(xihf, XIHF)
 RIL1_FORM_EMIT(xilf, XILF)
 SIY_FORM_EMIT(xiy, XIY)
-RRF1_FORM_EMIT(xrk, XRK)
 S_FORM_EMIT(xsch, XSCH)
 SS2_FORM_EMIT(zap, ZAP)
 
@@ -2168,9 +2189,19 @@ void Assembler::ar(Register r1, Register r2) {
   rr_form(AR, r1, r2);
 }
 
+// Add Register-Register-Register (32)
+void Assembler::ark(Register r1, Register r2, Register r3) {
+  rrf1_form(ARK, r1, r2, r3);
+}
+
 // Subtract Register (32)
 void Assembler::sr(Register r1, Register r2) {
   rr_form(SR, r1, r2);
+}
+
+// Subtract Register-Register-Register (32)
+void Assembler::srk(Register r1, Register r2, Register r3) {
+  rrf1_form(SRK, r1, r2, r3);
 }
 
 // Multiply Register (64<32)
@@ -2190,23 +2221,43 @@ void Assembler::dr(Register r1, Register r2) {
 }
 
 // And Register (32)
-void Assembler::or_z(Register r1, Register r2) {
-  rr_form(OR, r1, r2);
-}
-
-// And Register (32)
 void Assembler::nr(Register r1, Register r2) {
   rr_form(NR, r1, r2);
 }
 
-// XOR Register (32)
+// And Register-Register-Register (32)
+void Assembler::nrk(Register r1, Register r2, Register r3) {
+  rrf1_form(NRK, r1, r2, r3);
+}
+
+// Or Register (32)
+void Assembler::or_z(Register r1, Register r2) {
+  rr_form(OR, r1, r2);
+}
+
+// Or Register-Register-Register (32)
+void Assembler::ork(Register r1, Register r2, Register r3) {
+  rrf1_form(ORK, r1, r2, r3);
+}
+
+// Xor Register (32)
 void Assembler::xr(Register r1, Register r2) {
   rr_form(XR, r1, r2);
 }
 
-// XOR Register (32)
+// Xor Register-Register-Register (32)
+void Assembler::xrk(Register r1, Register r2, Register r3) {
+  rrf1_form(XRK, r1, r2, r3);
+}
+
+// Add Register (64)
 void Assembler::agr(Register r1, Register r2) {
   rre_form(AGR, r1, r2);
+}
+
+// Add Register-Register-Register (64)
+void Assembler::agrk(Register r1, Register r2, Register r3) {
+  rrf1_form(AGRK, r1, r2, r3);
 }
 
 // Subtract Register (64)
@@ -2214,14 +2265,14 @@ void Assembler::sgr(Register r1, Register r2) {
   rre_form(SGR, r1, r2);
 }
 
+// Subtract Register-Register-Register (64)
+void Assembler::sgrk(Register r1, Register r2, Register r3) {
+  rrf1_form(SGRK, r1, r2, r3);
+}
+
 // Multiply Register (128<64)
 void Assembler::mlgr(Register r1, Register r2) {
   rre_form(MLGR, r1, r2);
-}
-
-// Or Register (64)
-void Assembler::ogr(Register r1, Register r2) {
-  rre_form(OGR, r1, r2);
 }
 
 // And Register (64)
@@ -2229,9 +2280,29 @@ void Assembler::ngr(Register r1, Register r2) {
   rre_form(NGR, r1, r2);
 }
 
+// And Register-Register-Register (64)
+void Assembler::ngrk(Register r1, Register r2, Register r3) {
+  rrf1_form(NGRK, r1, r2, r3);
+}
+
+// Or Register (64)
+void Assembler::ogr(Register r1, Register r2) {
+  rre_form(OGR, r1, r2);
+}
+
+// Or Register-Register-Register (64)
+void Assembler::ogrk(Register r1, Register r2, Register r3) {
+  rrf1_form(OGRK, r1, r2, r3);
+}
+
 // Xor Register (64)
 void Assembler::xgr(Register r1, Register r2) {
   rre_form(XGR, r1, r2);
+}
+
+// Xor Register-Register-Register (64)
+void Assembler::xgrk(Register r1, Register r2, Register r3) {
+  rrf1_form(XGRK, r1, r2, r3);
 }
 
 // Add Register-Storage (32)
@@ -2375,9 +2446,19 @@ void Assembler::ahi(Register r1, const Operand& i2) {
   ri_form(AHI, r1, i2);
 }
 
+// Add Halfword Immediate (32)
+void Assembler::ahik(Register r1, Register r3, const Operand& i2) {
+  rie_form(AHIK, r1, r3, i2);
+}
+
 // Add Halfword Immediate (64)
 void Assembler::aghi(Register r1, const Operand& i2) {
   ri_form(AGHI, r1, i2);
+}
+
+// Add Halfword Immediate (64)
+void Assembler::aghik(Register r1, Register r3, const Operand& i2) {
+  rie_form(AGHIK, r1, r3, i2);
 }
 
 // Add Logical Register-Storage (32)
@@ -2400,9 +2481,19 @@ void Assembler::alr(Register r1, Register r2) {
   rr_form(ALR, r1, r2);
 }
 
+// Add Logical Register-Register-Register (32)
+void Assembler::alrk(Register r1, Register r2, Register r3) {
+  rrf1_form(ALRK, r1, r2, r3);
+}
+
 // Add Logical Register-Register (64)
 void Assembler::algr(Register r1, Register r2) {
   rre_form(ALGR, r1, r2);
+}
+
+// Add Logical Register-Register-Register (64)
+void Assembler::algrk(Register r1, Register r2, Register r3) {
+  rrf1_form(ALGRK, r1, r2, r3);
 }
 
 // Add Logical Immediate (32)
@@ -2430,9 +2521,19 @@ void Assembler::slr(Register r1, Register r2) {
   rr_form(SLR, r1, r2);
 }
 
+// Subtract Logical Register-Register-Register (32)
+void Assembler::slrk(Register r1, Register r2, Register r3) {
+  rrf1_form(SLRK, r1, r2, r3);
+}
+
 // Subtract Logical Register-Register (64)
 void Assembler::slgr(Register r1, Register r2) {
   rre_form(SLGR, r1, r2);
+}
+
+// Subtract Logical Register-Register-Register (64)
+void Assembler::slgrk(Register r1, Register r2, Register r3) {
+  rrf1_form(SLGRK, r1, r2, r3);
 }
 
 // Multiply Halfword Immediate (32)
@@ -2478,7 +2579,7 @@ void Assembler::llh(Register r1, const MemOperand& opnd) {
 
 // Load Logical halfword Register-Storage (64)
 void Assembler::llgh(Register r1, const MemOperand& opnd) {
-  rxy_form(LLH, r1, opnd.rx(), opnd.rb(), opnd.offset());
+  rxy_form(LLGH, r1, opnd.rx(), opnd.rb(), opnd.offset());
 }
 
 // Load Logical Character (32) - loads a byte and zero ext.
@@ -2537,15 +2638,26 @@ void Assembler::lgfr(Register r1, Register r2) {
 }
 
 // Shift Left Single Logical (32)
-void Assembler::sll(Register r1, const Operand& opnd) {
-  rs_form(SLL, r1, r0, r0, opnd.immediate());
-}
-
 void Assembler::sll(Register r1, Register opnd) {
   ASSERT(!opnd.is(r0));
   rs_form(SLL, r1, r0, opnd, 0);
 }
 
+// Shift Left Single Logical (32)
+void Assembler::sll(Register r1, const Operand& opnd) {
+  rs_form(SLL, r1, r0, r0, opnd.immediate());
+}
+
+// Shift Left Single Logical (32)
+void Assembler::sllk(Register r1, Register r3, Register opnd) {
+  ASSERT(!opnd.is(r0));
+  rsy_form(SLLK, r1, r3, opnd, 0);
+}
+
+// Shift Left Single Logical (32)
+void Assembler::sllk(Register r1, Register r3, const Operand& opnd) {
+  rsy_form(SLLK, r1, r3, r0, opnd.immediate());
+}
 
 // Shift Left Single Logical (64)
 void Assembler::sllg(Register r1, Register r3, Register opnd) {
@@ -2553,13 +2665,9 @@ void Assembler::sllg(Register r1, Register r3, Register opnd) {
   rsy_form(SLLG, r1, r3, opnd, 0);
 }
 
+// Shift Left Single Logical (64)
 void Assembler::sllg(Register r1, Register r3, const Operand& opnd) {
   rsy_form(SLLG, r1, r3, r0, opnd.immediate());
-}
-
-// Shift Right Single Logical (32)
-void Assembler::srl(Register r1, const Operand& opnd) {
-  rs_form(SRL, r1, r0, r0, opnd.immediate());
 }
 
 // Shift Right Single Logical (32)
@@ -2568,6 +2676,16 @@ void Assembler::srl(Register r1, Register opnd) {
   rs_form(SRL, r1, r0, opnd, 0);
 }
 
+// Shift Right Single Logical (32)
+void Assembler::srl(Register r1, const Operand& opnd) {
+  rs_form(SRL, r1, r0, r0, opnd.immediate());
+}
+
+// Shift Right Single Logical (32)
+void Assembler::srlk(Register r1, Register r3, Register opnd) {
+  ASSERT(!opnd.is(r0));
+  rsy_form(SRLK, r1, r3, opnd, 0);
+}
 
 // Shift Right Single Logical (32)
 void Assembler::srlk(Register r1, Register r3, const Operand& opnd) {
@@ -2580,13 +2698,31 @@ void Assembler::srlg(Register r1, Register r3, Register opnd) {
   rsy_form(SRLG, r1, r3, opnd, 0);
 }
 
+// Shift Right Single Logical (64)
 void Assembler::srlg(Register r1, Register r3, const Operand& opnd) {
   rsy_form(SRLG, r1, r3, r0, opnd.immediate());
 }
 
 // Shift Left Single (32)
+void Assembler::sla(Register r1, Register opnd) {
+  ASSERT(!opnd.is(r0));
+  rs_form(SLA, r1, r0, opnd, 0);
+}
+
+// Shift Left Single (32)
 void Assembler::sla(Register r1, const Operand& opnd) {
   rs_form(SLA, r1, r0, r0, opnd.immediate());
+}
+
+// Shift Left Single (32)
+void Assembler::slak(Register r1, Register r3, Register opnd) {
+  ASSERT(!opnd.is(r0));
+  rsy_form(SLAK, r1, r3, opnd, 0);
+}
+
+// Shift Left Single (32)
+void Assembler::slak(Register r1, Register r3, const Operand& opnd) {
+  rsy_form(SLAK, r1, r3, r0, opnd.immediate());
 }
 
 // Shift Left Single (64)
@@ -2595,8 +2731,15 @@ void Assembler::slag(Register r1, Register r3, Register opnd) {
   rsy_form(SLAG, r1, r3, opnd, 0);
 }
 
+// Shift Left Single (64)
 void Assembler::slag(Register r1, Register r3, const Operand& opnd) {
   rsy_form(SLAG, r1, r3, r0, opnd.immediate());
+}
+
+// Shift Right Single (32)
+void Assembler::sra(Register r1, Register opnd) {
+  ASSERT(!opnd.is(r0));
+  rs_form(SRA, r1, r0, opnd, 0);
 }
 
 // Shift Right Single (32)
@@ -2605,9 +2748,14 @@ void Assembler::sra(Register r1, const Operand& opnd) {
 }
 
 // Shift Right Single (32)
-void Assembler::sra(Register r1, Register opnd) {
+void Assembler::srak(Register r1, Register r3, Register opnd) {
   ASSERT(!opnd.is(r0));
-  rs_form(SRA, r1, r0, opnd, 0);
+  rsy_form(SRAK, r1, r3, opnd, 0);
+}
+
+// Shift Right Single (32)
+void Assembler::srak(Register r1, Register r3, const Operand& opnd) {
+  rsy_form(SRAK, r1, r3, r0, opnd.immediate());
 }
 
 // Shift Right Single (64)
@@ -2624,6 +2772,30 @@ void Assembler::srag(Register r1, Register r3, const Operand& opnd) {
 void Assembler::srda(Register r1, const Operand& opnd) {
   ASSERT(r1.code() % 2 == 0);
   rs_form(SRDA, r1, r0, r0, opnd.immediate());
+}
+
+// Rotate-And-Insert-Selected-Bits
+void Assembler::risbg(Register dst, Register src, const Operand& startBit,
+                      const Operand& endBit, const Operand& shiftAmt,
+                      bool zeroBits) {
+  // High tag the top bit of I4/EndBit to zero out any unselected bits
+  if (zeroBits)
+    rie_f_form(RISBG, dst, src, startBit, Operand(endBit.imm_ | 0x80),
+               shiftAmt);
+  else
+    rie_f_form(RISBG, dst, src, startBit, endBit, shiftAmt);
+}
+
+// Rotate-And-Insert-Selected-Bits
+void Assembler::risbgn(Register dst, Register src, const Operand& startBit,
+                       const Operand& endBit, const Operand& shiftAmt,
+                       bool zeroBits) {
+  // High tag the top bit of I4/EndBit to zero out any unselected bits
+  if (zeroBits)
+    rie_f_form(RISBGN, dst, src, startBit, Operand(endBit.imm_ | 0x80),
+               shiftAmt);
+  else
+    rie_f_form(RISBGN, dst, src, startBit, endBit, shiftAmt);
 }
 
 // Compare Halfword Immediate (32)
@@ -2709,6 +2881,26 @@ void Assembler::cgr(Register r1, Register r2) {
 // Compare Immediate (64)
 void Assembler::cfi(Register r, const Operand& opnd) {
   ril_form(CFI, r, opnd);
+}
+
+// Compare Immediate (Mem - Imm) (8)
+void Assembler::cli(const MemOperand& opnd, const Operand& imm) {
+  si_form(CLI, imm, opnd.rb(), opnd.offset());
+}
+
+// Compare Immediate (Mem - Imm) (8)
+void Assembler::cliy(const MemOperand& opnd, const Operand& imm) {
+  siy_form(CLIY, imm, opnd.rb(), opnd.offset());
+}
+
+// Test Under Mask (Mem - Imm) (8)
+void Assembler::tm(const MemOperand& opnd, const Operand& imm) {
+  si_form(TM, imm, opnd.rb(), opnd.offset());
+}
+
+// Test Under Mask (Mem - Imm) (8)
+void Assembler::tmy(const MemOperand& opnd, const Operand& imm) {
+  siy_form(TMY, imm, opnd.rb(), opnd.offset());
 }
 
 // Branch Relative and save (32)
@@ -2867,6 +3059,19 @@ void Assembler::iilh(Register r1, const Operand& opnd) {
 void Assembler::iill(Register r1, const Operand& opnd) {
   ri_form(IILL, r1, opnd);
 }
+
+// GPR <-> FPR Instructions
+
+// Load GR from FPR (64 <- L)
+void Assembler::lgdr(Register r1, DoubleRegister f2) {
+  rre_form(LGDR, r1, Register::from_code(f2.code()));
+}
+
+// Load FPR from FR (L <- 64)
+void Assembler::ldgr(DoubleRegister f1, Register r2) {
+  rre_form(LDGR, Register::from_code(f1.code()), r2);
+}
+
 
 // Floating point instructions
 //

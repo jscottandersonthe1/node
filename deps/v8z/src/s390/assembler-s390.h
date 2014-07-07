@@ -35,7 +35,7 @@
 // Copyright 2012 the V8 project authors. All rights reserved.
 
 //
-// Copyright IBM Corp. 2012, 2013. All rights reserved.
+// Copyright IBM Corp. 2012-2014. All rights reserved.
 //
 
 // A light-weight S390 Assembler
@@ -195,7 +195,11 @@ const Register sp   = { kRegister_sp_Code };
 // Double word FP register.
 struct DoubleRegister {
   static const int kNumRegisters = 16;
-  static const int kNumVolatileRegisters = 14;     // d0-d13
+#ifdef V8_TARGET_ARCH_S390X
+  static const int kNumVolatileRegisters = 8;     // d0-d7
+#else
+  static const int kNumVolatileRegisters = 14;     // d0-d15 except d4 and d6
+#endif
   static const int kNumAllocatableRegisters = 12;  // d1-d12
 
   inline static int ToAllocationIndex(DoubleRegister reg);
@@ -206,8 +210,9 @@ struct DoubleRegister {
   }
 
   static const char* AllocationIndexToString(int index) {
-    ASSERT(index >= 0 && index < kNumAllocatableRegisters);
+    ASSERT(index >= 0 && index < kNumRegisters);
     const char* const names[] = {
+      "f0",
       "f1",
       "f2",
       "f3",
@@ -220,6 +225,9 @@ struct DoubleRegister {
       "f10",
       "f11",
       "f12",
+      "f13",
+      "f14",
+      "f15"
     };
     return names[index];
   }
@@ -560,6 +568,7 @@ class Assembler : public AssemblerBase {
   // Puts a labels target address at the given position.
   // The high 8 bits are set to zero.
   void label_at_put(Label* L, int at_offset);
+  void load_label_offset(Register r1, Label* L);
 
   // Read/Modify the code target address in the branch/call instruction at pc.
   INLINE(static Address target_address_at(Address pc));
@@ -652,36 +661,38 @@ class Assembler : public AssemblerBase {
   // ---------------------------------------------------------------------------
   // Code generation
 
-  // S390 Pseudo Branch Instruction
-  void branchOnCond(Condition c, int branch_offset,
-      bool is_bound = false);  // jump on condition
-
-  // Label version
-  void b(Condition cond, Label* l, bool forceBRC = false) {
-    branchOnCond(cond, branch_offset(l, false), l->is_bound() || forceBRC);
-  }
-
+  // Helper for unconditional branch to Label with update to save register
   void b(Register r, Label* l) {
     positions_recorder()->WriteRecordedPositions();
     int32_t halfwords = branch_offset(l, false) / 2;
     brasl(r, Operand(halfwords));
   }
 
-  void beq(Label * l) { b(eq, l); }
-  void bne(Label * l) { b(ne, l); }
-  void blt(Label * l) { b(lt, l); }
-  void ble(Label * l) { b(le, l); }
-  void bgt(Label * l) { b(gt, l); }
-  void bge(Label * l) { b(ge, l); }
-  void b(Label * l)   { b(al, l); }
-  void jmp(Label * l) { b(al, l); }
-  void bunordered(Label* L) { b(unordered, L); }
-  void bordered(Label* L)   { b(ordered, L);   }
+  // Conditional Branch Instruction - Generates either BRC / BRCL
+  void branchOnCond(Condition c, int branch_offset, bool is_bound = false);
 
-  // Register version
-  void b(Condition cond, Register r) {
-    bcr(cond, r);
+  // Helpers for conditional branch to Label
+  void b(Condition cond, Label* l, Label::Distance dist = Label::kFar) {
+    branchOnCond(cond, branch_offset(l, false),
+                 l->is_bound() || (dist == Label::kNear));
   }
+
+  // Helpers for conditional branch to Label
+  void beq(Label * l, Label::Distance dist = Label::kFar) { b(eq, l, dist); }
+  void bne(Label * l, Label::Distance dist = Label::kFar) { b(ne, l, dist); }
+  void blt(Label * l, Label::Distance dist = Label::kFar) { b(lt, l, dist); }
+  void ble(Label * l, Label::Distance dist = Label::kFar) { b(le, l, dist); }
+  void bgt(Label * l, Label::Distance dist = Label::kFar) { b(gt, l, dist); }
+  void bge(Label * l, Label::Distance dist = Label::kFar) { b(ge, l, dist); }
+  void b(Label * l, Label::Distance dist = Label::kFar)   { b(al, l, dist); }
+  void jmp(Label * l, Label::Distance dist = Label::kFar) { b(al, l, dist); }
+  void bunordered(Label* l, Label::Distance dist = Label::kFar) {
+                                                     b(unordered, l, dist); }
+  void bordered(Label* l, Label::Distance dist = Label::kFar) {
+                                                       b(ordered, l, dist); }
+
+  // Helpers for conditional indirect branch off register
+  void b(Condition cond, Register r) { bcr(cond, r); }
   void beq(Register r) { b(eq, r); }
   void bne(Register r) { b(ne, r); }
   void blt(Register r) { b(lt, r); }
@@ -912,15 +923,12 @@ RXY_FORM(agf);
 RIL1_FORM(agfi);
 RRE_FORM(agfr);
 RI1_FORM(aghi);
-RIE_FORM(aghik);
 RRE_FORM(agr);
-RRF1_FORM(agrk);
 SIY_FORM(agsi);
 RX_FORM(ah);
 RRF1_FORM(ahhhr);
 RRF1_FORM(ahhlr);
 RI1_FORM(ahi);
-RIE_FORM(ahik);
 RXY_FORM(ahy);
 RIL1_FORM(aih);
 RX_FORM(al_z);
@@ -935,20 +943,17 @@ RIL1_FORM(algfi);
 RRE_FORM(algfr);
 RIE_FORM(alghsik);
 RRE_FORM(algr);
-RRF1_FORM(algrk);
 SIY_FORM(algsi);
 RRF1_FORM(alhhhr);
 RRF1_FORM(alhhlr);
 RIE_FORM(alhsik);
 RR_FORM(alr);
-RRF1_FORM(alrk);
 SIY_FORM(alsi);
 RIL1_FORM(alsih);
 RIL1_FORM(alsihn);
 RXY_FORM(aly);
 SS2_FORM(ap);
 RR_FORM(ar);
-RRF1_FORM(ark);
 SIY_FORM(asi);
 RRE_FORM(axbr);
 RRF1_FORM(axtr);
@@ -1219,7 +1224,6 @@ RR_FORM(lcr);
 RRE_FORM(lcxbr);
 RRE_FORM(ldebr);
 RRF2_FORM(ldetr);
-RRE_FORM(ldgr);
 RRE_FORM(ldxbr);
 RRF2_FORM(ldxbra);
 RRF2_FORM(ldxtr);
@@ -1238,7 +1242,6 @@ RXY_FORM(lg);
 RXY_FORM(lgat);
 RXY_FORM(lgb);
 RRE_FORM(lgbr);
-RRE_FORM(lgdr);
 RXY_FORM(lgf);
 RIL1_FORM(lgfi);
 RRE_FORM(lgfr);
@@ -1389,7 +1392,6 @@ RX_FORM(n);
 SS1_FORM(nc);
 RXY_FORM(ng);
 RRE_FORM(ngr);
-RRF1_FORM(ngrk);
 SI_FORM(ni);
 IE_FORM(niai);
 RIL1_FORM(nihf);
@@ -1400,14 +1402,12 @@ RI1_FORM(nilh);
 RI1_FORM(nill);
 SIY_FORM(niy);
 RR_FORM(nr);
-RRF1_FORM(nrk);
 RXY_FORM(ntstg);
 RXY_FORM(ny);
 RX_FORM(o);
 SS1_FORM(oc);
 RXY_FORM(og);
 RRE_FORM(ogr);
-RRF1_FORM(ogrk);
 SI_FORM(oi);
 RIL1_FORM(oihf);
 RI1_FORM(oihh);
@@ -1417,7 +1417,6 @@ RI1_FORM(oilh);
 RI1_FORM(oill);
 SIY_FORM(oiy);
 RR_FORM(or_z);
-RRF1_FORM(ork);
 RXY_FORM(oy);
 SS2_FORM(pack);
 RRE_FORM(pcc);
@@ -1432,8 +1431,6 @@ RRF1_FORM(ppa);
 RRF1_FORM(qadtr);
 RRF1_FORM(qaxtr);
 S_FORM(rchp);
-RIE_F_FORM(risbg);
-RIE_F_FORM(risbgn);
 RIE_FORM(risbhg);
 RIE_FORM(risblg);
 RSY1_FORM(rll);
@@ -1461,13 +1458,11 @@ RXY_FORM(sg);
 RXY_FORM(sgf);
 RRE_FORM(sgfr);
 RRE_FORM(sgr);
-RRF1_FORM(sgrk);
 RX_FORM(sh);
 RRF1_FORM(shhhr);
 RRF1_FORM(shhlr);
 RXY_FORM(shy);
 RX_FORM(sl);
-RSY1_FORM(slak);
 RXY_FORM(slb);
 RXY_FORM(slbg);
 RRE_FORM(slbgr);
@@ -1481,12 +1476,9 @@ RXY_FORM(slgf);
 RIL1_FORM(slgfi);
 RRE_FORM(slgfr);
 RRE_FORM(slgr);
-RRF1_FORM(slgrk);
 RRF1_FORM(slhhhr);
 RRF1_FORM(slhhlr);
-RSY1_FORM(sllk);
 RR_FORM(slr);
-RRF1_FORM(slrk);
 RXF_FORM(slxt);
 RXY_FORM(sly);
 SS2_FORM(sp_z);
@@ -1497,8 +1489,6 @@ RRE_FORM(sqxbr);
 RR_FORM(sr);
 RS1_FORM(srdl);
 RXF_FORM(srdt);
-RRF1_FORM(srk);
-RSY1_FORM(srlk);
 S_FORM(srnm);
 S_FORM(srnmb);
 S_FORM(srnmt);
@@ -1555,14 +1545,12 @@ RXE_FORM(tdgxt);
 S_FORM(tend);
 RRE_FORM(thder);
 RRE_FORM(thdr);
-SI_FORM(tm);
 RI1_FORM(tmh);
 RI1_FORM(tmhh);
 RI1_FORM(tmhl);
 RI1_FORM(tml);
 RI1_FORM(tmlh);
 RI1_FORM(tmll);
-SIY_FORM(tmy);
 RSL_FORM(tp);
 S_FORM(tpi);
 SS1_FORM(tr);
@@ -1585,13 +1573,11 @@ RX_FORM(x);
 SS1_FORM(xc);
 RXY_FORM(xg);
 RRE_FORM(xgr);
-RRF1_FORM(xgrk);
 SI_FORM(xi);
 RIL1_FORM(xihf);
 RIL1_FORM(xilf);
 SIY_FORM(xiy);
 RR_FORM(xr);
-RRF1_FORM(xrk);
 S_FORM(xsch);
 RXY_FORM(xy);
 SS2_FORM(zap);
@@ -1619,15 +1605,36 @@ SS2_FORM(zap);
   void stc(Register dst, const MemOperand& src);
   void stcy(Register dst, const MemOperand& src);
 
+  // Compare Instructions
+  void cr(Register r1, Register r2);
+  void cgr(Register r1, Register r2);
+  void clr(Register r1, Register r2);
+  void clgr(Register r1, Register r2);
+  void cli(const MemOperand& mem, const Operand& imm);
+  void cliy(const MemOperand& mem, const Operand& imm);
+
+  // Test Under Mask Instructions
+  void tm(const MemOperand& mem, const Operand& imm);
+  void tmy(const MemOperand& mem, const Operand& imm);
+
   // Shift Instruction (32)
-  void sll(Register r1, const Operand& opnd);
-  void srl(Register r1, const Operand& opnd);
-  void sra(Register r1, const Operand& opnd);
   void sll(Register r1, Register opnd);
+  void sll(Register r1, const Operand& opnd);
+  void sllk(Register r1, Register r3, Register opnd);
+  void sllk(Register r1, Register r3, const Operand& opnd);
   void srl(Register r1, Register opnd);
-  void sra(Register r1, Register opnd);
+  void srl(Register r1, const Operand& opnd);
+  void srlk(Register r1, Register r3, Register opnd);
   void srlk(Register r1, Register r3, const Operand& opnd);
+  void sra(Register r1, Register opnd);
+  void sra(Register r1, const Operand& opnd);
+  void srak(Register r1, Register r3, Register opnd);
+  void srak(Register r1, Register r3, const Operand& opnd);
+  void sla(Register r1, Register opnd);
   void sla(Register r1, const Operand& opnd);
+  void slak(Register r1, Register r3, Register opnd);
+  void slak(Register r1, Register r3, const Operand& opnd);
+
   void srda(Register r1, const Operand& opnd);
 
   // Shift Instructions (64)
@@ -1640,11 +1647,38 @@ SS2_FORM(zap);
   void slag(Register r1, Register r3, const Operand& opnd);
   void slag(Register r1, Register r3, const Register opnd);
 
-  // Compare Instructions
-  void cr(Register r1, Register r2);
-  void cgr(Register r1, Register r2);
-  void clr(Register r1, Register r2);
-  void clgr(Register r1, Register r2);
+  // Rotate and Insert Selected Bits
+  void risbg(Register dst, Register src, const Operand& startBit,
+             const Operand& endBit, const Operand& shiftAmt,
+             bool zeroBits = true);
+  void risbgn(Register dst, Register src, const Operand& startBit,
+              const Operand& endBit, const Operand& shiftAmt,
+              bool zeroBits = true);
+
+  // Arithmetic Instructions
+  void ahik(Register r1, Register r3, const Operand& opnd);
+  void ark(Register r1, Register r2, Register r3);
+  void alrk(Register r1, Register r2, Register r3);
+  void aghik(Register r1, Register r3, const Operand& opnd);
+  void agrk(Register r1, Register r2, Register r3);
+  void algrk(Register r1, Register r2, Register r3);
+  void srk(Register r1, Register r2, Register r3);
+  void slrk(Register r1, Register r2, Register r3);
+  void sgrk(Register r1, Register r2, Register r3);
+  void slgrk(Register r1, Register r2, Register r3);
+
+  // Bitwise Instructions
+  void nrk(Register r1, Register r2, Register r3);
+  void ngrk(Register r1, Register r2, Register r3);
+  void ork(Register r1, Register r2, Register r3);
+  void ogrk(Register r1, Register r2, Register r3);
+  void xrk(Register r1, Register r2, Register r3);
+  void xgrk(Register r1, Register r2, Register r3);
+
+
+  // GPR <-> FPR conversions
+  void lgdr(Register r1, DoubleRegister f2);
+  void ldgr(DoubleRegister f1, Register r2);
 
   // floating point instructions
   void ld(DoubleRegister r1, const MemOperand& opnd);
@@ -1908,7 +1942,6 @@ void lhi(Register dst, const Operand& imm);
   // Code emission
   inline void CheckBuffer();
   void GrowBuffer();
-  inline void emit(Instr x);
 
   // S390 emitting helpers
   inline void emit2bytes(uint16_t x);
@@ -2034,6 +2067,7 @@ void lhi(Register dst, const Operand& imm);
                      Disp d2);
   inline void ssf_form(Opcode op, Register r3, Register b1, Disp d1,
                      Register b2, Disp d2);
+  inline void rrf1_form(Opcode op, Register r1, Register r2, Register r3);
   inline void rrf1_form(uint32_t x);
   inline void rrf2_form(uint32_t x);
   inline void rrf3_form(uint32_t x);
