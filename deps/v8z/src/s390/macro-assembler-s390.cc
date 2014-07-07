@@ -1,6 +1,6 @@
 // Copyright 2012 the V8 project authors. All rights reserved.
 //
-// Copyright IBM Corp. 2012, 2013. All rights reserved.
+// Copyright IBM Corp. 2012-2014. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions are
@@ -109,9 +109,7 @@ void MacroAssembler::Call(Register target, Condition cond) {
   // address is loaded.
   positions_recorder()->WriteRecordedPositions();
 
-  // branch via link register and set LK bit for return point
-  // mtlr(target);  // @TODO Cleanup old PPC code.
-  // bclr(BA, SetLK);
+  // Branch to target via indirect branch
   basr(r14, target);
 
   ASSERT_EQ(CallSize(target, cond), SizeOfCodeGeneratedSince(&start));
@@ -120,52 +118,26 @@ void MacroAssembler::Call(Register target, Condition cond) {
 
 int MacroAssembler::CallSize(
     Address target, RelocInfo::Mode rmode, Condition cond) {
-  int size;
-
-#if 0  // Account for variable length Assembler::mov sequence.
-  int movSize;
-  intptr_t value = reinterpret_cast<intptr_t>(target);
-  if (is_int16(value) || (((value >> 16) << 16) == value)) {
-    movSize = 1;
-  } else {
-    movSize = 2;
-  }
-  size = (2 + movSize) * kInstrSize;
-#endif
-
   // S390 Assembler::move sequence are IILF / IIHF
+  int size;
 #if V8_TARGET_ARCH_S390X
   size = 2 + 12;  // IILF + IIHF + BASR
 #else
   size = 2 + 6;   // IILF + BASR
 #endif
-
   return size;
 }
 
 
 int MacroAssembler::CallSizeNotPredictableCodeSize(
     Address target, RelocInfo::Mode rmode, Condition cond) {
-  int size;
-
-#if 0  // Account for variable length Assembler::mov sequence.
-  int movSize;
-  intptr_t value = reinterpret_cast<intptr_t>(target);
-  if (is_int16(value) || (((value >> 16) << 16) == value)) {
-    movSize = 1;
-  } else {
-    movSize = 2;
-  }
-  size = (2 + movSize) * kInstrSize;
-#endif
-
   // S390 Assembler::move sequence are IILF / IIHF
+  int size;
 #if V8_TARGET_ARCH_S390X
   size = 2 + 12;  // IILF + IIHF + BASR
 #else
   size = 2 + 6;  // IILF + BASR
 #endif
-
   return size;
 }
 
@@ -181,12 +153,6 @@ void MacroAssembler::Call(Address target,
   // Statement positions are expected to be recorded when the target
   // address is loaded.
   positions_recorder()->WriteRecordedPositions();
-
-  // This can likely be optimized to make use of bc() with 24bit relative
-  //
-  // RecordRelocInfo(x.rmode_, x.imm_);
-  // bc( BA, .... offset, LKset);
-  //
 
   mov(ip, Operand(reinterpret_cast<intptr_t>(target), rmode));
   basr(r14, ip);
@@ -337,10 +303,7 @@ void MacroAssembler::InNewSpace(Register object,
   ASSERT(cond == eq || cond == ne);
   mov(r0, Operand(ExternalReference::new_space_mask(isolate())));
 
-  // If they are the same reg, we simply have to copy.
-  if (!scratch.is(object))
-    LoadRR(scratch, object);
-  AndP(scratch, r0);
+  AndP(scratch, object, r0);
   mov(r0, Operand(ExternalReference::new_space_start(isolate())));
   CmpRR(scratch, r0);
   b(cond, branch);
@@ -369,8 +332,7 @@ void MacroAssembler::RecordWriteField(
   // of the object, so so offset must be a multiple of kPointerSize.
   ASSERT(IsAligned(offset, kPointerSize));
 
-  LoadRR(dst, object);
-  AddP(dst, Operand(offset - kHeapObjectTag));
+  AddP(dst, object, Operand(offset - kHeapObjectTag));
   if (emit_debug_code()) {
     Label ok;
     mov(r0, Operand((1 << kPointerSizeLog2) - 1));
@@ -415,8 +377,7 @@ void MacroAssembler::RecordWrite(Register object,
   ASSERT(!address.is(cp) && !value.is(cp));
 
   if (emit_debug_code()) {
-    LoadP(ip, MemOperand(address));
-    CmpRR(ip, value);
+    CmpP(value, MemOperand(address));
     Check(eq, "Wrong address or value passed to RecordWrite");
   }
 
@@ -633,29 +594,41 @@ void MacroAssembler::EnterExitFrame(bool save_doubles, int stack_space) {
   lay(sp, MemOperand(sp, -2 * kPointerSize));
 
   if (emit_debug_code()) {
-    LoadImmP(r7, Operand::Zero());
-    StoreP(r7, MemOperand(fp, ExitFrameConstants::kSPOffset));
+    LoadImmP(r1, Operand::Zero());
+    StoreP(r1, MemOperand(fp, ExitFrameConstants::kSPOffset));
   }
-  mov(r7, Operand(CodeObject()));
-  StoreP(r7, MemOperand(fp, ExitFrameConstants::kCodeOffset));
+  mov(r1, Operand(CodeObject()));
+  StoreP(r1, MemOperand(fp, ExitFrameConstants::kCodeOffset));
 
   // Save the frame pointer and the context in top.
-  mov(r7, Operand(ExternalReference(Isolate::kCEntryFPAddress, isolate())));
-  StoreP(fp, MemOperand(r7));
-  mov(r7, Operand(ExternalReference(Isolate::kContextAddress, isolate())));
-  StoreP(cp, MemOperand(r7));
+  mov(r1, Operand(ExternalReference(Isolate::kCEntryFPAddress, isolate())));
+  StoreP(fp, MemOperand(r1));
+  mov(r1, Operand(ExternalReference(Isolate::kContextAddress, isolate())));
+  StoreP(cp, MemOperand(r1));
 
   // Optionally save all volatile double registers.
   if (save_doubles) {
     const int kNumRegs = DoubleRegister::kNumVolatileRegisters;
-    Sub(sp, Operand(kNumRegs * kDoubleSize));
-    for (int i = 0; i < kNumRegs; i++) {
-      DoubleRegister reg = DoubleRegister::from_code(i);
-      StoreF(reg, MemOperand(sp, i * kDoubleSize));
+    lay(sp, MemOperand(sp, -kNumRegs * kDoubleSize));
+#define StoreFloatingPointRegisterToStack(reg, offset) \
+    StoreF(DoubleRegister::from_code(reg), \
+      MemOperand(sp, (offset) * kDoubleSize));
+#ifdef V8_TARGET_ARCH_S390X
+    for (int i = 0; i < 7; i++) {
+      StoreFloatingPointRegisterToStack(i, i);
     }
-    // Note that d0 will be accessible at
-    //   fp - 2 * kPointerSize - kNumVolatileRegisters * kDoubleSize,
-    // since the sp slot and code slot were pushed after the fp.
+#else
+    StoreFloatingPointRegisterToStack(0, 0);
+    StoreFloatingPointRegisterToStack(1, 1);
+    StoreFloatingPointRegisterToStack(2, 2);
+    StoreFloatingPointRegisterToStack(3, 3);
+    StoreFloatingPointRegisterToStack(5, 4);
+    int offset = 5;
+    for (int i = 7; i < DoubleRegister::kNumRegisters; i++, offset++) {
+      StoreFloatingPointRegisterToStack(i, offset);
+    }
+#endif
+#undef StoreFloatingPointRegisterToStack
   }
 
   // Allocate and align the frame preparing for calling the runtime
@@ -670,8 +643,8 @@ void MacroAssembler::EnterExitFrame(bool save_doubles, int stack_space) {
 
   // Set the exit frame sp value to point just before the return address
   // location.
-  lay(r7, MemOperand(sp, (kStackFrameExtraParamSlot + 1) * kPointerSize));
-  StoreP(r7, MemOperand(fp, ExitFrameConstants::kSPOffset));
+  lay(r1, MemOperand(sp, kStackFrameSPSlot * kPointerSize));
+  StoreP(r1, MemOperand(fp, ExitFrameConstants::kSPOffset));
 }
 
 
@@ -693,8 +666,8 @@ int MacroAssembler::ActivationFrameAlignment() {
 #if !defined(USE_SIMULATOR)
   // Running on the real platform. Use the alignment as mandated by the local
   // environment.
-  // Note: This will break if we ever start generating snapshots on one PPC
-  // platform for another PPC platform with a different alignment.
+  // Note: This will break if we ever start generating snapshots on one S390
+  // platform for another S390 platform with a different alignment.
   return OS::ActivationFrameAlignment();
 #else  // Simulated
   // If we are using the simulator then we should always align to the expected
@@ -712,25 +685,38 @@ void MacroAssembler::LeaveExitFrame(bool save_doubles,
   if (save_doubles) {
     // Calculate the stack location of the saved doubles and restore them.
     const int kNumRegs = DoubleRegister::kNumVolatileRegisters;
-    const int offset = (2 * kPointerSize + kNumRegs * kDoubleSize);
-    LoadRR(r5, fp);
-    AddP(r5, Operand(-offset));
-    for (int i = 0; i < kNumRegs; i++) {
-      DoubleRegister reg = DoubleRegister::from_code(i);
-      LoadF(reg, MemOperand(r5, i * kDoubleSize));
+    lay(sp, MemOperand(fp, -(2 * kPointerSize + kNumRegs * kDoubleSize)));
+#define LoadFloatingPointRegisterToStack(reg, offset) \
+    LoadF(DoubleRegister::from_code(reg), \
+      MemOperand(sp, (offset) * kDoubleSize));
+#ifdef V8_TARGET_ARCH_S390X
+    for (int i = 0; i < 7; i++) {
+      LoadFloatingPointRegisterToStack(i, i);
     }
+#else
+    LoadFloatingPointRegisterToStack(0, 0);
+    LoadFloatingPointRegisterToStack(1, 1);
+    LoadFloatingPointRegisterToStack(2, 2);
+    LoadFloatingPointRegisterToStack(3, 3);
+    LoadFloatingPointRegisterToStack(5, 4);
+    int offset = 5;
+    for (int i = 7; i < DoubleRegister::kNumRegisters; i++, offset++) {
+      LoadFloatingPointRegisterToStack(i, offset);
+    }
+#endif
+#undef LoadFloatingPointRegisterToStack
   }
 
   // Clear top frame.
-  LoadImmP(r5, Operand(0, RelocInfo::NONE));
+  LoadImmP(r0, Operand(0, RelocInfo::NONE));
   mov(ip, Operand(ExternalReference(Isolate::kCEntryFPAddress, isolate())));
-  StoreP(r5, MemOperand(ip));
+  StoreP(r0, MemOperand(ip));
 
   // Restore current context from top and clear it in debug mode.
   mov(ip, Operand(ExternalReference(Isolate::kContextAddress, isolate())));
   LoadP(cp, MemOperand(ip));
 #ifdef DEBUG
-  StoreP(r5, MemOperand(ip));
+  StoreP(r0, MemOperand(ip));
 #endif
 
   // Tear down the exit frame, pop the arguments, and return.
@@ -739,7 +725,7 @@ void MacroAssembler::LeaveExitFrame(bool save_doubles,
   pop(r14);
 
   if (argument_count.is_valid()) {
-    ShiftLeftImm(argument_count, argument_count, Operand(kPointerSizeLog2));
+    ShiftLeftP(argument_count, argument_count, Operand(kPointerSizeLog2));
     la(sp, MemOperand(sp, argument_count));
   }
 }
@@ -754,8 +740,7 @@ void MacroAssembler::SetCallKind(Register dst, CallKind call_kind) {
   // at the call sites. However, the dst register has to be r7 to
   // follow the calling convention which requires the call type to be
   // in r7.
-  // @TODO Re-enable Assert here for S390
-//  ASSERT(dst.is(r7));
+  ASSERT(dst.is(r7));
   if (call_kind == CALL_AS_FUNCTION) {
     LoadSmiLiteral(dst, Smi::FromInt(1));
   } else {
@@ -919,10 +904,8 @@ void MacroAssembler::InvokeFunction(Register fun,
   // You can't call a function without a valid frame.
   ASSERT(flag == JUMP_FUNCTION || has_frame());
 
-  // Contract with called JS functions requires that function is passed in r2.
-  // @TODO HACK: Temporarily remove fun.is(r2) until we fix all the callers
-  // as PPC code expected it in r3.
-  // ASSERT(fun.is(r3));
+  // Contract with called JS functions requires that function is passed in r3.
+  ASSERT(fun.is(r3));
 
   Register expected_reg = r4;
   Register code_reg = r5;
@@ -1072,7 +1055,7 @@ void MacroAssembler::PopTryHandler() {
   StoreP(r3, MemOperand(ip));
 }
 
-// PPC - make use of ip as a temporary register
+// Make use of ip as a temporary register
 void MacroAssembler::JumpToHandlerEntry() {
   // Compute the handler entry address and jump to it.  The handler table is
   // a fixed array of (smi-tagged) code offsets.
@@ -1087,8 +1070,7 @@ void MacroAssembler::JumpToHandlerEntry() {
   LoadP(r4, MemOperand(ip));  // Smi-tagged offset.
   AddP(r3, Operand(Code::kHeaderSize - kHeapObjectTag));  // Code start.
   SmiUntag(ip, r4);
-  LoadRR(r0, r3);
-  AddP(r0, ip);
+  AddP(r0, r3, ip);
   LoadRR(r14, r0);
   Ret();
 }
@@ -1209,8 +1191,7 @@ void MacroAssembler::CheckAccessGlobalProxy(Register holder_reg,
     push(holder_reg);  // Temporarily save holder on the stack.
     // Read the first word and compare to the native_context_map.
     LoadP(holder_reg, FieldMemOperand(scratch, HeapObject::kMapOffset));
-    LoadRoot(ip, Heap::kNativeContextMapRootIndex);
-    CmpRR(holder_reg, ip);
+    CompareRoot(holder_reg, Heap::kNativeContextMapRootIndex);
     Check(eq, "JSGlobalObject::native_context should be a native context.");
     pop(holder_reg);  // Restore holder.
   }
@@ -1227,13 +1208,11 @@ void MacroAssembler::CheckAccessGlobalProxy(Register holder_reg,
     // that ip is clobbered as part of cmp with an object Operand.
     push(holder_reg);  // Temporarily save holder on the stack.
     LoadRR(holder_reg, ip);  // Move ip to its holding place.
-    LoadRoot(ip, Heap::kNullValueRootIndex);
-    CmpRR(holder_reg, ip);
+    CompareRoot(holder_reg, Heap::kNullValueRootIndex);
     Check(ne, "JSGlobalProxy::context() should not be null.");
 
     LoadP(holder_reg, FieldMemOperand(holder_reg, HeapObject::kMapOffset));
-    LoadRoot(ip, Heap::kNativeContextMapRootIndex);
-    CmpRR(holder_reg, ip);
+    CompareRoot(holder_reg, Heap::kNativeContextMapRootIndex);
     Check(eq, "JSGlobalObject::native_context should be a native context.");
     // Restore ip is not needed. ip is reloaded below.
     pop(holder_reg);  // Restore holder.
@@ -1271,30 +1250,24 @@ void MacroAssembler::GetNumberHash(Register t0, Register scratch) {
   LoadRR(scratch, t0);
   NotP(scratch);
   sll(t0, Operand(15));
-  Add(t0, scratch, t0);
+  AddP(t0, scratch, t0);
   // hash = hash ^ (hash >> 12);
-  LoadRR(scratch, t0);
-  srl(scratch, Operand(12));
+  ShiftRight(scratch, t0, Operand(12));
   XorP(t0, scratch);
   // hash = hash + (hash << 2);
-  LoadRR(scratch, t0);
-  sll(scratch, Operand(2));
-  Add(t0, t0, scratch);
+  ShiftLeft(scratch, t0, Operand(2));
+  AddP(t0, t0, scratch);
   // hash = hash ^ (hash >> 4);
-  LoadRR(scratch, t0);
-  srl(scratch, Operand(4));
+  ShiftRight(scratch, t0, Operand(4));
   XorP(t0, scratch);
   // hash = hash * 2057;
   LoadRR(r0, t0);
-  LoadRR(scratch, t0);
-  sll(scratch, Operand(3));
-  Add(t0, t0, scratch);
-  LoadRR(scratch, r0);
-  sll(scratch, Operand(11));
-  Add(t0, t0, scratch);
+  ShiftLeft(scratch, t0, Operand(3));
+  AddP(t0, t0, scratch);
+  ShiftLeft(scratch, r0, Operand(11));
+  AddP(t0, t0, scratch);
   // hash = hash ^ (hash >> 16);
-  LoadRR(scratch, t0);
-  srl(scratch, Operand(16));
+  ShiftRight(scratch, t0, Operand(16));
   XorP(t0, scratch);
 }
 
@@ -1538,11 +1511,10 @@ void MacroAssembler::AllocateInNewSpace(Register object_size,
   // to calculate the new top. Object size may be in words so a shift is
   // required to get the number of bytes.
   if ((flags & SIZE_IN_WORDS) != 0) {
-    ShiftLeftImm(scratch2, object_size, Operand(kPointerSizeLog2));
+    ShiftLeftP(scratch2, object_size, Operand(kPointerSizeLog2));
     AddP(scratch2, result);
   } else {
-    LoadRR(scratch2, result);
-    AddP(scratch2, object_size);
+    AddP(scratch2, result, object_size);
   }
   b(Condition(CC_OF), gc_required);
   Cmpl(scratch2, ip);
@@ -1628,8 +1600,8 @@ void MacroAssembler::AllocateAsciiString(Register result,
   // observing object alignment.
   ASSERT((SeqAsciiString::kHeaderSize & kObjectAlignmentMask) == 0);
   ASSERT(kCharSize == 1);
-  LoadRR(scratch1, length);
-  AddP(scratch1, Operand(kObjectAlignmentMask + SeqAsciiString::kHeaderSize));
+  AddP(scratch1, length,
+                 Operand(kObjectAlignmentMask + SeqAsciiString::kHeaderSize));
   LoadImmP(r0, Operand(~kObjectAlignmentMask));
   AndP(scratch1, r0);
 
@@ -1749,9 +1721,7 @@ void MacroAssembler::CompareInstanceType(Register map,
 
 void MacroAssembler::CompareRoot(Register obj,
                                  Heap::RootListIndex index) {
-  ASSERT(!obj.is(ip));
-  LoadRoot(ip, index);
-  CmpRR(obj, ip);
+  CmpP(obj, RootMemOperand(index));
 }
 
 
@@ -1826,8 +1796,7 @@ void MacroAssembler::StoreNumberToDoubleElements(Register value_reg,
   // in the exponent.
 #if V8_TARGET_ARCH_S390X
   mov(scratch1, Operand(kLastNonNaNInt64));
-  LoadRR(scratch3, value_reg);
-  AddP(scratch3, Operand(-kHeapObjectTag));
+  AddP(scratch3, value_reg, Operand(-kHeapObjectTag));
   lg(double_reg, MemOperand(scratch3, HeapNumber::kValueOffset));
   CmpRR(double_reg, scratch1);
 #else
@@ -1891,8 +1860,8 @@ void MacroAssembler::StoreNumberToDoubleElements(Register value_reg,
   b(&have_double_value);
 
   bind(&smi_value);
-  LoadRR(scratch1, elements_reg);
-  AddP(scratch1, Operand(FixedDoubleArray::kHeaderSize - kHeapObjectTag));
+  AddP(scratch1, elements_reg,
+                 Operand(FixedDoubleArray::kHeaderSize - kHeapObjectTag));
   SmiToDoubleArrayOffset(scratch4, key_reg);
   AddP(scratch1, scratch4);
   // scratch1 is now effective address of the double element
@@ -1922,28 +1891,24 @@ void MacroAssembler::AddAndCheckForOverflow(Register dst,
   // C = A+B; C overflows if A/B have same sign and C has diff sign than A
   if (dst.is(left)) {
     LoadRR(scratch, left);            // Preserve left.
-    Add(dst, left, right);        // Left is overwritten.
-    XorP(scratch, dst);  // Original left.
-    LoadRR(overflow_dst, dst);
-    XorP(overflow_dst, right);
+    AddP(dst, left, right);            // Left is overwritten.
+    XorP(scratch, dst);               // Original left.
+    XorP(overflow_dst, dst, right);
     AndP(overflow_dst, scratch/*, SetRC*/);
     LoadAndTestRR(overflow_dst, overflow_dst);
     // Should be okay to remove rc
   } else if (dst.is(right)) {
     LoadRR(scratch, right);           // Preserve right.
-    Add(dst, left, right);        // Right is overwritten.
-    XorP(scratch, dst);  // Original right.
-    LoadRR(overflow_dst, dst);
-    XorP(overflow_dst, left);
+    AddP(dst, left, right);            // Right is overwritten.
+    XorP(scratch, dst);               // Original right.
+    XorP(overflow_dst, dst, left);
     AndP(overflow_dst, scratch/*, SetRC*/);
     LoadAndTestRR(overflow_dst, overflow_dst);
     // Should be okay to remove rc
   } else {
-    Add(dst, left, right);
-    LoadRR(overflow_dst, dst);
-    XorP(overflow_dst, left);
-    LoadRR(scratch, dst);
-    XorP(scratch, right);
+    AddP(dst, left, right);
+    XorP(overflow_dst, dst, left);
+    XorP(scratch, dst, right);
     AndP(overflow_dst, scratch/*, SetRC*/);
     LoadAndTestRR(overflow_dst, overflow_dst);
     // Should be okay to remove rc
@@ -1965,8 +1930,7 @@ void MacroAssembler::SubAndCheckForOverflow(Register dst,
   if (dst.is(left)) {
     LoadRR(scratch, left);            // Preserve left.
     Sub(dst, left, right);        // Left is overwritten.
-    LoadRR(overflow_dst, dst);
-    XorP(overflow_dst, scratch);
+    XorP(overflow_dst, dst, scratch);
     XorP(scratch, right);
     AndP(overflow_dst, scratch/*, SetRC*/);
     LoadAndTestRR(overflow_dst, overflow_dst);
@@ -1974,18 +1938,15 @@ void MacroAssembler::SubAndCheckForOverflow(Register dst,
   } else if (dst.is(right)) {
     LoadRR(scratch, right);           // Preserve right.
     Sub(dst, left, right);        // Right is overwritten.
-    LoadRR(overflow_dst, dst);
-    XorP(overflow_dst, left);
+    XorP(overflow_dst, dst, left);
     XorP(scratch, left);
     AndP(overflow_dst, scratch/*, SetRC*/);
     LoadAndTestRR(overflow_dst, overflow_dst);
     // Should be okay to remove rc
   } else {
     Sub(dst, left, right);
-    LoadRR(overflow_dst, dst);
-    XorP(overflow_dst, left);
-    LoadRR(scratch, right);
-    XorP(scratch, left);
+    XorP(overflow_dst, dst, left);
+    XorP(scratch, left, right);
     AndP(overflow_dst, scratch/*, SetRC*/);
     LoadAndTestRR(overflow_dst, overflow_dst);
     // Should be okay to remove rc
@@ -1999,16 +1960,16 @@ void MacroAssembler::CompareMap(Register obj,
                                 Label* early_success,
                                 CompareMapMode mode) {
   LoadP(scratch, FieldMemOperand(obj, HeapObject::kMapOffset));
-  CompareMap(scratch, map, early_success, mode);
+  CompareMap(obj, map, early_success, mode);
 }
 
 
-void MacroAssembler::CompareMap(Register obj_map,
+void MacroAssembler::CompareMap(Register obj,
                                 Handle<Map> map,
                                 Label* early_success,
                                 CompareMapMode mode) {
   mov(r0, Operand(map));
-  CmpRR(obj_map, r0);
+  CmpP(r0, FieldMemOperand(obj, HeapObject::kMapOffset));
   if (mode == ALLOW_ELEMENT_TRANSITION_MAPS) {
     ElementsKind kind = map->elements_kind();
     if (IsFastElementsKind(kind)) {
@@ -2020,7 +1981,7 @@ void MacroAssembler::CompareMap(Register obj_map,
         if (!current_map) break;
         beq(early_success);
         mov(r0, Operand(Handle<Map>(current_map)));
-        CmpRR(obj_map, r0);
+        CmpP(r0, FieldMemOperand(obj, HeapObject::kMapOffset));
       }
     }
   }
@@ -2053,8 +2014,7 @@ void MacroAssembler::CheckMap(Register obj,
     JumpIfSmi(obj, fail);
   }
   LoadP(scratch, FieldMemOperand(obj, HeapObject::kMapOffset));
-  LoadRoot(ip, index);
-  CmpRR(scratch, ip);
+  CompareRoot(scratch, index);
   bne(fail);
 }
 
@@ -2118,8 +2078,7 @@ void MacroAssembler::TryGetFunctionPrototype(Register function,
   // If the prototype or initial map is the hole, don't return it and
   // simply miss the cache instead. This will allow us to allocate a
   // prototype object on-demand in the runtime system.
-  LoadRoot(ip, Heap::kTheHoleValueRootIndex);
-  CmpRR(result, ip);
+  CompareRoot(result, Heap::kTheHoleValueRootIndex);
   beq(miss);
 
   // If the function does not have an initial map, we're done.
@@ -2384,40 +2343,6 @@ void MacroAssembler::EmitVFPTruncate(VFPRoundingMode rounding_mode,
 
   // according to POPS Figure 19-18, condition code 3 is set if the integer
   // overflows or underflows.
-
-  /*
-  // Convert
-  if (rounding_mode == kRoundToZero) {
-    fctidz(double_scratch, double_input);
-  } else {
-    SetRoundingMode(rounding_mode);
-    fctid(double_scratch, double_input);
-    ResetRoundingMode();
-  }
-
-  AddP(sp, Operand(-kDoubleSize));
-  StoreF(double_scratch, MemOperand(sp, 0));
-#if V8_TARGET_ARCH_S390X
-  ld(result, MemOperand(sp, 0));
-#else
-#if __FLOAT_WORD_ORDER == __LITTLE_ENDIAN
-  LoadlW(scratch, MemOperand(sp, 4));
-  LoadlW(result, MemOperand(sp, 0));
-#else
-  LoadlW(scratch, MemOperand(sp, 0));
-  LoadlW(result, MemOperand(sp, 4));
-#endif
-#endif
-  AddP(sp, Operand(kDoubleSize));
-
-  // The result is a 32-bit integer when the high 33 bits of the
-  // result are identical.
-#if V8_TARGET_ARCH_S390X
-  TestIfInt32(result, scratch, r0);
-#else
-  TestIfInt32(scratch, result, r0);
-#endif
-  */
 }
 
 
@@ -2462,7 +2387,7 @@ void MacroAssembler::EmitOutOfInt32RangeTruncate(Register result,
   blt(&high_shift_needed);
   LoadImmP(input_high, Operand::Zero());  // Zero out high for or'ing later
   LoadComplementRR(scratch, scratch);       // scratch = 32 - scratch
-  AddPImm(scratch, Operand(32));
+  AddP(scratch, Operand(32));
   b(&neg_shift);
 
   // Set the implicit 1 before the mantissa part in input_high.
@@ -2474,7 +2399,7 @@ void MacroAssembler::EmitOutOfInt32RangeTruncate(Register result,
   // If they weren't, it would mean that the answer is in the 32bit range.
   sll(input_high, scratch);
   LoadComplementRR(scratch, scratch);       // scratch = 32 - scratch
-  AddPImm(scratch, Operand(32));
+  AddP(scratch, Operand(32));
   b(&pos_shift);
 
   // Replace the shifted bits with bits from the lower mantissa word.
@@ -2526,18 +2451,13 @@ void MacroAssembler::EmitECMATruncate(Register result,
 
   // otherwise, do the manual truncation.
 
-  // Allocate 8 bytes on stack as temp for conversion via memory
-  lay(sp, MemOperand(sp, -8));
-  StoreF(double_input, MemOperand(sp));
-#if __FLOAT_WORD_ORDER == __LITTLE_ENDIAN
-  LoadlW(input_low, MemOperand(sp));
-  LoadlW(input_high, MemOperand(sp, 4));
-#else
-  LoadlW(input_high, MemOperand(sp));
-  LoadlW(input_low, MemOperand(sp, 4));
-#endif
-  // Return the stack space
-  la(sp, MemOperand(sp, 8));
+  // Load the FPR bits into a GPR
+  lgdr(input_high, double_input);
+
+  // Need to massage the 64-bit reg into high and low regs
+  // @TODO Implement EmitOutOfInt32RangeTruncate to use a 64-bit reg!
+  lr(input_low, input_high);
+  srlg(input_high, input_high, Operand(32));
 
   EmitOutOfInt32RangeTruncate(result,
                               input_high,
@@ -2551,18 +2471,21 @@ void MacroAssembler::EmitECMATruncate(Register result,
 void MacroAssembler::GetLeastBitsFromSmi(Register dst,
                                          Register src,
                                          int num_least_bits) {
-  // @TODO Can replace by single RISBG
-  SmiUntag(dst, src);
-  AndPI(dst, Operand((1 << num_least_bits) - 1));
+  if (CpuFeatures::IsSupported(GENERAL_INSTR_EXT)) {
+    // We rotate by kSmiShift amount, and extract the num_least_bits
+    risbg(dst, src, Operand(64 - num_least_bits), Operand(63),
+                    Operand(64 - kSmiShift), true);
+  } else {
+    SmiUntag(dst, src);
+    AndP(dst, Operand((1 << num_least_bits) - 1));
+  }
 }
 
 
 void MacroAssembler::GetLeastBitsFromInt32(Register dst,
                                            Register src,
                                            int num_least_bits) {
-  if (!dst.is(src))
-    LoadRR(dst, src);
-  AndPI(dst, Operand((1 << num_least_bits) - 1));
+  AndP(dst, src, Operand((1 << num_least_bits) - 1));
 }
 
 
@@ -2731,8 +2654,7 @@ void MacroAssembler::Assert(Condition cond, const char* msg, CRegister cr) {
 void MacroAssembler::AssertRegisterIsRoot(Register reg,
                                           Heap::RootListIndex index) {
   if (emit_debug_code()) {
-    LoadRoot(ip, index);
-    CmpRR(reg, ip);
+    CompareRoot(reg, index);
     Check(eq, "Register did not match expected root");
   }
 }
@@ -2744,15 +2666,12 @@ void MacroAssembler::AssertFastElements(Register elements) {
     Label ok;
     push(elements);
     LoadP(elements, FieldMemOperand(elements, HeapObject::kMapOffset));
-    LoadRoot(ip, Heap::kFixedArrayMapRootIndex);
-    CmpRR(elements, ip);
-    beq(&ok);
-    LoadRoot(ip, Heap::kFixedDoubleArrayMapRootIndex);
-    CmpRR(elements, ip);
-    beq(&ok);
-    LoadRoot(ip, Heap::kFixedCOWArrayMapRootIndex);
-    CmpRR(elements, ip);
-    beq(&ok);
+    CompareRoot(elements, Heap::kFixedArrayMapRootIndex);
+    beq(&ok, Label::kNear);
+    CompareRoot(elements, Heap::kFixedDoubleArrayMapRootIndex);
+    beq(&ok, Label::kNear);
+    CompareRoot(elements, Heap::kFixedCOWArrayMapRootIndex);
+    beq(&ok, Label::kNear);
     Abort("JSObject with fast elements map has slow elements");
     bind(&ok);
     pop(elements);
@@ -2909,8 +2828,7 @@ void MacroAssembler::JumpIfNotPowerOfTwoOrZero(
   Sub(scratch, reg, Operand(1));
   Cmpi(scratch, Operand::Zero());
   blt(not_power_of_two_or_zero);
-  LoadRR(r0, reg);
-  AndP(r0, scratch/*, SetRC*/);  // Should be okay to remove rc
+  AndP(r0, reg, scratch/*, SetRC*/);  // Should be okay to remove rc
   bne(not_power_of_two_or_zero /*, cr0*/);
 }
 
@@ -2923,8 +2841,7 @@ void MacroAssembler::JumpIfNotPowerOfTwoOrZeroAndNeg(
   Sub(scratch, reg, Operand(1));
   Cmpi(scratch, Operand::Zero());
   blt(zero_and_neg);
-  LoadRR(r0, reg);
-  AndP(r0, scratch/*, SetRC*/);  // Should be okay to remove rc
+  AndP(r0, reg, scratch/*, SetRC*/);  // Should be okay to remove rc
   bne(not_power_of_two /*, cr0*/);
 }
 
@@ -2951,8 +2868,7 @@ void MacroAssembler::SmiTagCheckOverflow(Register dst,
     ASSERT(!dst.is(overflow));
     ASSERT(!src.is(overflow));
     SmiTag(dst, src);
-    LoadRR(overflow, src);
-    XorP(overflow, dst/*, SetRC*/);  // Overflow if (value ^ 2 * value) < 0.
+    XorP(overflow, src, dst);  // Overflow if (value ^ 2 * value) < 0.
     LoadAndTestRR(overflow, overflow);
     // safe to remove rc
   }
@@ -2977,7 +2893,7 @@ void MacroAssembler::UntagAndJumpIfSmi(
   // this won't work if src == dst
   ASSERT(src.code() != dst.code());
   SmiUntag(dst, src);
-  TestBit(src, 0, r0);
+  TestIfSmi(src);
   beq(smi_case);
 }
 
@@ -2986,9 +2902,18 @@ void MacroAssembler::UntagAndJumpIfNotSmi(
     Register dst, Register src, Label* non_smi_case) {
   STATIC_ASSERT(kSmiTag == 0);
   STATIC_ASSERT(kSmiTagSize == 1);
-  TestBit(src, 0, r0);
-  SmiUntag(dst, src);
-  LoadAndTestRR(r0, r0);
+
+  // We can more optimally use TestIfSmi if dst != src
+  // otherwise, the UnTag operation will kill the CC and we cannot
+  // test the Tag bit.
+  if (src.code() != dst.code()) {
+    SmiUntag(dst, src);
+    TestIfSmi(src);
+  } else {
+    TestBit(src, 0, r0);
+    SmiUntag(dst, src);
+    LoadAndTestRR(r0, r0);
+  }
   bne(non_smi_case);
 }
 
@@ -3086,8 +3011,7 @@ void MacroAssembler::JumpIfNotBothSequentialAsciiStrings(Register first,
                                                          Label* failure) {
   // Check that neither is a smi.
   STATIC_ASSERT(kSmiTag == 0);
-  LoadRR(scratch1, first);
-  AndP(scratch1, second);
+  AndP(scratch1, first, second);
   JumpIfSmi(scratch1, failure);
   JumpIfNonSmisNotBothSequentialAsciiStrings(first,
                                              second,
@@ -3233,6 +3157,18 @@ void MacroAssembler::JumpIfBothInstanceTypesAreNotSequentialAscii(
   int kFlatAsciiStringMask =
       kIsNotStringMask | kStringEncodingMask | kStringRepresentationMask;
   int kFlatAsciiStringTag = ASCII_STRING_TYPE;
+  if (!scratch1.is(first)) LoadRR(scratch1, first);
+  if (!scratch2.is(second)) LoadRR(scratch2, second);
+  nilf(scratch1, Operand(kFlatAsciiStringMask));
+  Cmpi(scratch1, Operand(kFlatAsciiStringTag));
+  bne(failure);
+  nilf(scratch2, Operand(kFlatAsciiStringMask));
+  Cmpi(scratch2, Operand(kFlatAsciiStringTag));
+  bne(failure);
+
+  /*
+  Cmpi(scratch1, Operand(kFlatAsciiStringTag));
+  nilf(scratch2, Operand(kFlatAsciiStringMask));
   mov(scratch1, Operand(kFlatAsciiStringMask));
   AndP(scratch1, first);
   mov(scratch2, Operand(kFlatAsciiStringMask));
@@ -3241,6 +3177,7 @@ void MacroAssembler::JumpIfBothInstanceTypesAreNotSequentialAscii(
   bne(failure);
   Cmpi(scratch2, Operand(kFlatAsciiStringTag));
   bne(failure);
+  */
 }
 
 
@@ -3250,10 +3187,17 @@ void MacroAssembler::JumpIfInstanceTypeIsNotSequentialAscii(Register type,
   int kFlatAsciiStringMask =
       kIsNotStringMask | kStringEncodingMask | kStringRepresentationMask;
   int kFlatAsciiStringTag = ASCII_STRING_TYPE;
+
+  if (!scratch.is(type)) LoadRR(scratch, type);
+  nilf(scratch, Operand(kFlatAsciiStringMask));
+  Cmpi(scratch, Operand(kFlatAsciiStringTag));
+  bne(failure);
+  /*
   mov(scratch, Operand(kFlatAsciiStringMask));
   AndP(scratch, type);
   Cmpi(scratch, Operand(kFlatAsciiStringTag));
   bne(failure);
+  */
 }
 
 static const int kRegisterPassedArguments = 5;
@@ -3285,19 +3229,16 @@ void MacroAssembler::PrepareCallCFunction(int num_reg_arguments,
     // the original value of sp and, on native, the required slots to
     // make ABI work.
     LoadRR(scratch, sp);
-#if !defined(USE_SIMULATOR)
-    Sub(sp, Operand((stack_passed_arguments +
+    lay(sp, MemOperand(sp, -(1 + stack_passed_arguments +
                           kNumRequiredStackFrameSlots) * kPointerSize));
-#else
-    Sub(sp, Operand((stack_passed_arguments + 1) * kPointerSize));
-#endif
     ASSERT(IsPowerOf2(frame_alignment));
     nill(sp, Operand(-frame_alignment));
 
     // Save the original stack pointer (pre-alignment) onto the stack
-    StoreP(scratch, MemOperand(sp, stack_passed_arguments * kPointerSize));
+    StoreP(scratch, MemOperand(sp, (stack_passed_arguments +
+                        kNumRequiredStackFrameSlots) * kPointerSize));
   } else {
-    Sub(sp, Operand((stack_passed_arguments +
+    lay(sp, MemOperand(sp, -(stack_passed_arguments +
                           kNumRequiredStackFrameSlots) * kPointerSize));
   }
 }
@@ -3383,15 +3324,16 @@ void MacroAssembler::CallCFunctionHelper(Register function,
   // preserved regsiter save area.
   // @TODO Make sure this is in the right place and we need to guard it
   // with appropriate #ifdefs
-  lay(sp, MemOperand(sp, -kCalleeRegisterSaveAreaSize));
+  // lay(sp, MemOperand(sp, -kCalleeRegisterSaveAreaSize));
   Call(function);
-  la(sp, MemOperand(sp, +kCalleeRegisterSaveAreaSize));
+  // la(sp, MemOperand(sp, +kCalleeRegisterSaveAreaSize));
 
   int stack_passed_arguments = CalculateStackPassedWords(
       num_reg_arguments, num_double_arguments);
   if (ActivationFrameAlignment() > kPointerSize) {
     // Load the original stack pointer (pre-alignment) from the stack
-    LoadP(sp, MemOperand(sp, stack_passed_arguments * kPointerSize), r0);
+    LoadP(sp, MemOperand(sp, (stack_passed_arguments +
+                    kNumRequiredStackFrameSlots) * kPointerSize), r0);
   } else {
     la(sp, MemOperand(sp, (stack_passed_arguments +
                           kNumRequiredStackFrameSlots) * kPointerSize));
@@ -3537,16 +3479,14 @@ void MacroAssembler::CheckPageFlag(
   ASSERT(cc == ne || cc == eq);
   ClearRightImm(scratch, object, Operand(kPageSizeBits));
   LoadP(scratch, MemOperand(scratch, MemoryChunk::kFlagsOffset));
-
-  mov(r0, Operand(mask));
-  AndP(r0, scratch);
+  AndP(r0, scratch, Operand(mask));
   // Should be okay to remove rc
 
   if (cc == ne) {
-    bne(condition_met /*, cr0*/);
+    bne(condition_met, Label::kNear);
   }
   if (cc == eq) {
-    beq(condition_met /*, cr0*/);
+    beq(condition_met, Label::kNear);
   }
 }
 
@@ -3631,7 +3571,7 @@ void MacroAssembler::GetMarkBits(Register addr_reg,
   ExtractBitRange(ip, addr_reg,
                   kPageSizeBits - 1,
                   kLowBits);
-  ShiftLeftImm(ip, ip, Operand(Bitmap::kBytesPerCellLog2));
+  ShiftLeftP(ip, ip, Operand(Bitmap::kBytesPerCellLog2));
   AddP(bitmap_reg, ip);
   LoadRR(ip, mask_reg);   // Have to do some funky reg shuffling as
                           // 31-bit shift left clobbers on s390.
@@ -3741,8 +3681,7 @@ void MacroAssembler::EnsureNotWhite(
 #else
   ASSERT(kSmiShift == 1);
 #endif
-  LoadRR(length, ip);
-  AddP(length, Operand(SeqString::kHeaderSize + kObjectAlignmentMask));
+  AddP(length, ip, Operand(SeqString::kHeaderSize + kObjectAlignmentMask));
   LoadImmP(r0, Operand(~kObjectAlignmentMask));
   AndP(length, r0);
 
@@ -3913,18 +3852,48 @@ void MacroAssembler::mov(Register dst, const Operand& src) {
 #endif
 }
 
+// Compare 32-bit Register vs Memory
 void MacroAssembler::Cmp(Register dst, const MemOperand& opnd) {
   // make sure offset is within 20 bit range
-#if V8_TARGET_ARCH_S390X
-  cg(dst, opnd);
-#else
   ASSERT(is_int20(opnd.offset()));
   if (is_uint12(opnd.offset()))
     c(dst, opnd);
   else
     cy(dst, opnd);
+}
+
+// Compare Pointer Size Register vs Memory
+void MacroAssembler::CmpP(Register dst, const MemOperand& opnd) {
+  // make sure offset is within 20 bit range
+  ASSERT(is_int20(opnd.offset()));
+#if V8_TARGET_ARCH_S390X
+  cg(dst, opnd);
+#else
+  Cmp(dst, opnd);
 #endif
 }
+
+// Compare Logical 32-bit Register vs Memory
+void MacroAssembler::CmpLogical(Register dst, const MemOperand& opnd) {
+  // make sure offset is within 20 bit range
+  ASSERT(is_int20(opnd.offset()));
+  if (is_uint12(opnd.offset()))
+    cl(dst, opnd);
+  else
+    cly(dst, opnd);
+}
+
+// Compare Logical 32-bit Register vs Memory
+void MacroAssembler::CmpLogicalP(Register dst, const MemOperand& opnd) {
+  // make sure offset is within 20 bit range
+  ASSERT(is_int20(opnd.offset()));
+#if V8_TARGET_ARCH_S390X
+  clg(dst, opnd);
+#else
+  CmpLogical(dst, opnd);
+#endif
+}
+
 
 void MacroAssembler::Cmpl(Register dst, const MemOperand& opnd) {
   ASSERT(is_int20(opnd.offset()));
@@ -3936,6 +3905,15 @@ void MacroAssembler::Cmpl(Register dst, const MemOperand& opnd) {
   else
     cly(dst, opnd);
 #endif
+}
+
+// Compare Logical Byte (Mem - Imm)
+void MacroAssembler::CmpLogicalByte(const MemOperand& mem, const Operand& imm) {
+  ASSERT(is_uint8(imm.immediate()));
+  if (is_uint12(mem.offset()))
+    cli(mem, imm);
+  else
+    cliy(mem, imm);
 }
 
 void MacroAssembler::Sub(Register dst, Register src1, Register src2) {
@@ -3951,33 +3929,11 @@ void MacroAssembler::Sub(Register dst, Register src1, Register src2) {
 }
 
 void MacroAssembler::Sub(Register dst, Register src, const Operand& imm) {
-  Add(dst, src, Operand(-(imm.imm_)));
+  AddP(dst, src, Operand(-(imm.imm_)));
 }
 
 void MacroAssembler::Sub(Register dst, const Operand& imm) {
-  AddPImm(dst, Operand(-(imm.imm_)));
-}
-
-void MacroAssembler::Add(Register dst, const MemOperand& opnd) {
-  ASSERT(is_int20(opnd.offset()));
-  if (is_uint12(opnd.offset()))
-    a(dst, opnd);
-  else
-    ay(dst, opnd);
-}
-
-void MacroAssembler::AddPImm(Register dst, const Operand& opnd) {
-#if V8_TARGET_ARCH_S390X
-  if (is_int16(opnd.immediate()))
-    aghi(dst, opnd);
-  else
-    agfi(dst, opnd);
-#else
-  if (is_int16(opnd.immediate()))
-    ahi(dst, opnd);
-  else
-    afi(dst, opnd);
-#endif
+  AddP(dst, Operand(-(imm.imm_)));
 }
 
 void MacroAssembler::Mul(Register dst, Register src1, Register src2) {
@@ -4029,36 +3985,160 @@ void MacroAssembler::MulP(Register dst, const MemOperand& opnd) {
 #endif
 }
 
-void MacroAssembler::Add(Register dst, Register src,
-                        const Operand& opnd) {
-  if (!dst.is(src)) {
-    Load(dst, opnd);  // should be calling sign-ext load
-    AddRR(dst, src);
-  } else {
-    AddPImm(dst, opnd);
-  }
+// Add 32-bit (Register dst = Register dst + Immediate opnd)
+void MacroAssembler::Add(Register dst, const Operand& opnd) {
+  if (is_int16(opnd.immediate()))
+    ahi(dst, opnd);
+  else
+    afi(dst, opnd);
 }
 
-void MacroAssembler::Add(Register dst, Register src1,
-                        Register src2) {
+// Add Pointer Size (Register dst = Register dst + Immediate opnd)
+void MacroAssembler::AddP(Register dst, const Operand& opnd) {
+#if V8_TARGET_ARCH_S390X
+  if (is_int16(opnd.immediate()))
+    aghi(dst, opnd);
+  else
+    agfi(dst, opnd);
+#else
+  if (is_int16(opnd.immediate()))
+    ahi(dst, opnd);
+  else
+    afi(dst, opnd);
+#endif
+}
+
+// Add 32-bit (Register dst = Register src + Immediate opnd)
+void MacroAssembler::Add(Register dst, Register src, const Operand& opnd) {
+  if (!dst.is(src)) {
+    if (CpuFeatures::IsSupported(DISTINCT_OPS) && is_int16(opnd.immediate())) {
+      ahik(dst, src, opnd);
+      return;
+    }
+    lr(dst, src);
+  }
+  Add(dst, opnd);
+}
+
+// Add Pointer Size (Register dst = Register src + Immediate opnd)
+void MacroAssembler::AddP(Register dst, Register src, const Operand& opnd) {
+  if (!dst.is(src)) {
+    if (CpuFeatures::IsSupported(DISTINCT_OPS) && is_int16(opnd.immediate())) {
+      AddPImm_RRI(dst, src, opnd);
+      return;
+    }
+    LoadRR(dst, src);
+  }
+  AddP(dst, opnd);
+}
+
+// Add 32-bit (Register dst = Register dst + Register src)
+void MacroAssembler::Add(Register dst, Register src) {
+  ar(dst, src);
+}
+
+// Add Pointer Size (Register dst = Register dst + Register src)
+void MacroAssembler::AddP(Register dst, Register src) {
+  AddRR(dst, src);
+}
+
+// Add Pointer Size with src extension
+//     (Register dst(ptr) = Register dst (ptr) + Register src (32 | 32->64))
+// src is treated as a 32-bit signed integer, which is sign extended to
+// 64-bit if necessary.
+void MacroAssembler::AddP_ExtendSrc(Register dst, Register src) {
+#if V8_TARGET_ARCH_S390X
+  agfr(dst, src);
+#else
+  ar(dst, src);
+#endif
+}
+
+// Add 32-bit (Register dst = Register src1 + Register src2)
+void MacroAssembler::Add(Register dst, Register src1, Register src2) {
   if (!dst.is(src1) && !dst.is(src2)) {
-    LoadRR(dst, src1);
+    // We prefer to generate AR/AGR, over the non clobbering ARK/AGRK
+    // as AR is a smaller instruction
+    if (CpuFeatures::IsSupported(DISTINCT_OPS)) {
+      ark(dst, src1, src2);
+      return;
+    } else {
+      lr(dst, src1);
+    }
+  } else if (dst.is(src2)) {
+    src2 = src1;
+  }
+  ar(dst, src2);
+}
+
+// Add Pointer Size (Register dst = Register src1 + Register src2)
+void MacroAssembler::AddP(Register dst, Register src1, Register src2) {
+  if (!dst.is(src1) && !dst.is(src2)) {
+    // We prefer to generate AR/AGR, over the non clobbering ARK/AGRK
+    // as AR is a smaller instruction
+    if (CpuFeatures::IsSupported(DISTINCT_OPS)) {
+      AddP_RRR(dst, src1, src2);
+      return;
+    } else {
+      LoadRR(dst, src1);
+    }
   } else if (dst.is(src2)) {
     src2 = src1;
   }
   AddRR(dst, src2);
 }
 
-void MacroAssembler::Addl(Register dst, const MemOperand& opnd) {
+// Add Pointer Size with src extension
+//      (Register dst (ptr) = Register dst (ptr) + Register src1 (ptr) +
+//                            Register src2 (32 | 32->64))
+// src is treated as a 32-bit signed integer, which is sign extended to
+// 64-bit if necessary.
+void MacroAssembler::AddP_ExtendSrc(Register dst, Register src1,
+                                    Register src2) {
 #if V8_TARGET_ARCH_S390X
-  algf(dst, opnd);
-#else
-  ASSERT(is_int20(opnd.offset()));
-  if (is_uint12(opnd.offset())) {
-    al_z(dst, opnd);
+  if (dst.is(src2)) {
+    // The source we need to sign extend is the same as result.
+    lgfr(dst, src2);
+    agr(dst, src1);
   } else {
-    aly(dst, opnd);
+    if (!dst.is(src1))
+      LoadRR(dst, src1);
+    agfr(dst, src2);
   }
+#else
+  AddP(dst, src1, src2);
+#endif
+}
+
+// Add 32-bit (Register-Memory)
+void MacroAssembler::Add(Register dst, const MemOperand& opnd) {
+  ASSERT(is_int20(opnd.offset()));
+  if (is_uint12(opnd.offset()))
+    a(dst, opnd);
+  else
+    ay(dst, opnd);
+}
+
+// Add Pointer Size (Register-Memory)
+void MacroAssembler::AddP(Register dst, const MemOperand& opnd) {
+#if V8_TARGET_ARCH_S390X
+  ASSERT(is_int20(opnd.offset()));
+  ag(dst, opnd);
+#else
+  Add(dst, opnd);
+#endif
+}
+
+// Add Pointer Size with src extension
+//      (Register dst (ptr) = Register dst (ptr) + Mem opnd (32 | 32->64))
+// src is treated as a 32-bit signed integer, which is sign extended to
+// 64-bit if necessary.
+void MacroAssembler::AddP_ExtendSrc(Register dst, const MemOperand& opnd) {
+#if V8_TARGET_ARCH_S390X
+  ASSERT(is_int20(opnd.offset()));
+  agf(dst, opnd);
+#else
+  Add(dst, opnd);
 #endif
 }
 
@@ -4094,38 +4174,81 @@ void MacroAssembler::Sub(Register dst, const MemOperand& opnd) {
 #endif
 }
 
-#if 0  // Not support on z9
-void MacroAssembler::And(Register dst, Register src1, Register src2) {
-#if V8_TARGET_ARCH_S390X
-  ngrk(dst, src1, src2);
-#else
-  nrk(dst, src1, src2);
-#endif
-}
-#endif
+//----------------------------------------------------------------------------//
+//  Bitwise Operations
+//----------------------------------------------------------------------------//
 
-void MacroAssembler::AndP(Register dst, Register src) {
-#if V8_TARGET_ARCH_S390X
-  ngr(dst, src);
-#else
+
+// AND 32-bit - dst = dst & src
+void MacroAssembler::And(Register dst, Register src) {
   nr(dst, src);
-#endif
 }
 
-void MacroAssembler::AndP(Register dst, const MemOperand& opnd) {
-#if V8_TARGET_ARCH_S390X
-  iihf(dst, Operand(static_cast<intptr_t>(0)));  // higher reg set to 0
-  n(dst, opnd);
-#else
+// AND Pointer Size - dst = dst & src
+void MacroAssembler::AndP(Register dst, Register src) {
+  AndRR(dst, src);
+}
+
+// Non-clobbering AND 32-bit - dst = src1 & src1
+void MacroAssembler::And(Register dst, Register src1, Register src2) {
+  if (!dst.is(src1) && !dst.is(src2)) {
+    // We prefer to generate XR/XGR, over the non clobbering XRK/XRK
+    // as XR is a smaller instruction
+    if (CpuFeatures::IsSupported(DISTINCT_OPS)) {
+      nrk(dst, src1, src2);
+      return;
+    } else {
+      lr(dst, src1);
+    }
+  } else if (dst.is(src2)) {
+    src2 = src1;
+  }
+  And(dst, src2);
+}
+
+// Non-clobbering AND pointer size - dst = src1 & src1
+void MacroAssembler::AndP(Register dst, Register src1, Register src2) {
+  if (!dst.is(src1) && !dst.is(src2)) {
+    // We prefer to generate XR/XGR, over the non clobbering XRK/XRK
+    // as XR is a smaller instruction
+    if (CpuFeatures::IsSupported(DISTINCT_OPS)) {
+      AndP_RRR(dst, src1, src2);
+      return;
+    } else {
+      LoadRR(dst, src1);
+    }
+  } else if (dst.is(src2)) {
+    src2 = src1;
+  }
+  AndP(dst, src2);
+}
+
+// AND 32-bit (Reg - Mem)
+void MacroAssembler::And(Register dst, const MemOperand& opnd) {
   ASSERT(is_int20(opnd.offset()));
   if (is_uint12(opnd.offset()))
     n(dst, opnd);
   else
     ny(dst, opnd);
+}
+
+// AND Pointer Size (Reg - Mem)
+void MacroAssembler::AndP(Register dst, const MemOperand& opnd) {
+  ASSERT(is_int20(opnd.offset()));
+#if V8_TARGET_ARCH_S390X
+  ng(dst, opnd);
+#else
+  And(dst, opnd);
 #endif
 }
 
-void MacroAssembler::AndPI(Register dst, const Operand& opnd) {
+// AND 32-bit - dst = dst & imm
+void MacroAssembler::And(Register dst, const Operand& opnd) {
+  nilf(dst, opnd);
+}
+
+// AND Pointer Size - dst = dst & imm
+void MacroAssembler::AndP(Register dst, const Operand& opnd) {
 #if V8_TARGET_ARCH_S390X
   intptr_t value = opnd.imm_;
   if (value >> 32 != -1) {
@@ -4134,116 +4257,276 @@ void MacroAssembler::AndPI(Register dst, const Operand& opnd) {
   }
   nilf(dst, Operand(value & 0xFFFFFFFF));
 #else
-  nilf(dst, opnd);
+  And(dst, opnd);
 #endif
 }
 
-void MacroAssembler::AndPImm(Register dst, const Operand& opnd) {
-#if V8_TARGET_ARCH_S390X
+// AND 32-bit - dst = src & imm
+void MacroAssembler::And(Register dst, Register src, const Operand& opnd) {
+  if (!dst.is(src))
+    lr(dst, src);
+  nilf(dst, opnd);
+}
+
+// AND Pointer Size - dst = src & imm
+void MacroAssembler::AndP(Register dst, Register src, const Operand& opnd) {
+  // Try to exploit RISBG first
   intptr_t value = opnd.imm_;
-  if (value >> 32 != -1) {
-    ASSERT(false);
-    // this may not work b/c condition code won't be set correctly
-    nihf(dst, Operand(value >> 32));
+  if (CpuFeatures::IsSupported(GENERAL_INSTR_EXT)) {
+    intptr_t shifted_value = value;
+    int trailing_zeros = 0;
+
+    // We start checking how many trailing zeros are left at the end.
+    while ((0 != shifted_value) && (0 == (shifted_value & 1))) {
+       trailing_zeros++;
+       shifted_value >>= 1;
+    }
+
+    // If temp (value with right-most set of zeros shifted out) is 1 less
+    // than power of 2, we have consecutive bits of 1.
+    if (IsPowerOf2(shifted_value + 1)) {
+      int startBit = 32 + CompilerIntrinsics::CountLeadingZeros(shifted_value) -
+                     trailing_zeros;
+      int endBit = 63 - trailing_zeros;
+      // Start: startBit, End: endBit, Shift = 0, true = zero unselected bits.
+      risbg(dst, src, Operand(startBit), Operand(endBit), Operand::Zero(),
+            true);
+      return;
+    } else if (-1 == shifted_value) {
+    // A Special case in which all top bits up to MSB are 1's.  In this case,
+    // we can set startBit to be 0.
+      int endBit = 63 - trailing_zeros;
+      risbg(dst, src, Operand::Zero(), Operand(endBit), Operand::Zero(), true);
+      return;
+    }
   }
-  nilf(dst, Operand(value & 0xFFFFFFFF));
-#else
-  nilf(dst, opnd);
-#endif
+
+  if (!dst.is(src))
+    LoadRR(dst, src);
+  AndP(dst, opnd);
 }
 
-void MacroAssembler::OrP(Register dst, Register src) {
-#if V8_TARGET_ARCH_S390X
-  ogr(dst, src);
-#else
+// OR 32-bit - dst = dst & src
+void MacroAssembler::Or(Register dst, Register src) {
   or_z(dst, src);
-#endif
 }
 
-#if 0  // Not support on z9
+// OR Pointer Size - dst = dst & src
+void MacroAssembler::OrP(Register dst, Register src) {
+  OrRR(dst, src);
+}
+
+// Non-clobbering OR 32-bit - dst = src1 & src1
 void MacroAssembler::Or(Register dst, Register src1, Register src2) {
+  if (!dst.is(src1) && !dst.is(src2)) {
+    // We prefer to generate XR/XGR, over the non clobbering XRK/XRK
+    // as XR is a smaller instruction
+    if (CpuFeatures::IsSupported(DISTINCT_OPS)) {
+      ork(dst, src1, src2);
+      return;
+    } else {
+      lr(dst, src1);
+    }
+  } else if (dst.is(src2)) {
+    src2 = src1;
+  }
+  Or(dst, src2);
+}
+
+// Non-clobbering OR pointer size - dst = src1 & src1
+void MacroAssembler::OrP(Register dst, Register src1, Register src2) {
+  if (!dst.is(src1) && !dst.is(src2)) {
+    // We prefer to generate XR/XGR, over the non clobbering XRK/XRK
+    // as XR is a smaller instruction
+    if (CpuFeatures::IsSupported(DISTINCT_OPS)) {
+      OrP_RRR(dst, src1, src2);
+      return;
+    } else {
+      LoadRR(dst, src1);
+    }
+  } else if (dst.is(src2)) {
+    src2 = src1;
+  }
+  OrP(dst, src2);
+}
+
+// OR 32-bit (Reg - Mem)
+void MacroAssembler::Or(Register dst, const MemOperand& opnd) {
+  ASSERT(is_int20(opnd.offset()));
+  if (is_uint12(opnd.offset()))
+    o(dst, opnd);
+  else
+    oy(dst, opnd);
+}
+
+// OR Pointer Size (Reg - Mem)
+void MacroAssembler::OrP(Register dst, const MemOperand& opnd) {
+  ASSERT(is_int20(opnd.offset()));
 #if V8_TARGET_ARCH_S390X
-  ogrk(dst, src1, src2);
+  og(dst, opnd);
 #else
-  ork(dst, src1, src2);
+  Or(dst, opnd);
 #endif
 }
-#endif
 
-void MacroAssembler::OrPImm(Register dst, const Operand& opnd) {
-  ASSERT(!opnd.is_reg());
+// OR 32-bit - dst = dst & imm
+void MacroAssembler::Or(Register dst, const Operand& opnd) {
+  oilf(dst, opnd);
+}
+
+// OR Pointer Size - dst = dst & imm
+void MacroAssembler::OrP(Register dst, const Operand& opnd) {
 #if V8_TARGET_ARCH_S390X
   intptr_t value = opnd.imm_;
   if (value >> 32 != 0) {
     // this may not work b/c condition code won't be set correctly
     oihf(dst, Operand(value >> 32));
   }
-  oilf(dst, opnd);
+  oilf(dst, Operand(value & 0xFFFFFFFF));
 #else
-  oilf(dst, opnd);
+  Or(dst, opnd);
 #endif
 }
 
-#if 0
+// OR 32-bit - dst = src & imm
 void MacroAssembler::Or(Register dst, Register src, const Operand& opnd) {
-  ASSERT(!opnd.is_reg());
-  if (!dst.is(src)) LoadRR(dst, src);
+  if (!dst.is(src))
+    lr(dst, src);
+  oilf(dst, opnd);
+}
+
+// OR Pointer Size - dst = src & imm
+void MacroAssembler::OrP(Register dst, Register src, const Operand& opnd) {
+  if (!dst.is(src))
+    LoadRR(dst, src);
   OrP(dst, opnd);
 }
-#endif
 
-void MacroAssembler::XorP(Register dst, Register src) {
-#if V8_TARGET_ARCH_S390X
-  xgr(dst, src);
-#else
+// XOR 32-bit - dst = dst & src
+void MacroAssembler::Xor(Register dst, Register src) {
   xr(dst, src);
-#endif
 }
 
-#if 0
+// XOR Pointer Size - dst = dst & src
+void MacroAssembler::XorP(Register dst, Register src) {
+  XorRR(dst, src);
+}
+
+// Non-clobbering XOR 32-bit - dst = src1 & src1
 void MacroAssembler::Xor(Register dst, Register src1, Register src2) {
-  if (!dst.is(src1) && !dst.is(src2)) LoadRR(dst, src1);
-  else if (dst.is(src2)) src2 = src1;
+  if (!dst.is(src1) && !dst.is(src2)) {
+    // We prefer to generate XR/XGR, over the non clobbering XRK/XRK
+    // as XR is a smaller instruction
+    if (CpuFeatures::IsSupported(DISTINCT_OPS)) {
+      xrk(dst, src1, src2);
+      return;
+    } else {
+      lr(dst, src1);
+    }
+  } else if (dst.is(src2)) {
+    src2 = src1;
+  }
+  Xor(dst, src2);
+}
+
+// Non-clobbering XOR pointer size - dst = src1 & src1
+void MacroAssembler::XorP(Register dst, Register src1, Register src2) {
+  if (!dst.is(src1) && !dst.is(src2)) {
+    // We prefer to generate XR/XGR, over the non clobbering XRK/XRK
+    // as XR is a smaller instruction
+    if (CpuFeatures::IsSupported(DISTINCT_OPS)) {
+      XorP_RRR(dst, src1, src2);
+      return;
+    } else {
+      LoadRR(dst, src1);
+    }
+  } else if (dst.is(src2)) {
+    src2 = src1;
+  }
   XorP(dst, src2);
 }
-#endif
 
-void MacroAssembler::XorPImm(Register dst, const Operand& opnd) {
-  ASSERT(!opnd.is_reg());
+// XOR 32-bit (Reg - Mem)
+void MacroAssembler::Xor(Register dst, const MemOperand& opnd) {
+  ASSERT(is_int20(opnd.offset()));
+  if (is_uint12(opnd.offset()))
+    x(dst, opnd);
+  else
+    xy(dst, opnd);
+}
+
+// XOR Pointer Size (Reg - Mem)
+void MacroAssembler::XorP(Register dst, const MemOperand& opnd) {
+  ASSERT(is_int20(opnd.offset()));
 #if V8_TARGET_ARCH_S390X
-  xihf(dst, Operand(opnd.imm_ >> 32));
-  xilf(dst, opnd);
+  xg(dst, opnd);
 #else
-  xilf(dst, opnd);
+  Xor(dst, opnd);
 #endif
 }
 
-#if 0
+// XOR 32-bit - dst = dst & imm
+void MacroAssembler::Xor(Register dst, const Operand& opnd) {
+  xilf(dst, opnd);
+}
+
+// XOR Pointer Size - dst = dst & imm
+void MacroAssembler::XorP(Register dst, const Operand& opnd) {
+#if V8_TARGET_ARCH_S390X
+  intptr_t value = opnd.imm_;
+  xihf(dst, Operand(value >> 32));
+  xilf(dst, Operand(value & 0xFFFFFFFF));
+#else
+  Xor(dst, opnd);
+#endif
+}
+
+// XOR 32-bit - dst = src & imm
 void MacroAssembler::Xor(Register dst, Register src, const Operand& opnd) {
-  ASSERT(!opnd.is_reg());
-  if (!dst.is(src)) LoadRR(dst, src);
+  if (!dst.is(src))
+    lr(dst, src);
+  xilf(dst, opnd);
+}
+
+// XOR Pointer Size - dst = src & imm
+void MacroAssembler::XorP(Register dst, Register src, const Operand& opnd) {
+  if (!dst.is(src))
+    LoadRR(dst, src);
   XorP(dst, opnd);
 }
-#endif
 
-void MacroAssembler::AddP(Register dst, const Operand& opnd) {
-  AddPImm(dst, opnd);
-}
 
-// the size of mem operand is treated as sizeof(intptr_t)
-void MacroAssembler::AddP(Register dst, const MemOperand& opnd) {
-#if V8_TARGET_ARCH_S390X
-  alg(dst, opnd);
-#else
+// Add Logical 32-bit (Register-Memory)
+void MacroAssembler::AddLogical(Register dst, const MemOperand& opnd) {
+  ASSERT(is_int20(opnd.offset()));
   if (is_uint12(opnd.offset()))
     al_z(dst, opnd);
   else
     aly(dst, opnd);
+}
+
+// Add Logical Pointer Size (Register-Memory)
+void MacroAssembler::AddLogicalP(Register dst, const MemOperand& opnd) {
+#if V8_TARGET_ARCH_S390X
+  ASSERT(is_int20(opnd.offset()));
+  alg(dst, opnd);
+#else
+  AddLogical(dst, opnd);
 #endif
 }
 
-void MacroAssembler::AddP(Register dst, Register src) {
-  AddRR(dst, src);
+void MacroAssembler::SubP(Register dst, Register src1, Register src2) {
+  if (!dst.is(src1) && !dst.is(src2)) {
+    LoadRR(dst, src1);
+    SubRR(dst, src2);
+  } else if (dst.is(src1)) {
+    SubRR(dst, src2);
+  } else if (dst.is(src2)) {
+    SubRR(dst, src1);
+    LoadComplementRR(dst, dst);
+  } else {
+    ASSERT(false);
+  }
 }
 
 void MacroAssembler::SubP(Register dst, const Operand& opnd) {
@@ -4268,7 +4551,7 @@ void MacroAssembler::NotP(Register dst) {
   xihf(dst, Operand(0xFFFFFFFF));
   xilf(dst, Operand(0xFFFFFFFF));
 #else
-  XorPImm(dst, Operand(0xFFFFFFFF));
+  XorP(dst, Operand(0xFFFFFFFF));
 #endif
 }
 
@@ -4283,8 +4566,7 @@ void MacroAssembler::Load(Register dst, const Operand& opnd) {
 #endif
   } else {
 #if V8_TARGET_ARCH_S390X
-    iilf(dst, opnd);
-    iihf(dst, Operand(static_cast<intptr_t>(0)));
+    llilf(dst, opnd);
 #else
     iilf(dst, opnd);
 #endif
@@ -4343,14 +4625,6 @@ void MacroAssembler::Addl(Register dst, const Operand& opnd) {
 #endif
 }
 
-void MacroAssembler::Add(Register dst, Register src) {
-#ifdef V8_TARGET_ARCH_S390X
-  algr(dst, src);
-#else
-  alr(dst, src);
-#endif
-}
-
 void MacroAssembler::Branch(Condition c, const Operand& opnd) {
   intptr_t value = opnd.immediate();
   if (is_int16(value))
@@ -4393,31 +4667,14 @@ void MacroAssembler::LoadSmiLiteral(Register dst, Smi *smi) {
 void MacroAssembler::LoadDoubleLiteral(DoubleRegister result,
                                        double value,
                                        Register scratch) {
-  lay(sp, MemOperand(sp, -8));  // reserve 1 temp double on the stack
+  uint64_t int_val = BitCast<uint64_t, double>(value);
+  uint32_t hi_32 = int_val >> 32;
+  uint32_t lo_32 = static_cast<uint32_t>(int_val);
 
-  // avoid gcc strict aliasing error using union cast
-  union {
-    double dval;
-#if V8_TARGET_ARCH_S390X
-    intptr_t ival;
-#else
-    intptr_t ival[2];
-#endif
-  } litVal;
-
-  litVal.dval = value;
-#if V8_TARGET_ARCH_S390X
-  mov(scratch, Operand(litVal.ival));
-  stg(scratch, MemOperand(sp));
-#else
-  LoadIntLiteral(scratch, litVal.ival[0]);
-  StoreW(scratch, MemOperand(sp, 0));
-  LoadIntLiteral(scratch, litVal.ival[1]);
-  StoreW(scratch, MemOperand(sp, 4));
-#endif
-  LoadF(result, MemOperand(sp, 0));
-
-  la(sp, MemOperand(sp, 8));  // restore the stack ptr
+  // Load the 64-bit value into a GPR, then transfer it to FPR via LDGR
+  iihf(scratch, Operand(hi_32));
+  iilf(scratch, Operand(lo_32));
+  ldgr(result, scratch);
 }
 
 void MacroAssembler::Cmp(Register src1, Register src2) {
@@ -4462,11 +4719,9 @@ void MacroAssembler::AddSmiLiteral(Register dst, Register src, Smi *smi,
                                    Register scratch) {
 #if V8_TARGET_ARCH_S390X
   LoadSmiLiteral(scratch, smi);
-  LoadRR(dst, src);
-  AddP(dst, scratch);
+  AddP(dst, src, scratch);
 #else
-  LoadRR(dst, src);
-  AddP(dst, Operand(reinterpret_cast<intptr_t>(smi)));
+  AddP(dst, src, Operand(reinterpret_cast<intptr_t>(smi)));
 #endif
 }
 
@@ -4476,14 +4731,20 @@ void MacroAssembler::SubSmiLiteral(Register dst, Register src, Smi *smi,
   LoadSmiLiteral(scratch, smi);
   Sub(dst, src, scratch);
 #else
-  LoadRR(dst, src);
-  AddP(dst, Operand(-(reinterpret_cast<intptr_t>(smi))));
+  AddP(dst, src, Operand(-(reinterpret_cast<intptr_t>(smi))));
 #endif
 }
 
 void MacroAssembler::AndSmiLiteral(Register dst, Register src, Smi *smi) {
-  LoadSmiLiteral(dst, smi);
-  AndP(dst, src);
+  if (!dst.is(src))
+    LoadRR(dst, src);
+#if V8_TARGET_ARCH_S390X
+  ASSERT((reinterpret_cast<intptr_t>(smi) & 0xffffffff) == 0);
+  int value = static_cast<int>(reinterpret_cast<intptr_t>(smi) >> 32);
+  nihf(dst, Operand(value));
+#else
+  nilf(dst, Operand(reinterpret_cast<int>(smi)));
+#endif
 }
 
 
@@ -4745,86 +5006,126 @@ void MacroAssembler::StoreByte(Register src, const MemOperand& mem,
   }
 }
 
-// Shift left for pointer types.
-void MacroAssembler::ShiftLeftImm(Register dst, Register src,
-                                  const Operand& val) {
-#if V8_TARGET_ARCH_S390X
-  sllg(dst, src, val);
-#else
-  // 32-bit shift clobbers source.  Make a copy if necessary
-  if (!dst.is(src))
+// Shift left logical for 32-bit integer types.
+void MacroAssembler::ShiftLeft(Register dst, Register src,
+                               const Operand& val) {
+  if (dst.is(src)) {
+    sll(dst, val);
+  } else if (CpuFeatures::IsSupported(DISTINCT_OPS)) {
+    sllk(dst, src, val);
+  } else {
     lr(dst, src);
-  sll(dst, val);
-#endif
+    sll(dst, val);
+  }
 }
 
-void MacroAssembler::ShiftLeftP(Register dst, Register src,
+// Shift left logical for 32-bit integer types.
+void MacroAssembler::ShiftLeft(Register dst, Register src,
+                               Register val) {
+  ASSERT(!dst.is(val));  // The lr/sll path clobbers val.
+  if (dst.is(src)) {
+    sll(dst, val);
+  } else if (CpuFeatures::IsSupported(DISTINCT_OPS)) {
+    sllk(dst, src, val);
+  } else {
+    lr(dst, src);
+    sll(dst, val);
+  }
+}
+
+// Shift right logical for 32-bit integer types.
+void MacroAssembler::ShiftRight(Register dst, Register src,
+                                const Operand& val) {
+  if (dst.is(src)) {
+    srl(dst, val);
+  } else if (CpuFeatures::IsSupported(DISTINCT_OPS)) {
+    srlk(dst, src, val);
+  } else {
+    lr(dst, src);
+    srl(dst, val);
+  }
+}
+
+// Shift right logical for 32-bit integer types.
+void MacroAssembler::ShiftRight(Register dst, Register src,
                                 Register val) {
-#if V8_TARGET_ARCH_S390X
-  sllg(dst, src, val);
-#else
-  ASSERT(!dst.is(val));
-  if (!dst.is(src))
+  ASSERT(!dst.is(val));  // The lr/srl path clobbers val.
+  if (dst.is(src)) {
+    srl(dst, val);
+  } else if (CpuFeatures::IsSupported(DISTINCT_OPS)) {
+    srlk(dst, src, val);
+  } else {
     lr(dst, src);
-  sll(dst, val);
-#endif
+    srl(dst, val);
+  }
 }
 
-void MacroAssembler::ShiftRightP(Register dst, Register src,
-                                 Register val) {
-#if V8_TARGET_ARCH_S390X
-  srlg(dst, src, val);
-#else
-  ASSERT(!dst.is(val));
-  if (!dst.is(src))
+// Shift left arithmetic for 32-bit integer types.
+void MacroAssembler::ShiftLeftArith(Register dst, Register src,
+                                    const Operand& val) {
+  if (dst.is(src)) {
+    sla(dst, val);
+  } else if (CpuFeatures::IsSupported(DISTINCT_OPS)) {
+    slak(dst, src, val);
+  } else {
     lr(dst, src);
-  srl(dst, val);
-#endif
+    sla(dst, val);
+  }
 }
 
-void MacroAssembler::ShiftRightArithP(Register dst, Register src,
-                                 Register val) {
-#if V8_TARGET_ARCH_S390X
-  srag(dst, src, val);
-#else
-  ASSERT(!dst.is(val));
-  if (!dst.is(src))
+// Shift left arithmetic for 32-bit integer types.
+void MacroAssembler::ShiftLeftArith(Register dst, Register src,
+                                    Register val) {
+  ASSERT(!dst.is(val));  // The lr/sla path clobbers val.
+  if (dst.is(src)) {
+    sla(dst, val);
+  } else if (CpuFeatures::IsSupported(DISTINCT_OPS)) {
+    slak(dst, src, val);
+  } else {
     lr(dst, src);
-  sra(dst, val);
-#endif
+    sla(dst, val);
+  }
 }
 
-
-// Shift right for pointer types.
-void MacroAssembler::ShiftRightImm(Register dst, Register src,
-                                  const Operand& val, RCBit) {
-#if V8_TARGET_ARCH_S390X
-  srlg(dst, src, val);
-#else
-  // 32-bit shift clobbers source.  Make a copy if necessary
-  if (!dst.is(src))
+// Shift right arithmetic for 32-bit integer types.
+void MacroAssembler::ShiftRightArith(Register dst, Register src,
+                                     const Operand& val) {
+  if (dst.is(src)) {
+    sra(dst, val);
+  } else if (CpuFeatures::IsSupported(DISTINCT_OPS)) {
+    srak(dst, src, val);
+  } else {
     lr(dst, src);
-  srl(dst, val);
-#endif
+    sra(dst, val);
+  }
 }
 
-// Shift right arithmetic for pointer types.
-void MacroAssembler::ShiftRightArithImm(Register dst, Register src,
-                                  const int val, RCBit) {
-#if V8_TARGET_ARCH_S390X
-  srag(dst, src, Operand(val));
-#else
-  // 32-bit shift clobbers source.  Make a copy if necessary
-  if (!dst.is(src))
+// Shift right arithmetic for 32-bit integer types.
+void MacroAssembler::ShiftRightArith(Register dst, Register src,
+                                     Register val) {
+  ASSERT(!dst.is(val));  // The lr/sra path clobbers val.
+  if (dst.is(src)) {
+    sra(dst, val);
+  } else if (CpuFeatures::IsSupported(DISTINCT_OPS)) {
+    srak(dst, src, val);
+  } else {
     lr(dst, src);
-  sra(dst, Operand(val));
-#endif
+    sra(dst, val);
+  }
 }
 
 // Clear right most # of bits
 void MacroAssembler::ClearRightImm(Register dst, Register src,
                                   const Operand& val) {
   int numBitsToClear = val.imm_ % (kPointerSize * 8);
+
+  // Try to use RISBG if possible
+  if (CpuFeatures::IsSupported(GENERAL_INSTR_EXT)) {
+    int endBit = 63 - numBitsToClear;
+    risbg(dst, src, Operand::Zero(), Operand(endBit), Operand::Zero(), true);
+    return;
+  }
+
   uint64_t hexMask = ~((1L << numBitsToClear) - 1);
 
   // S390 AND instr clobbers source.  Make a copy if necessary
@@ -4884,28 +5185,6 @@ CodePatcher::~CodePatcher() {
   ASSERT(masm_.pc_ == address_ + size_);
   ASSERT(masm_.reloc_info_writer.pos() == address_ + size_ + Assembler::kGap);
 }
-
-
-void CodePatcher::Emit(Instr instr) {
-  masm()->emit(instr);
-}
-
-
-void CodePatcher::EmitCondition(Condition cond) {
-  Instr instr = Assembler::instr_at(masm_.pc_);
-  switch (cond) {
-    case eq:
-      instr = (instr & ~kCondMask) | BT;
-      break;
-    case ne:
-      instr = (instr & ~kCondMask) | BF;
-      break;
-    default:
-      UNIMPLEMENTED();
-  }
-  masm_.emit(instr);
-}
-
 
 } }  // namespace v8::internal
 

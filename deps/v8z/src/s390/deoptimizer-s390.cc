@@ -1,6 +1,6 @@
 // Copyright 2012 the V8 project authors. All rights reserved.
 //
-// Copyright IBM Corp. 2012, 2013. All rights reserved.
+// Copyright IBM Corp. 2012-2014. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions are
@@ -1064,7 +1064,7 @@ void Deoptimizer::EntryGenerator::Generate() {
   // r6: Fp-to-sp delta.
   // Parm6: isolate is passed on the stack.
   __ mov(r7, Operand(ExternalReference::isolate_address()));
-  __ StoreP(r7, MemOperand(sp));
+  __ StoreP(r7, MemOperand(sp, kStackFrameExtraParamSlot * kPointerSize));
 
   // Call Deoptimizer::New().
   {
@@ -1147,7 +1147,7 @@ void Deoptimizer::EntryGenerator::Generate() {
   __ LoadlW(r3, MemOperand(r2, Deoptimizer::output_count_offset()));
   __ LoadP(r2,
            MemOperand(r2, Deoptimizer::output_offset()));  // r2 is output_.
-  __ ShiftLeftImm(r3, r3, Operand(kPointerSizeLog2));
+  __ ShiftLeftP(r3, r3, Operand(kPointerSizeLog2));
   __ AddP(r3, r2);
   __ bind(&outer_push_loop);
   // Inner loop state: r4 = current FrameDescription*, r5 = loop index.
@@ -1156,8 +1156,7 @@ void Deoptimizer::EntryGenerator::Generate() {
 
   __ bind(&inner_push_loop);
   __ AddP(r5, Operand(-sizeof(intptr_t)));
-  __ LoadRR(r8, r4);
-  __ AddP(r8, r5);
+  __ AddP(r8, r4, r5);
   __ LoadP(r9, MemOperand(r8, FrameDescription::frame_content_offset()));
   __ push(r9);
   __ Cmpi(r5, Operand::Zero());

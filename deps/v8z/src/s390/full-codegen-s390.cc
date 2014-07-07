@@ -1,6 +1,6 @@
 // Copyright 2012 the V8 project authors. All rights reserved.
 //
-// Copyright IBM Corp. 2012, 2013. All rights reserved.
+// Copyright IBM Corp. 2012-2014. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions are
@@ -302,10 +302,9 @@ void FullCodeGenerator::Generate() {
     { Comment cmnt(masm_, "[ Stack check");
       PrepareForBailoutForId(BailoutId::Declarations(), NO_REGISTERS);
       Label ok;
-      __ LoadRoot(ip, Heap::kStackLimitRootIndex);
-      __ Cmpl(sp, ip);
+      __ CmpLogicalP(sp, RootMemOperand(Heap::kStackLimitRootIndex));
       // This is a FIXED_SEQUENCE and must match the other StackCheck code
-      __ b(ge, &ok, true);   // Force BRC as this is a FIXED_SEQUENCE
+      __ bge(&ok, Label::kNear);   // Force BRC as this is a FIXED_SEQUENCE
       StackCheckStub stub;
       __ CallStub(&stub);
       __ bind(&ok);
@@ -377,14 +376,13 @@ void FullCodeGenerator::EmitStackCheck(IterationStatement* stmt,
                    Max(1, distance / kBackEdgeDistanceUnit));
     }
     EmitProfilingCounterDecrement(weight);
-    __ b(ge, &ok, true);   // Force BRC as this is a FIXED_SEQUENCE
+    __ bge(&ok, Label::kNear);   // Force BRC as this is a FIXED_SEQUENCE
     InterruptStub stub;
     __ CallStub(&stub);
   } else {
-    __ LoadRoot(ip, Heap::kStackLimitRootIndex);
-    __ Cmpl(sp, ip);
+    __ CmpLogicalP(sp, RootMemOperand(Heap::kStackLimitRootIndex));
     // This is a FIXED_SEQUENCE and must match the other StackCheck code
-    __ b(ge, &ok, true);   // Force BRC as this is a FIXED_SEQUENCE
+    __ bge(&ok, Label::kNear);   // Force BRC as this is a FIXED_SEQUENCE
     StackCheckStub stub;
     __ CallStub(&stub);
   }
@@ -792,8 +790,7 @@ void FullCodeGenerator::PrepareForBailoutBeforeSplit(Expression* expr,
   if (should_normalize) __ b(&skip);
   PrepareForBailout(expr, TOS_REG);
   if (should_normalize) {
-    __ LoadRoot(ip, Heap::kTrueValueRootIndex);
-    __ CmpRR(r2, ip);
+    __ CompareRoot(r2, Heap::kTrueValueRootIndex);
     Split(eq, if_true, if_false, NULL);
     __ bind(&skip);
   }
@@ -1103,8 +1100,7 @@ void FullCodeGenerator::VisitForInStatement(ForInStatement* stmt) {
   // ignore null and undefined in contrast to the specification; see
   // ECMA-262 section 12.6.4.
   VisitForAccumulatorValue(stmt->enumerable());
-  __ LoadRoot(ip, Heap::kUndefinedValueRootIndex);
-  __ CmpRR(r2, ip);
+  __ CompareRoot(r2, Heap::kUndefinedValueRootIndex);
   __ beq(&exit);
   Register null_value = r6;
   __ LoadRoot(null_value, Heap::kNullValueRootIndex);
@@ -1152,8 +1148,7 @@ void FullCodeGenerator::VisitForInStatement(ForInStatement* stmt) {
   // to do a slow check.
   Label fixed_array;
   __ LoadP(r4, FieldMemOperand(r2, HeapObject::kMapOffset));
-  __ LoadRoot(ip, Heap::kMetaMapRootIndex);
-  __ CmpRR(r4, ip);
+  __ CompareRoot(r4, Heap::kMetaMapRootIndex);
   __ bne(&fixed_array);
 
   // We got a map in register r2. Get the enumeration cache from it.
@@ -1350,8 +1345,7 @@ void FullCodeGenerator::EmitLoadGlobalCheckExtensions(Variable* var,
     __ bind(&loop);
     // Terminate at native context.
     __ LoadP(temp, FieldMemOperand(next, HeapObject::kMapOffset));
-    __ LoadRoot(ip, Heap::kNativeContextMapRootIndex);
-    __ CmpRR(temp, ip);
+    __ CompareRoot(temp, Heap::kNativeContextMapRootIndex);
     __ beq(&fast);
     // Check that extension is NULL.
     __ LoadP(temp, ContextOperand(next, Context::EXTENSION_INDEX));
@@ -1557,8 +1551,7 @@ void FullCodeGenerator::VisitRegExpLiteral(RegExpLiteral* expr) {
   int literal_offset =
       FixedArray::kHeaderSize + expr->literal_index() * kPointerSize;
   __ LoadP(r7, FieldMemOperand(r6, literal_offset), r0);
-  __ LoadRoot(ip, Heap::kUndefinedValueRootIndex);
-  __ CmpRR(r7, ip);
+  __ CompareRoot(r7, Heap::kUndefinedValueRootIndex);
   __ bne(&materialized);
 
   // Create regexp literal using runtime function.
@@ -2010,13 +2003,11 @@ void FullCodeGenerator::EmitInlineSmiBinaryOp(BinaryOperation* expr,
     case Token::ADD: {
       Label add_no_overflow;
       // C = A+B; C overflows if A/B have same sign and C has diff sign than A
-      __ LoadRR(r0, right);
-      __ XorP(r0, left);
-      __ Add(scratch1, left, right);
+      __ XorP(r0, left, right);
+      __ AddP(scratch1, left, right);
       __ TestSignBit(r0, r0);
       __ bne(&add_no_overflow /*, cr0*/);
-      __ LoadRR(r0, right);
-      __ XorP(r0, scratch1);
+      __ XorP(r0, right, scratch1);
       __ TestSignBit(r0, r0);
       __ bne(&stub_call /*, cr0*/);
       __ bind(&add_no_overflow);
@@ -2026,13 +2017,11 @@ void FullCodeGenerator::EmitInlineSmiBinaryOp(BinaryOperation* expr,
     case Token::SUB: {
       Label sub_no_overflow;
       // C = A-B; C overflows if A/B have diff signs and C has diff sign than A
-      __ LoadRR(r0, right);
-      __ XorP(r0, left);
+      __ XorP(r0, left, right);
       __ Sub(scratch1, left, right);
       __ TestSignBit(r0, r0);
       __ beq(&sub_no_overflow /*, cr0*/);
-      __ LoadRR(r0, left);
-      __ XorP(r0, scratch1);
+      __ XorP(r0, left, scratch1);
       __ TestSignBit(r0, r0);
       __ bne(&stub_call /*, cr0*/);
       __ bind(&sub_no_overflow);
@@ -2075,7 +2064,7 @@ void FullCodeGenerator::EmitInlineSmiBinaryOp(BinaryOperation* expr,
       // We need -0 if we were multiplying a negative number with 0 to get 0.
       // We know one of them was zero.
       __ bind(&mul_zero);
-      __ Add(scratch2, right, left);
+      __ AddP(scratch2, right, left);
       __ Cmpi(scratch2, Operand::Zero());
       __ blt(&stub_call);
       __ LoadSmiLiteral(right, Smi::FromInt(0));
@@ -2668,14 +2657,12 @@ void FullCodeGenerator::EmitIsObject(CallRuntime* expr) {
                          &if_true, &if_false, &fall_through);
 
   __ JumpIfSmi(r2, if_false);
-  __ LoadRoot(ip, Heap::kNullValueRootIndex);
-  __ CmpRR(r2, ip);
+  __ CompareRoot(r2, Heap::kNullValueRootIndex);
   __ beq(if_true);
   __ LoadP(r4, FieldMemOperand(r2, HeapObject::kMapOffset));
   // Undetectable objects behave like undefined when tested with typeof.
-  __ LoadlB(r3, FieldMemOperand(r4, Map::kBitFieldOffset));
-  __ mov(r0, Operand(1 << Map::kIsUndetectable));
-  __ AndP(r0, r3);
+  __ tm(FieldMemOperand(r4, Map::kBitFieldOffset),
+        Operand(1 << Map::kIsUndetectable));
   __ bne(if_false /*, cr0*/);
   __ LoadlB(r3, FieldMemOperand(r4, Map::kInstanceTypeOffset));
   __ Cmpi(r3, Operand(FIRST_NONCALLABLE_SPEC_OBJECT_TYPE));
@@ -2725,9 +2712,8 @@ void FullCodeGenerator::EmitIsUndetectableObject(CallRuntime* expr) {
 
   __ JumpIfSmi(r2, if_false);
   __ LoadP(r3, FieldMemOperand(r2, HeapObject::kMapOffset));
-  __ LoadlB(r3, FieldMemOperand(r3, Map::kBitFieldOffset));
-  __ mov(r0, Operand(1 << Map::kIsUndetectable));
-  __ AndP(r0, r3);
+  __ tm(FieldMemOperand(r3, Map::kBitFieldOffset),
+        Operand(1 << Map::kIsUndetectable));
   PrepareForBailoutBeforeSplit(expr, true, if_true, if_false);
   Split(ne, if_true, if_false, fall_through, cr0);
 
@@ -2760,8 +2746,7 @@ void FullCodeGenerator::EmitIsStringWrapperSafeForDefaultValueOf(
   // Check for fast case object. Generate false result for slow case object.
   __ LoadP(r4, FieldMemOperand(r2, JSObject::kPropertiesOffset));
   __ LoadP(r4, FieldMemOperand(r4, HeapObject::kMapOffset));
-  __ LoadRoot(ip, Heap::kHashTableMapRootIndex);
-  __ CmpRR(r4, ip);
+  __ CompareRoot(r4, Heap::kHashTableMapRootIndex);
   __ beq(if_false);
 
   // Look for valueOf symbol in the descriptor array, and indicate false if
@@ -2817,7 +2802,7 @@ void FullCodeGenerator::EmitIsStringWrapperSafeForDefaultValueOf(
   // Set the bit in the map to indicate that it has been checked safe for
   // default valueOf and set true result.
   __ LoadlB(r4, FieldMemOperand(r3, Map::kBitField2Offset));
-  __ OrPImm(r4, Operand(1 << Map::kStringWrapperSafeForDefaultValueOf));
+  __ OrP(r4, Operand(1 << Map::kStringWrapperSafeForDefaultValueOf));
   __ stc(r4, FieldMemOperand(r3, Map::kBitField2Offset));
   __ b(if_true);
 
@@ -3512,8 +3497,7 @@ void FullCodeGenerator::EmitGetFromCache(CallRuntime* expr) {
   // tmp now holds finger offset as a smi.
   __ LoadP(r4, FieldMemOperand(cache, JSFunctionResultCache::kFingerOffset));
   // r4 now holds finger offset as a smi.
-  __ LoadRR(r5, cache);
-  __ AddP(r5, Operand(FixedArray::kHeaderSize - kHeapObjectTag));
+  __ AddP(r5, cache, Operand(FixedArray::kHeaderSize - kHeapObjectTag));
   // r5 now points to the start of fixed array elements.
   __ SmiToPtrArrayOffset(r4, r4);
   __ LoadP(r4, MemOperand(r5, r4));
@@ -3669,9 +3653,8 @@ void FullCodeGenerator::EmitFastAsciiArrayJoin(CallRuntime* expr) {
   // Check that all array elements are sequential ASCII strings, and
   // accumulate the sum of their lengths, as a smi-encoded value.
   __ LoadImmP(string_length, Operand::Zero());
-  __ LoadRR(element, elements);
-  __ AddP(element, Operand(FixedArray::kHeaderSize - kHeapObjectTag));
-  __ ShiftLeftImm(elements_end, array_length, Operand(kPointerSizeLog2));
+  __ AddP(element, elements, Operand(FixedArray::kHeaderSize - kHeapObjectTag));
+  __ ShiftLeftP(elements_end, array_length, Operand(kPointerSizeLog2));
   __ AddP(elements_end, element);
   // Loop condition: while (element < elements_end).
   // Live values in registers:
@@ -3758,8 +3741,7 @@ void FullCodeGenerator::EmitFastAsciiArrayJoin(CallRuntime* expr) {
 
   // Get first element in the array to free up the elements register to be used
   // for the result.
-  __ LoadRR(element, elements);
-  __ AddP(element, Operand(FixedArray::kHeaderSize - kHeapObjectTag));
+  __ AddP(element, elements, Operand(FixedArray::kHeaderSize - kHeapObjectTag));
   result = elements;  // End of live range for elements.
   elements = no_reg;
   // Live values in registers:
@@ -3776,12 +3758,12 @@ void FullCodeGenerator::EmitFastAsciiArrayJoin(CallRuntime* expr) {
   // Prepare for looping. Set up elements_end to end of the array. Set
   // result_pos to the position of the result where to write the first
   // character.
-  __ ShiftLeftImm(elements_end, array_length, Operand(kPointerSizeLog2));
+  __ ShiftLeftP(elements_end, array_length, Operand(kPointerSizeLog2));
   __ AddP(elements_end, element);
   result_pos = array_length;  // End of live range for array_length.
   array_length = no_reg;
-  __ LoadRR(result_pos, result);
-  __ AddP(result_pos, Operand(SeqAsciiString::kHeaderSize - kHeapObjectTag));
+  __ AddP(result_pos, result,
+          Operand(SeqAsciiString::kHeaderSize - kHeapObjectTag));
 
   // Check the length of the separator.
   __ LoadP(scratch1, FieldMemOperand(separator, SeqAsciiString::kLengthOffset));
@@ -3853,8 +3835,8 @@ void FullCodeGenerator::EmitFastAsciiArrayJoin(CallRuntime* expr) {
   // Copy the separator to the result.
   __ LoadP(string_length, FieldMemOperand(separator, String::kLengthOffset));
   __ SmiUntag(string_length);
-  __ LoadRR(string, separator);
-  __ AddP(string, Operand(SeqAsciiString::kHeaderSize - kHeapObjectTag));
+  __ AddP(string, separator,
+                  Operand(SeqAsciiString::kHeaderSize - kHeapObjectTag));
   __ CopyBytes(string, result_pos, string_length, scratch1);
 
   __ bind(&long_separator);
@@ -4292,18 +4274,15 @@ void FullCodeGenerator::EmitLiteralCompareTypeof(Expression* expr,
   if (check->Equals(isolate()->heap()->number_symbol())) {
     __ JumpIfSmi(r2, if_true);
     __ LoadP(r2, FieldMemOperand(r2, HeapObject::kMapOffset));
-    __ LoadRoot(ip, Heap::kHeapNumberMapRootIndex);
-    __ CmpRR(r2, ip);
+    __ CompareRoot(r2, Heap::kHeapNumberMapRootIndex);
     Split(eq, if_true, if_false, fall_through);
   } else if (check->Equals(isolate()->heap()->string_symbol())) {
     __ JumpIfSmi(r2, if_false);
     // Check for undetectable objects => false.
     __ CompareObjectType(r2, r2, r3, FIRST_NONSTRING_TYPE);
     __ bge(if_false);
-    __ LoadlB(r3, FieldMemOperand(r2, Map::kBitFieldOffset));
-    STATIC_ASSERT((1 << Map::kIsUndetectable) < 0x8000);
-    __ mov(r0, Operand(1 << Map::kIsUndetectable));
-    __ AndP(r0, r3);
+    __ tm(FieldMemOperand(r2, Map::kBitFieldOffset),
+          Operand(1 << Map::kIsUndetectable));
     Split(eq, if_true, if_false, fall_through, cr0);
   } else if (check->Equals(isolate()->heap()->boolean_symbol())) {
     __ CompareRoot(r2, Heap::kTrueValueRootIndex);
@@ -4320,9 +4299,8 @@ void FullCodeGenerator::EmitLiteralCompareTypeof(Expression* expr,
     __ JumpIfSmi(r2, if_false);
     // Check for undetectable objects => true.
     __ LoadP(r2, FieldMemOperand(r2, HeapObject::kMapOffset));
-    __ LoadlB(r3, FieldMemOperand(r2, Map::kBitFieldOffset));
-    __ mov(r0, Operand(1 << Map::kIsUndetectable));
-    __ AndP(r0, r3);
+    __ tm(FieldMemOperand(r2, Map::kBitFieldOffset),
+          Operand(1 << Map::kIsUndetectable));
     Split(ne, if_true, if_false, fall_through, cr0);
 
   } else if (check->Equals(isolate()->heap()->function_symbol())) {
@@ -4344,9 +4322,8 @@ void FullCodeGenerator::EmitLiteralCompareTypeof(Expression* expr,
     __ CompareInstanceType(r2, r3, LAST_NONCALLABLE_SPEC_OBJECT_TYPE);
     __ bgt(if_false);
     // Check for undetectable objects => false.
-    __ LoadlB(r3, FieldMemOperand(r2, Map::kBitFieldOffset));
-    __ mov(r0, Operand(1 << Map::kIsUndetectable));
-    __ AndP(r0, r3);
+    __ tm(FieldMemOperand(r2, Map::kBitFieldOffset),
+          Operand(1 << Map::kIsUndetectable));
     Split(eq, if_true, if_false, fall_through, cr0);
   } else {
     if (if_false != fall_through) __ b(if_false);
@@ -4379,8 +4356,7 @@ void FullCodeGenerator::VisitCompareOperation(CompareOperation* expr) {
       VisitForStackValue(expr->right());
       __ InvokeBuiltin(Builtins::IN, CALL_FUNCTION);
       PrepareForBailoutBeforeSplit(expr, false, NULL, NULL);
-      __ LoadRoot(ip, Heap::kTrueValueRootIndex);
-      __ CmpRR(r2, ip);
+      __ CompareRoot(r2, Heap::kTrueValueRootIndex);
       Split(eq, if_true, if_false, fall_through);
       break;
 
@@ -4466,8 +4442,7 @@ void FullCodeGenerator::EmitLiteralCompareNil(CompareOperation* expr,
   Heap::RootListIndex nil_value = nil == kNullValue ?
       Heap::kNullValueRootIndex :
       Heap::kUndefinedValueRootIndex;
-  __ LoadRoot(r3, nil_value);
-  __ CmpRR(r2, r3);
+  __ CompareRoot(r2, nil_value);
   if (expr->op() == Token::EQ_STRICT) {
     Split(eq, if_true, if_false, fall_through);
   } else {
@@ -4475,14 +4450,13 @@ void FullCodeGenerator::EmitLiteralCompareNil(CompareOperation* expr,
         Heap::kUndefinedValueRootIndex :
         Heap::kNullValueRootIndex;
     __ beq(if_true);
-    __ LoadRoot(r3, other_nil_value);
-    __ CmpRR(r2, r3);
+    __ CompareRoot(r2, other_nil_value);
     __ beq(if_true);
     __ JumpIfSmi(r2, if_false);
     // It can be an undetectable object.
     __ LoadP(r3, FieldMemOperand(r2, HeapObject::kMapOffset));
     __ LoadlB(r3, FieldMemOperand(r3, Map::kBitFieldOffset));
-    __ AndPI(r3, Operand(1 << Map::kIsUndetectable));
+    __ AndP(r3, Operand(1 << Map::kIsUndetectable));
     __ Cmpi(r3, Operand(1 << Map::kIsUndetectable));
     Split(eq, if_true, if_false, fall_through);
   }

@@ -1,6 +1,6 @@
 // Copyright 2011 the V8 project authors. All rights reserved.
 //
-// Copyright IBM Corp. 2012, 2013. All rights reserved.
+// Copyright IBM Corp. 2012-2014. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions are
@@ -266,12 +266,12 @@ int Decoder::FormatFloatingRegister(Instruction* instr, const char* format) {
     int reg = rrinstr->R2Value();
     PrintDRegister(reg);
     return 2;
-  } else if (format[1] == '5') {  // 'r5: register resides in bit 24-28
+  } else if (format[1] == '5') {  // 'f5: register resides in bit 24-28
     RREInstruction* rreinstr = reinterpret_cast<RREInstruction*>(instr);
     int reg = rreinstr->R1Value();
     PrintDRegister(reg);
     return 2;
-  } else if (format[1] == '6') {  // 'r6: register resides in bit 29-32
+  } else if (format[1] == '6') {  // 'f6: register resides in bit 29-32
     RREInstruction* rreinstr = reinterpret_cast<RREInstruction*>(instr);
     int reg = rreinstr->R2Value();
     PrintDRegister(reg);
@@ -378,24 +378,6 @@ int Decoder::FormatOption(Instruction* instr, const char* format) {
                                         reinterpret_cast<byte*>(instr) + off));
         return 8;
       }
-     case 's': {
-       ASSERT(format[1] == 'h');
-       int32_t value = 0;
-       int32_t opcode = instr->OpcodeValue() << 26;
-       int32_t sh = instr->Bits(15, 11);
-       if (opcode == EXT5 ||
-           (opcode == EXT2 &&
-            instr->Bits(10, 2) << 2 == SRADIX)) {
-         // SH Bits 1 and 15-11 (split field)
-         value = (sh | (instr->Bit(1) << 5));
-       } else {
-         // SH Bits 15-11
-         value = (sh << 26) >> 26;
-       }
-       out_buffer_pos_ += OS::SNPrintF(out_buffer_ + out_buffer_pos_,
-                                     "%d", value);
-       return 2;
-     }
      case 'm': {
        return FormatMask(instr, format);
      }
@@ -428,25 +410,6 @@ int Decoder::FormatMask(Instruction* instr, const char* format) {
     return 2;
   }
 
-  if (format[1] == 'e') {
-    if (instr->OpcodeValue() << 26 != EXT5) {
-      // ME Bits 10-6
-      value = (instr->Bits(10, 6) << 26) >> 26;
-    } else {
-      // ME Bits 5 and 10-6 (split field)
-      value = (instr->Bits(10, 6) | (instr->Bit(5) << 5));
-    }
-  } else if (format[1] == 'b') {
-    if (instr->OpcodeValue() << 26 != EXT5) {
-      // MB Bits 5-1
-      value = (instr->Bits(5, 1) << 26) >> 26;
-    } else {
-      // MB Bits 5 and 10-6 (split field)
-      value = (instr->Bits(10, 6) | (instr->Bit(5) << 5));
-    }
-  } else {
-    UNREACHABLE();  // bad format
-  }
   out_buffer_pos_ += OS::SNPrintF(out_buffer_ + out_buffer_pos_,
       "%d", value);
   return 2;
@@ -541,23 +504,36 @@ int Decoder::FormatImmediate(Instruction *instr, const char* format) {
     out_buffer_pos_ += OS::SNPrintF(out_buffer_ + out_buffer_pos_,
                                     "%d", value);
     return 2;
-  } else if (format[1] == '7') {  // unsigned immediate in 16-48
+  } else if (format[1] == '7') {  // unsigned immediate in 16-47
     RILInstruction* rilinstr = reinterpret_cast<RILInstruction*>(instr);
     uint32_t value = rilinstr->I2UnsignedValue();
     out_buffer_pos_ += OS::SNPrintF(out_buffer_ + out_buffer_pos_,
                                     "%d", value);
     return 2;
-  } else if (format[1] == '8') {  // unsigned immediate in 8-16
+  } else if (format[1] == '8') {  // unsigned immediate in 8-15
     SSInstruction* ssinstr = reinterpret_cast<SSInstruction*>(instr);
     uint8_t value = ssinstr->Length();
     out_buffer_pos_ += OS::SNPrintF(out_buffer_ + out_buffer_pos_,
                                     "%d", value);
     return 2;
-  } else {  // ppc specific
-    int32_t value = (instr->Bits(15, 0) << 16) >> 16;
+  } else if (format[1] == '9') {  // unsigned immediate in 16-23
+    RIEInstruction* rie_instr = reinterpret_cast<RIEInstruction*>(instr);
+    uint8_t value = rie_instr->I3Value();
     out_buffer_pos_ += OS::SNPrintF(out_buffer_ + out_buffer_pos_,
-        "%d", value);
-    return 5;
+                                    "%d", value);
+    return 2;
+  }  else if (format[1] == 'a') {  // unsigned immediate in 24-31
+    RIEInstruction* rie_instr = reinterpret_cast<RIEInstruction*>(instr);
+    uint8_t value = rie_instr->I4Value();
+    out_buffer_pos_ += OS::SNPrintF(out_buffer_ + out_buffer_pos_,
+                                    "%d", value);
+    return 2;
+  } else if (format[1] == 'b') {   // unsigned immediate in 32-39
+    RIEInstruction* rie_instr = reinterpret_cast<RIEInstruction*>(instr);
+    uint8_t value = rie_instr->I5Value();
+    out_buffer_pos_ += OS::SNPrintF(out_buffer_ + out_buffer_pos_,
+                                    "%d", value);
+    return 2;
   }
 
   UNREACHABLE();
@@ -681,18 +657,30 @@ bool Decoder::DecodeFourByte(Instruction* instr) {
       case SLA: Format(instr, "sla\t'r1,'d1('r3)"); break;
       case SRA: Format(instr, "sra\t'r1,'d1('r3)"); break;
       case AGR: Format(instr, "agr\t'r5,'r6"); break;
+      case AGFR: Format(instr, "agfr\t'r5,'r6"); break;
+      case ARK: Format(instr, "ark\t'r5,'r6,'r3"); break;
+      case AGRK: Format(instr, "agrk\t'r5,'r6,'r3"); break;
       case SGR: Format(instr, "sgr\t'r5,'r6"); break;
+      case SRK: Format(instr, "srk\t'r5,'r6,'r3"); break;
+      case SGRK: Format(instr, "sgrk\t'r5,'r6,'r3"); break;
       case NGR: Format(instr, "ngr\t'r5,'r6"); break;
+      case NRK: Format(instr, "nrk\t'r5,'r6,'r3"); break;
+      case NGRK: Format(instr, "ngrk\t'r5,'r6,'r3"); break;
       case NILL: Format(instr, "nill\t'r1,'i1"); break;
       case NILH: Format(instr, "nilh\t'r1,'i1"); break;
       case OGR: Format(instr, "ogr\t'r5,'r6"); break;
+      case ORK: Format(instr, "ork\t'r5,'r6,'r3"); break;
+      case OGRK: Format(instr, "ogrk\t'r5,'r6,'r3"); break;
       case XGR: Format(instr, "xgr\t'r5,'r6"); break;
+      case XRK: Format(instr, "xrk\t'r5,'r6,'r3"); break;
+      case XGRK: Format(instr, "xgrk\t'r5,'r6,'r3"); break;
       case CGR: Format(instr, "cgr\t'r5,'r6"); break;
       case CLGR: Format(instr, "clgr\t'r5,'r6"); break;
       case LBR: Format(instr, "lbr\t'r5,'r6"); break;
       case LEDBR: Format(instr, "ledbr\t'f5,'f6"); break;
       case LTGR: Format(instr, "ltgr\t'r5,'r6"); break;
       case LGR: Format(instr, "lgr\t'r5,'r6"); break;
+      case LGDR: Format(instr, "lgdr\t'r5,'f6"); break;
       case LGFR: Format(instr, "lgfr\t'r5,'r6"); break;
       case LTGFR: Format(instr, "ltgfr\t'r5,'r6"); break;
       case LCGR: Format(instr, "lcgr\t'r5,'r6"); break;
@@ -700,10 +688,16 @@ bool Decoder::DecodeFourByte(Instruction* instr) {
       case LGBR: Format(instr, "lgbr\t'r5,'r6"); break;
       case LGHR: Format(instr, "lghr\t'r5,'r6"); break;
       case MSGR: Format(instr, "msgr\t'r5,'r6"); break;
+      case DSGR: Format(instr, "dsgr\t'r5,'r6"); break;
+      case LZDR: Format(instr, "lzdr\t'r5,'r6"); break;
       case MLR: Format(instr, "mlr\t'r5,'r6"); break;
       case MLGR: Format(instr, "mlgr\t'r5,'r6"); break;
       case ALGR: Format(instr, "algr\t'r5,'r6"); break;
+      case ALRK: Format(instr, "alrk\t'r5,'r6,'r3"); break;
+      case ALGRK: Format(instr, "algrk\t'r5,'r6,'r3"); break;
       case SLGR: Format(instr, "slgr\t'r5,'r6"); break;
+      case SLRK: Format(instr, "slrk\t'r5,'r6,'r3"); break;
+      case SLGRK: Format(instr, "slgrk\t'r5,'r6,'r3"); break;
       case LHR: Format(instr, "lhr\t'r5,'r6"); break;
       case LLHR: Format(instr, "llhr\t'r5,'r6"); break;
       case LLGHR: Format(instr, "llghr\t'r5,'r6"); break;
@@ -713,6 +707,7 @@ bool Decoder::DecodeFourByte(Instruction* instr) {
       case M: Format(instr, "m\t'r1,'d1('r2d,'r3)"); break;
       case D: Format(instr, "d\t'r1,'d1('r2d,'r3)"); break;
       case O: Format(instr, "o\t'r1,'d1('r2d,'r3)"); break;
+      case N: Format(instr, "n\t'r1,'d1('r2d,'r3)"); break;
       case L: Format(instr, "l\t'r1,'d1('r2d,'r3)"); break;
       case C: Format(instr, "c\t'r1,'d1('r2d,'r3)"); break;
       case AH: Format(instr, "ah\t'r1,'d1('r2d,'r3)"); break;
@@ -727,12 +722,15 @@ bool Decoder::DecodeFourByte(Instruction* instr) {
       case LB: Format(instr, "lb\t'r1,'d1('r2d,'r3)"); break;
       case CH: Format(instr, "ch\t'r1,'d1('r2d,'r3)"); break;
       case CL: Format(instr, "cl\t'r1,'d1('r2d,'r3)"); break;
+      case CLI: Format(instr, "cli\t'd1('r3),'i8"); break;
+      case TM: Format(instr, "tm\t'd1('r3),'i8"); break;
       case BC: Format(instr, "bc\t'm1,'d1('r2d,'r3)"); break;
       case BCT: Format(instr, "bct\t'r1,'d1('r2d,'r3)"); break;
       case ST: Format(instr, "st\t'r1,'d1('r2d,'r3)"); break;
       case STC: Format(instr, "stc\t'r1,'d1('r2d,'r3)"); break;
       case IC_z: Format(instr, "ic\t'r1,'d1('r2d,'r3)"); break;
       case LD: Format(instr, "ld\t'f1,'d1('r2d,'r3)"); break;
+      case LDGR: Format(instr, "ldgr\t'f5,'r6"); break;
       case STE:Format(instr, "ste\t'f1,'d1('r2d,'r3)"); break;
       case STD:Format(instr, "std\t'f1,'d1('r2d,'r3)"); break;
       case CFDBR: Format(instr, "cfdbr\t'r5,'m2,'f6"); break;
@@ -779,6 +777,8 @@ bool Decoder::DecodeSixByte(Instruction* instr) {
     case LLIHF: Format(instr, "llihf\t'r1,'i7"); break;
     case AFI: Format(instr, "afi\t'r1,'i7"); break;
     case ALFI: Format(instr, "alfi\t'r1,'i7"); break;
+    case AHIK: Format(instr, "ahik\t'r1,'r2,'i1"); break;
+    case AGHIK: Format(instr, "aghik\t'r1,'r2,'i1"); break;
     case CLGFI: Format(instr, "clgfi\t'r1,'i7"); break;
     case CLFI: Format(instr, "clfi\t'r1,'i7"); break;
     case CFI: Format(instr, "cfi\t'r1,'i2"); break;
@@ -789,10 +789,16 @@ bool Decoder::DecodeSixByte(Instruction* instr) {
     case IILF: Format(instr, "iilf\t'r1,'i7"); break;
     case XIHF: Format(instr, "xihf\t'r1,'i7"); break;
     case XILF: Format(instr, "xilf\t'r1,'i7"); break;
+    case SLLK: Format(instr, "sllk\t'r1,'r2,'d2('r3)"); break;
     case SLLG: Format(instr, "sllg\t'r1,'r2,'d2('r3)"); break;
+    case SRLK: Format(instr, "srlk\t'r1,'r2,'d2('r3)"); break;
     case SRLG: Format(instr, "srlg\t'r1,'r2,'d2('r3)"); break;
+    case SLAK: Format(instr, "slak\t'r1,'r2,'d2('r3)"); break;
     case SLAG: Format(instr, "slag\t'r1,'r2,'d2('r3)"); break;
+    case SRAK: Format(instr, "srak\t'r1,'r2,'d2('r3)"); break;
     case SRAG: Format(instr, "srag\t'r1,'r2,'d2('r3)"); break;
+    case RISBG: Format(instr, "risbg\t'r1,'r2,'i9,'ia,'ib"); break;
+    case RISBGN: Format(instr, "risbgn\t'r1,'r2,'i9,'ia,'ib"); break;
     case LMY: Format(instr, "lmy\t'r1,'r2,'d2('r3)"); break;
     case LMG: Format(instr, "lmg\t'r1,'r2,'d2('r3)"); break;
     case STMY: Format(instr, "stmy\t'r1,'r2,'d2('r3)"); break;
@@ -807,6 +813,7 @@ bool Decoder::DecodeSixByte(Instruction* instr) {
     case XY: Format(instr, "xy\t'r1,'d2('r2d,'r3)"); break;
     case CY: Format(instr, "cy\t'r1,'d2('r2d,'r3)"); break;
     case AG: Format(instr, "ag\t'r1,'d2('r2d,'r3)"); break;
+    case AGF: Format(instr, "agf\t'r1,'d2('r2d,'r3)"); break;
     case SG: Format(instr, "sg\t'r1,'d2('r2d,'r3)"); break;
     case NG: Format(instr, "ng\t'r1,'d2('r2d,'r3)"); break;
     case OG: Format(instr, "og\t'r1,'d2('r2d,'r3)"); break;
@@ -819,7 +826,6 @@ bool Decoder::DecodeSixByte(Instruction* instr) {
     case ALY: Format(instr, "aly\t'r1,'d2('r2d,'r3)"); break;
     case ALG: Format(instr, "alg\t'r1,'d2('r2d,'r3)"); break;
     case SLG: Format(instr, "slg\t'r1,'d2('r2d,'r3)"); break;
-    case AGF: Format(instr, "agf\t'r1,'d2('r2d,'r3)"); break;
     case SGF: Format(instr, "sgf\t'r1,'d2('r2d,'r3)"); break;
     case SLY: Format(instr, "sly\t'r1,'d2('r2d,'r3)"); break;
     case LLH: Format(instr, "llh\t'r1,'d2('r2d,'r3)"); break;
@@ -832,6 +838,8 @@ bool Decoder::DecodeSixByte(Instruction* instr) {
     case LGB: Format(instr, "lgb\t'r1,'d2('r2d,'r3)"); break;
     case CHY: Format(instr, "chy\t'r1,'d2('r2d,'r3)"); break;
     case CLY: Format(instr, "cly\t'r1,'d2('r2d,'r3)"); break;
+    case CLIY: Format(instr, "cliy\t'd2('r3),'i8"); break;
+    case TMY: Format(instr, "tmy\t'd2('r3),'i8"); break;
     case CLG: Format(instr, "clg\t'r1,'d2('r2d,'r3)"); break;
     case BCTG: Format(instr, "bctg\t'r1,'d2('r2d,'r3)"); break;
     case STY: Format(instr, "sty\t'r1,'d2('r2d,'r3)"); break;
@@ -866,34 +874,16 @@ bool Decoder::DecodeSixByte(Instruction* instr) {
 // Disassemble the instruction at *instr_ptr into the output buffer.
 int Decoder::InstructionDecode(byte* instr_ptr) {
   Instruction* instr = Instruction::At(instr_ptr);
-
-  // Try to decode as S390 instruction first.
-  bool processed = true;
-  int orig_out_buffer_pos_ = out_buffer_pos_;
   int instrLength = instr->InstructionLength();
 
-  if (instrLength == 2)
-    processed = DecodeTwoByte(instr);
-  else if (instrLength == 4)
-    processed = DecodeFourByte(instr);
-  else if (instrLength == 6)
-    processed = DecodeSixByte(instr);
+  if (2 == instrLength)
+    DecodeTwoByte(instr);
+  else if (4 == instrLength)
+    DecodeFourByte(instr);
+  else
+    DecodeSixByte(instr);
 
-  // @TODO Remove eventually.
-  // if we cannot process as S390, treat it as PPC instr
-  if (processed)
-    return instrLength;
-
-
-  // S390 will try to print the bits.  If ppc instruction
-  // we'll reset it back to the original position.
-  out_buffer_pos_ = orig_out_buffer_pos_;
-  // Print raw instruction bytes.
-  out_buffer_pos_ += OS::SNPrintF(out_buffer_ + out_buffer_pos_,
-                                  "%08x       ",
-                                  instr->InstructionBits());
-
-  return Instruction::kInstrSize;
+  return instrLength;
 }
 
 
