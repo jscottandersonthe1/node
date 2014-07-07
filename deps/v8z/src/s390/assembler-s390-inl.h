@@ -35,7 +35,7 @@
 // Copyright 2012 the V8 project authors. All rights reserved.
 
 //
-// Copyright IBM Corp. 2012, 2013. All rights reserved.
+// Copyright IBM Corp. 2012-2014. All rights reserved.
 //
 
 #ifndef V8_S390_ASSEMBLER_S390_INL_H_
@@ -348,14 +348,6 @@ void Assembler::CheckTrampolinePoolQuick() {
   if (pc_offset() >= next_buffer_check_) {
     CheckTrampolinePool();
   }
-}
-
-void Assembler::emit(Instr x) {
-  UNREACHABLE();
-  CheckBuffer();
-  *reinterpret_cast<Instr*>(pc_) = x;
-  pc_ += kInstrSize;
-  CheckTrampolinePoolQuick();
 }
 
 // S390 specific emitting helpers
