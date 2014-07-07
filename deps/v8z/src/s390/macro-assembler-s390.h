@@ -1,6 +1,6 @@
 // Copyright 2012 the V8 project authors. All rights reserved.
 //
-// Copyright IBM Corp. 2012, 2013. All rights reserved.
+// Copyright IBM Corp. 2012-2014. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions are
@@ -46,11 +46,19 @@ inline MemOperand FieldMemOperand(Register object, int offset) {
   return MemOperand(object, offset - kHeapObjectTag);
 }
 
-
+// Generate a MemOperand for loading a field from an object.
+inline MemOperand FieldMemOperand(Register object, Register index, int offset) {
+  return MemOperand(object, index, offset - kHeapObjectTag);
+}
 
 // Give alias names to registers
 const Register cp = { 13 };  // JavaScript context pointer
 const Register kRootRegister = { 10 };  // Roots array pointer.
+
+// Generate a MemOperand for loading a field off Root register
+inline MemOperand RootMemOperand(Heap::RootListIndex index) {
+  return MemOperand(kRootRegister, index << kPointerSizeLog2);
+}
 
 // Flags used for the AllocateInNewSpace functions.
 enum AllocationFlags {
@@ -117,11 +125,21 @@ bool AreAliased(Register reg1,
 // arithmetics and bitwise
 #define AddRR              agr
 #define SubRR              sgr
-#define OrRR               ogr
 #define AndRR              ngr
+#define OrRR               ogr
 #define XorRR              xgr
 #define LoadComplementRR   lcgr
 #define LoadNegativeRR     lngr
+
+// Distinct Operands
+#define AddP_RRR           agrk
+#define AddPImm_RRI        aghik
+#define AddLogicalP_RRR    algrk
+#define SubP_RRR           sgrk
+#define SubLogicalP_RRR    slgrk
+#define AndP_RRR           ngrk
+#define OrP_RRR            ogrk
+#define XorP_RRR           xgrk
 
 // Load / Store
 #define LoadRR             lgr
@@ -135,6 +153,11 @@ bool AreAliased(Register reg1,
 #define CmpLogicalRR       clgr
 #define CmpRR              cgr
 
+// Shifts
+#define ShiftLeftP         sllg
+#define ShiftRightP        srlg
+#define ShiftLeftArithP    slag
+#define ShiftRightArithP   srag
 #else
 #define LoadMultipleP      lm
 #define LoadAndTestP       lt_z
@@ -145,11 +168,21 @@ bool AreAliased(Register reg1,
 // Reg2Reg
 #define AddRR              ar
 #define SubRR              sr
-#define OrRR               or_z
 #define AndRR              nr
+#define OrRR               or_z
 #define XorRR              xr
 #define LoadComplementRR   lcr
 #define LoadNegativeRR     lnr
+
+// Distinct Operands
+#define AddP_RRR           ark
+#define AddPImm_RRI        ahik
+#define AddLogicalP_RRR    alrk
+#define SubP_RRR           srk
+#define SubLogicalP_RRR    slrk
+#define AndP_RRR           nrk
+#define OrP_RRR            ork
+#define XorP_RRR           xrk
 
 // Load / Store
 #define LoadRR             lr
@@ -162,6 +195,12 @@ bool AreAliased(Register reg1,
 #define CmpLogicalPW       clfi
 #define CmpLogicalRR       clr
 #define CmpRR              cr_z
+
+// Shifts
+#define ShiftLeftP         ShiftLeft
+#define ShiftRightP        ShiftRight
+#define ShiftLeftArithP    ShiftLeftArith
+#define ShiftRightArithP   ShiftRightArith
 
 #endif
 
@@ -256,20 +295,19 @@ class MacroAssembler: public Assembler {
   void StoreF(DoubleRegister dst, const MemOperand& opnd);
   void StoreShortF(DoubleRegister dst, const MemOperand& opnd);
 
-  // compare 32bit
+  // Compare (Register - Memory)
   void Cmp(Register dst, const MemOperand& opnd);
+  void CmpP(Register dst, const MemOperand& opnd);
+  void CmpLogical(Register dst, const MemOperand& opnd);
+  void CmpLogicalP(Register dst, const MemOperand& opnd);
+
   void Cmp(Register dst, const Operand& opnd);
   // compare 32bit logical
   void Cmpl(Register dst, const MemOperand& opnd);
   void Cmpl(Register dst, const Operand& opnd);
   // add logical 32bit
-  void Addl(Register dst, const MemOperand& opnd);
   void Addl(Register dst, const Operand& opnd);
   // add 32bit
-  void Add(Register dst, const MemOperand& opnd);
-  void Add(Register dst, Register src, const Operand& opnd);
-  void Add(Register dst, Register src);
-  void Add(Register dst, Register src1, Register src2);
   // subtract 32bit
   void Sub(Register dst, Register src) {
     sr(dst, src);
@@ -284,34 +322,48 @@ class MacroAssembler: public Assembler {
   void Subl(Register dst, Register src);
 
   // and 32bit
-  // and(r,r,r) Not supported on z9
-  // void AndP(Register dst, Register src1, Register src2);
-  // void AndP(Register dst, Register src, const Operand& opnd);
-  // or(r,r,r) Not supported on z9
-  // void OrP(Register dst, Register src1, Register src2);
-  // void OrP(Register dst, Register src, const Operand& opnd);
-  // void XorP(Register dst, Register src1, Register src2);
   // void XorP(Register dst, Register src, const Operand& opnd);
   void Branch(Condition c, const Operand& opnd);
   void BranchOnCount(Register r1, Label *l);
-  void ShiftLeftP(Register dst, Register src, Register val);
-  void ShiftRightP(Register dst, Register src, Register val);
-  void ShiftRightArithP(Register dst, Register src, Register shift);
 
-  void ShiftLeftImm(Register dst, Register src, const Operand& val);
-  void ShiftRightImm(Register dst, Register src, const Operand& val,
-                    RCBit rc = LeaveRC);
-  void ShiftRightArithImm(Register dst, Register src, const int val,
-                    RCBit rc = LeaveRC);
+  // Shifts
+  void ShiftLeft(Register dst, Register src, Register val);
+  void ShiftLeft(Register dst, Register src, const Operand& val);
+  void ShiftRight(Register dst, Register src, Register val);
+  void ShiftRight(Register dst, Register src, const Operand& val);
+  void ShiftLeftArith(Register dst, Register src, Register shift);
+  void ShiftLeftArith(Register dst, Register src, const Operand& val);
+  void ShiftRightArith(Register dst, Register src, Register shift);
+  void ShiftRightArith(Register dst, Register src, const Operand& val);
+
   void ClearRightImm(Register dst, Register src, const Operand& val);
 
-  // pointers
+  // Add (Register - Immediate)
+  void Add(Register dst, const Operand& opnd);
   void AddP(Register dst, const Operand& opnd);
-  void AddP(Register dst, const MemOperand& opnd);
+  void Add(Register dst, Register src, const Operand& opnd);
+  void AddP(Register dst, Register src, const Operand& opnd);
+
+  // Add (Register - Register)
+  void Add(Register dst, Register src);
   void AddP(Register dst, Register src);
+  void AddP_ExtendSrc(Register dst, Register src);
+  void Add(Register dst, Register src1, Register src2);
+  void AddP(Register dst, Register src1, Register src2);
+  void AddP_ExtendSrc(Register dst, Register src1, Register src2);
+
+  // Add (Register - Mem)
+  void Add(Register dst, const MemOperand& opnd);
+  void AddP(Register dst, const MemOperand& opnd);
+  void AddP_ExtendSrc(Register dst, const MemOperand& opnd);
+
+  // Add Logical (Register - Mem)
+  void AddLogical(Register dst, const MemOperand& opnd);
+  void AddLogicalP(Register dst, const MemOperand& opnd);
+
+  void SubP(Register dst, Register src1, Register src2);
   void SubP(Register dst, const Operand& opnd);
   void SubP(Register dst, const MemOperand& opnd);
-  void AddPImm(Register dst, const Operand& opnd);
 
   void MulP(Register dst, const Operand& opnd);
   void MulP(Register dst, Register src);
@@ -320,14 +372,38 @@ class MacroAssembler: public Assembler {
 
   void DivP(Register dividend, Register divider);
 
-  void AndP(Register dst, const MemOperand& opnd);
-  void AndPI(Register dst, const Operand& opnd);
-  void AndPImm(Register dst, const Operand& opnd);
+  // Bitwise operations
+  void And(Register dst, Register src);
   void AndP(Register dst, Register src);
+  void And(Register dst, Register src1, Register src2);
+  void AndP(Register dst, Register src1, Register src2);
+  void And(Register dst, const MemOperand& opnd);
+  void AndP(Register dst, const MemOperand& opnd);
+  void And(Register dst, const Operand& opnd);
+  void AndP(Register dst, const Operand& opnd);
+  void And(Register dst, Register src, const Operand& opnd);
+  void AndP(Register dst, Register src, const Operand& opnd);
+  void Or(Register dst, Register src);
   void OrP(Register dst, Register src);
-  void OrPImm(Register dst, const Operand& opnd);
+  void Or(Register dst, Register src1, Register src2);
+  void OrP(Register dst, Register src1, Register src2);
+  void Or(Register dst, const MemOperand& opnd);
+  void OrP(Register dst, const MemOperand& opnd);
+  void Or(Register dst, const Operand& opnd);
+  void OrP(Register dst, const Operand& opnd);
+  void Or(Register dst, Register src, const Operand& opnd);
+  void OrP(Register dst, Register src, const Operand& opnd);
+  void Xor(Register dst, Register src);
   void XorP(Register dst, Register src);
-  void XorPImm(Register dst, const Operand& opnd);
+  void Xor(Register dst, Register src1, Register src2);
+  void XorP(Register dst, Register src1, Register src2);
+  void Xor(Register dst, const MemOperand& opnd);
+  void XorP(Register dst, const MemOperand& opnd);
+  void Xor(Register dst, const Operand& opnd);
+  void XorP(Register dst, const Operand& opnd);
+  void Xor(Register dst, Register src, const Operand& opnd);
+  void XorP(Register dst, Register src, const Operand& opnd);
+
 
   void NotP(Register dst);
 
@@ -640,6 +716,7 @@ class MacroAssembler: public Assembler {
   void Cmpi(Register src1, const Operand& src2);
   void Cmpli(Register src1, const Operand& src2);
   void Cmpl(Register src1, Register src2);
+  void CmpLogicalByte(const MemOperand& mem, const Operand& imm);
 
   void AddSmiLiteral(Register dst, Register src, Smi *smi, Register scratch);
   void SubSmiLiteral(Register dst, Register src, Smi *smi, Register scratch);
@@ -1307,25 +1384,30 @@ class MacroAssembler: public Assembler {
   inline void ExtractBitRange(Register dst, Register src,
                               int rangeStart, int rangeEnd) {
     ASSERT(rangeStart >= rangeEnd && rangeStart < kBitsPerPointer);
+
+    // Try to use RISBG if possible.
+    if (CpuFeatures::IsSupported(GENERAL_INSTR_EXT)) {
+      int shiftAmount = (64 - rangeEnd) % 64;  // Convert to shift left.
+      int endBit = 63;                     // End is always LSB after shifting.
+      int startBit = 63 - rangeStart + rangeEnd;
+      risbg(dst, src, Operand(startBit), Operand(endBit), Operand(shiftAmount),
+            true);
+    } else {
+      if (rangeEnd > 0)             // Don't need to shift if rangeEnd is zero.
+        ShiftRightP(dst, src, Operand(rangeEnd));
+      else if (!dst.is(src))        // If we didn't shift, we might need to copy
+        LoadRR(dst, src);
+      int width  = rangeStart - rangeEnd + 1;
 #if V8_TARGET_ARCH_S390X
-    if (rangeEnd > 0)              // Don't need to shift if rangeEnd is zero.
-      srlg(dst, src,  Operand(rangeEnd));
-    else if (!dst.is(src))         // If we didn't shift, we might need to copy
-      LoadRR(dst, src);                // src to dst
-    int width  = rangeStart - rangeEnd + 1;
-    uint64_t mask = (static_cast<uint64_t>(1) << width) - 1;
-    nihf(dst, Operand(mask >> 32));
-    nilf(dst, Operand(mask & 0xFFFFFFFF));
-    ltgr(dst, dst);
+      uint64_t mask = (static_cast<uint64_t>(1) << width) - 1;
+      nihf(dst, Operand(mask >> 32));
+      nilf(dst, Operand(mask & 0xFFFFFFFF));
+      ltgr(dst, dst);
 #else
-    if (!dst.is(src))
-      lr(dst, src);
-    if (rangeEnd > 0)              // Don't need to shift if rangeEnd is zero.
-      srl(dst, Operand(rangeEnd));
-    int width  = rangeStart - rangeEnd + 1;
-    uint32_t mask = (1 << width) - 1;
-    AndPI(dst, Operand(mask));
+      uint32_t mask = (1 << width) - 1;
+      AndP(dst, Operand(mask));
 #endif
+    }
   }
 
   inline void ExtractBit(Register dst, Register src, uint32_t bitNumber) {
@@ -1411,7 +1493,7 @@ class MacroAssembler: public Assembler {
     SmiTag(reg, reg);
   }
   void SmiTag(Register dst, Register src) {
-    ShiftLeftImm(dst, src, Operand(kSmiShift));
+    ShiftLeftP(dst, src, Operand(kSmiShift));
   }
 
 #if !V8_TARGET_ARCH_S390X
@@ -1422,8 +1504,7 @@ class MacroAssembler: public Assembler {
   inline void JumpIfNotSmiCandidate(Register value, Register scratch,
                                     Label* not_smi_label) {
     // High bits must be identical to fit into an Smi
-    LoadRR(scratch, value);
-    AddPImm(scratch, Operand(0x40000000u));
+    AddP(scratch, value, Operand(0x40000000u));
     Cmpi(scratch, Operand::Zero());
     blt(not_smi_label);
   }
@@ -1440,21 +1521,21 @@ class MacroAssembler: public Assembler {
     bne(not_smi_label /*, cr0*/);
   }
 
-  void SmiUntag(Register reg, RCBit rc = LeaveRC) {
-    SmiUntag(reg, reg, rc);
+  void SmiUntag(Register reg) {
+    SmiUntag(reg, reg);
   }
 
-  void SmiUntag(Register dst, Register src, RCBit rc = LeaveRC) {
-    ShiftRightArithImm(dst, src, kSmiShift, rc);
+  void SmiUntag(Register dst, Register src) {
+    ShiftRightArithP(dst, src, Operand(kSmiShift));
   }
 
   void SmiToPtrArrayOffset(Register dst, Register src) {
 #if V8_TARGET_ARCH_S390X
     STATIC_ASSERT(kSmiTag == 0 && kSmiShift > kPointerSizeLog2);
-    ShiftRightArithImm(dst, src, kSmiShift - kPointerSizeLog2);
+    ShiftRightArithP(dst, src, Operand(kSmiShift - kPointerSizeLog2));
 #else
     STATIC_ASSERT(kSmiTag == 0 && kSmiShift < kPointerSizeLog2);
-    ShiftLeftImm(dst, src, Operand(kPointerSizeLog2 - kSmiShift));
+    ShiftLeftP(dst, src, Operand(kPointerSizeLog2 - kSmiShift));
 #endif
   }
 
@@ -1465,7 +1546,7 @@ class MacroAssembler: public Assembler {
   void SmiToShortArrayOffset(Register dst, Register src) {
 #if V8_TARGET_ARCH_S390X
     STATIC_ASSERT(kSmiTag == 0 && kSmiShift > 1);
-    ShiftRightArithImm(dst, src, kSmiShift - 1);
+    ShiftRightArithP(dst, src, Operand(kSmiShift - 1));
 #else
     STATIC_ASSERT(kSmiTag == 0 && kSmiShift == 1);
     if (!dst.is(src)) {
@@ -1477,10 +1558,10 @@ class MacroAssembler: public Assembler {
   void SmiToIntArrayOffset(Register dst, Register src) {
 #if V8_TARGET_ARCH_S390X
     STATIC_ASSERT(kSmiTag == 0 && kSmiShift > 2);
-    ShiftRightArithImm(dst, src, kSmiShift - 2);
+    ShiftRightArithP(dst, src, Operand(kSmiShift - 2));
 #else
     STATIC_ASSERT(kSmiTag == 0 && kSmiShift < 2);
-    ShiftLeftImm(dst, src, Operand(2 - kSmiShift));
+    ShiftLeftP(dst, src, Operand(2 - kSmiShift));
 #endif
   }
 
@@ -1489,18 +1570,18 @@ class MacroAssembler: public Assembler {
   void SmiToDoubleArrayOffset(Register dst, Register src) {
 #if V8_TARGET_ARCH_S390X
     STATIC_ASSERT(kSmiTag == 0 && kSmiShift > kDoubleSizeLog2);
-    ShiftRightArithImm(dst, src, kSmiShift - kDoubleSizeLog2);
+    ShiftRightArithP(dst, src, Operand(kSmiShift - kDoubleSizeLog2));
 #else
     STATIC_ASSERT(kSmiTag == 0 && kSmiShift < kDoubleSizeLog2);
-    ShiftLeftImm(dst, src, Operand(kDoubleSizeLog2 - kSmiShift));
+    ShiftLeftP(dst, src, Operand(kDoubleSizeLog2 - kSmiShift));
 #endif
   }
 
   void SmiToArrayOffset(Register dst, Register src, int elementSizeLog2) {
     if (kSmiShift < elementSizeLog2) {
-      ShiftLeftImm(dst, src, Operand(elementSizeLog2 - kSmiShift));
+      ShiftLeftP(dst, src, Operand(elementSizeLog2 - kSmiShift));
     } else if (kSmiShift > elementSizeLog2) {
-      ShiftRightArithImm(dst, src, kSmiShift - elementSizeLog2);
+      ShiftRightArithP(dst, src, Operand(kSmiShift - elementSizeLog2));
     } else if (!dst.is(src)) {
       LoadRR(dst, src);
     }
@@ -1511,7 +1592,7 @@ class MacroAssembler: public Assembler {
     if (isSmi) {
       SmiToArrayOffset(dst, src, elementSizeLog2);
     } else {
-      ShiftLeftImm(dst, src, Operand(elementSizeLog2));
+      ShiftLeftP(dst, src, Operand(elementSizeLog2));
     }
   }
 
@@ -1559,8 +1640,7 @@ class MacroAssembler: public Assembler {
   inline void TestIfInt32(Register value,
                           Register scratch1, Register scratch2) {
     // High bits must be identical to fit into an 32-bit integer
-    LoadRR(scratch1, value);
-    sra(scratch1, Operand(31));
+    ShiftRightArith(scratch1, value, Operand(31));
     srag(scratch2, value, Operand(32));
     cr_z(scratch1, scratch2);  // force 32-bit comparison
   }
@@ -1568,8 +1648,7 @@ class MacroAssembler: public Assembler {
   inline void TestIfInt32(Register hi_word, Register lo_word,
                           Register scratch) {
     // High bits must be identical to fit into an 32-bit integer
-    LoadRR(scratch, lo_word);
-    sra(scratch, Operand(31));
+    ShiftRightArith(scratch, lo_word, Operand(31));
     CmpRR(scratch, hi_word);
   }
 #endif
@@ -1741,13 +1820,6 @@ class CodePatcher {
 
   // Macro assembler to emit code.
   MacroAssembler* masm() { return &masm_; }
-
-  // Emit an instruction directly.
-  void Emit(Instr instr);
-
-  // Emit the condition part of an instruction leaving the rest of the current
-  // instruction unchanged.
-  void EmitCondition(Condition cond);
 
  private:
   byte* address_;  // The address of the code being patched.

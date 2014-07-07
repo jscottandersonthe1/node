@@ -1,6 +1,6 @@
 // Copyright 2012 the V8 project authors. All rights reserved.
 //
-// Copyright IBM Corp. 2012, 2013. All rights reserved.
+// Copyright IBM Corp. 2012-2014. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions are
@@ -1152,7 +1152,7 @@ LInstruction* LChunkBuilder::DoBitNot(HBitNot* instr) {
   ASSERT(instr->representation().IsInteger32());
   if (instr->HasNoUses()) return NULL;
   LOperand* value = UseRegisterAtStart(instr->value());
-  return DefineAsRegister(new(zone()) LBitNotI(value));
+  return DefineSameAsFirst(new(zone()) LBitNotI(value));
 }
 
 
@@ -1310,8 +1310,10 @@ LInstruction* LChunkBuilder::DoMul(HMul* instr) {
         instr->CheckFlag(HValue::kBailoutOnMinusZero)) {
       AssignEnvironment(mul);
     }
-    return DefineAsRegister(mul);
-
+    if (instr->CheckFlag(HValue::kCanOverflow))
+      return DefineAsRegister(mul);
+    else
+      return DefineSameAsFirst(mul);
   } else if (instr->representation().IsDouble()) {
     return DoArithmeticD(Token::MUL, instr);
 

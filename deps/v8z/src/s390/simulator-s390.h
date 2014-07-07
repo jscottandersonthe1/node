@@ -1,6 +1,6 @@
 // Copyright 2012 the V8 project authors. All rights reserved.
 //
-// Copyright IBM Corp. 2012, 2013. All rights reserved.
+// Copyright IBM Corp. 2012-2014. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions are
@@ -29,12 +29,12 @@
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 
-// Declares a Simulator for PPC instructions if we are not generating a native
-// PPC binary. This Simulator allows us to run and debug PPC code generation on
-// regular desktop machines.
+// Declares a Simulator for S390 instructions if we are not generating a native
+// S390 binary. This Simulator allows us to run and debug S390 code generation
+// on regular desktop machines.
 // V8 calls into generated code by "calling" the CALL_GENERATED_CODE macro,
 // which will start execution in the Simulator or forwards to the real entry
-// on a PPC HW platform.
+// on a S390 hardware platform.
 
 #ifndef V8_S390_SIMULATOR_S390_H_
 #define V8_S390_SIMULATOR_S390_H_
@@ -132,8 +132,27 @@ class Simulator {
   friend class S390Debugger;
   enum Register {
     no_reg = -1,
-    r0 = 0, r1, r2, r3, r4, r5, r6, r7,
-    r8, r9, r10, r11, r12, r13, r14, sp,
+    r0 = 0,
+    r1 = 1,
+    r2 = 2,
+    r3 = 3,
+    r4 = 4,
+    r5 = 5,
+    r6 = 6,
+    r7 = 7,
+    r8 = 8,
+    r9 = 9,
+    r10 = 10,
+    r11 = 11,
+    r12 = 12,
+    r13 = 13,
+    r14 = 14,
+    r15 = 15,
+    fp = r11,
+    ip = r12,
+    cp = r13,
+    ra = r14,
+    sp = r15,  // name aliases
     kNumGPRs = 16,
     d0 = 0, d1, d2, d3, d4, d5, d6, d7,
     d8, d9, d10, d11, d12, d13, d14, d15,
@@ -148,8 +167,8 @@ class Simulator {
   static Simulator* current(v8::internal::Isolate* isolate);
 
   // Accessors for register state.
-  void set_register(int reg, intptr_t value);
-  intptr_t get_register(int reg) const;
+  void set_register(int reg, uint64_t value);
+  uint64_t get_register(int reg) const;
   template<typename T> T get_low_register(int reg) const;
   template<typename T> T get_high_register(int reg) const;
   void set_low_register(int reg, uint32_t value);
@@ -181,7 +200,7 @@ class Simulator {
   // Accessor to the internal simulator stack area.
   uintptr_t StackLimit() const;
 
-  // Executes PPC instructions until the PC reaches end_sim_pc.
+  // Executes S390 instructions until the PC reaches end_sim_pc.
   void Execute();
 
   // Call on program start.
@@ -254,6 +273,10 @@ class Simulator {
   inline void IncreaseStopCounter(uint32_t bkpt_code);
   void PrintStopInfo(uint32_t code);
 
+  // Byte Reverse
+  inline int16_t ByteReverse(int16_t hword);
+  inline int32_t ByteReverse(int32_t word);
+
   // Read and write memory.
   inline uint8_t ReadBU(intptr_t addr);
   inline int8_t ReadB(intptr_t addr);
@@ -325,6 +348,10 @@ class Simulator {
   }
 
   bool TestConditionCode(Condition mask) {
+    // Check for unconditional branch
+    if (mask == 0xf)
+      return true;
+
     return (condition_reg_ & mask) != 0;
   }
 
@@ -356,10 +383,9 @@ class Simulator {
       void SetFPRegister(int reg_index, const InputType& value);
 
   // Architecture state.
-  // Saturating instructions require a Q flag to indicate saturation.
-  // There is currently no way to read the CPSR directly, and thus read the Q
-  // flag, so this is left unimplemented.
-  intptr_t registers_[kNumGPRs];  // PowerPC
+  // On z9 and higher, and supported Linux on System z platforms, all registers
+  // are 64-bit, even in 31-bit mode.
+  uint64_t registers_[kNumGPRs];
   // condition register. In s390, the last 4 bits are used.
   int32_t condition_reg_;
   int32_t fp_condition_reg_;  // PowerPC
