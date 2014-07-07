@@ -1,6 +1,6 @@
 // Copyright 2012 the V8 project authors. All rights reserved.
 //
-// Copyright IBM Corp. 2012, 2013. All rights reserved.
+// Copyright IBM Corp. 2012-2014. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions are
@@ -462,6 +462,16 @@ class RecordWriteStub: public CodeStub {
     }
   }
 
+  static bool isBranchNop(SixByteInstr instr, int instrLength) {
+    if ((4 == instrLength && 0 == (instr & kFourByteBrCondMask)) ||
+        // BRC - Check for 0x0 mask condition.
+        (6 == instrLength && 0 == (instr & kSixByteBrCondMask)))  {
+        // BRCL - Check for 0x0 mask condition
+      return true;
+    }
+    return false;
+  }
+
   static Mode GetMode(Code* stub) {
     int32_t first_instr_length = Instruction::InstructionLength(
                                                      stub->instruction_start());
@@ -475,32 +485,18 @@ class RecordWriteStub: public CodeStub {
     ASSERT(first_instr_length == 4 || first_instr_length == 6);
     ASSERT(second_instr_length == 4 || second_instr_length == 6);
 
-    // INCREMENTAL has NOP on first branch.
-    if (4 == first_instr_length) {
-      // BRC - Check for 0x0 mask condition.
-      if (0 == (first_instr & kFourByteBrCondMask)) {
-        return INCREMENTAL_COMPACTION;
-      }
-    } else {
-      // BRCL - Check for 0x0 mask condition
-      if (0 == (first_instr & kSixByteBrCondMask)) {
-        return INCREMENTAL_COMPACTION;
-      }
-    }
+    bool isFirstInstrNOP= isBranchNop(first_instr, first_instr_length);
+    bool isSecondInstrNOP = isBranchNop(second_instr, second_instr_length);
 
+    // STORE_BUFFER_ONLY has NOP on both branches
+    if (isSecondInstrNOP && isFirstInstrNOP) return STORE_BUFFER_ONLY;
     // INCREMENTAL_COMPACTION has NOP on second branch.
-    if (4 == second_instr_length) {
-      // BRC - Check for 0x0 mask condition.
-      if (0 == (second_instr & kFourByteBrCondMask)) {
-        return INCREMENTAL;
-      }
-    } else {
-      // BRCL - Check for 0x0 mask condition
-      if (0 == (second_instr & kSixByteBrCondMask)) {
-        return INCREMENTAL;
-      }
-    }
+    else if (isFirstInstrNOP && !isSecondInstrNOP)
+      return INCREMENTAL_COMPACTION;
+    // INCREMENTAL has NOP on first branch.
+    else if (!isFirstInstrNOP && isSecondInstrNOP) return INCREMENTAL;
 
+    ASSERT(false);
     return STORE_BUFFER_ONLY;
   }
 
@@ -518,16 +514,16 @@ class RecordWriteStub: public CodeStub {
         ASSERT(GetMode(stub) == INCREMENTAL ||
                GetMode(stub) == INCREMENTAL_COMPACTION);
 
-        PatchBranchCondMask(&masm, 0, CC_ALWAYS);
-        PatchBranchCondMask(&masm, first_instr_length, CC_ALWAYS);
+        PatchBranchCondMask(&masm, 0, CC_NOP);
+        PatchBranchCondMask(&masm, first_instr_length, CC_NOP);
         break;
       case INCREMENTAL:
         ASSERT(GetMode(stub) == STORE_BUFFER_ONLY);
-        PatchBranchCondMask(&masm, first_instr_length, CC_NOP);
+        PatchBranchCondMask(&masm, 0, CC_ALWAYS);
         break;
       case INCREMENTAL_COMPACTION:
         ASSERT(GetMode(stub) == STORE_BUFFER_ONLY);
-        PatchBranchCondMask(&masm, 0, CC_NOP);
+        PatchBranchCondMask(&masm, first_instr_length, CC_ALWAYS);
         break;
     }
     ASSERT(GetMode(stub) == mode);

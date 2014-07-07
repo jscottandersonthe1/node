@@ -1,6 +1,6 @@
 // Copyright 2012 the V8 project authors. All rights reserved.
 //
-// Copyright IBM Corp. 2012, 2013. All rights reserved.
+// Copyright IBM Corp. 2012-2014. All rights reserved.
 //
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions are
@@ -126,14 +126,18 @@ class RegExpMacroAssemblerS390: public NativeRegExpMacroAssembler {
   static const int kFramePointer = 0;
 
   // Above the frame pointer - Stored registers and stack passed parameters.
-  // Register 6-11,13
+  // Register 6-15(sp)
   static const int kStoredRegisters = kFramePointer;
   // Return address (stored from link register, read into pc on return).
-  static const int kReturnAddress = kStoredRegisters + 7 * kPointerSize;
-  static const int kCallerFrame = kReturnAddress + kPointerSize;
+  // static const int kReturnAddress = kStoredRegisters + 7 * kPointerSize;
+  // FIXME: broken in 64 bit
+  static const int kCallerFrame = kStoredRegisters +
+    kCalleeRegisterSaveAreaSize;
   // Stack parameters placed by caller.
-  static const int kSecondaryReturnAddress = kCallerFrame +
-    kStackFrameExtraParamSlot * kPointerSize;
+  static const int kCaptureArraySize = kCallerFrame;
+  static const int kStackAreaBase = kCallerFrame + kPointerSize;
+  // kDirectCall again
+  static const int kSecondaryReturnAddress = kStackAreaBase + 2 * kPointerSize;
   static const int kIsolate = kSecondaryReturnAddress + kPointerSize;
 
   // Below the frame pointer.
