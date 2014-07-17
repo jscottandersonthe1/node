@@ -1274,7 +1274,7 @@ void Simulator::SoftwareInterrupt(Instruction* instr) {
          (redirection->type() == ExternalReference::BUILTIN_FP_INT_CALL);
       // This is dodgy but it works because the C entry stubs are never moved.
       // See comment in codegen-arm.cc and bug 1242173.
-      intptr_t saved_lr = get_register(r14);
+      int64_t saved_lr = get_register(r14);
 #ifndef V8_TARGET_ARCH_S390X
       // On zLinux-31, the saved_lr might be tagged with a high bit of 1.
       // Cleanse it before proceeding with simulation.
@@ -1606,7 +1606,7 @@ void Simulator::PrintStopInfo(uint32_t code) {
 
 // Method for checking overflow on signed subtraction:
 #define CheckOverflowForIntSub(src1, src2) \
-  CheckOverflowForIntAdd((src1), -(src2))
+  (((src1 - src2) < src1) != (src2 > 0))
 
 // Method for checking overflow on unsigned addtion
 #define CheckOverflowForUIntAdd(src1, src2) \
@@ -1810,7 +1810,7 @@ bool Simulator::DecodeTwoByte(Instruction* instr) {
       int r2 = rrinst->R2Value();
       intptr_t link_addr = get_pc() + 2;
       // If R2 is zero, the BASR does not branch.
-      intptr_t r2_val = (r2 == 0)?link_addr:get_register(r2);
+      int64_t r2_val = (r2 == 0)?link_addr:get_register(r2);
 #ifndef V8_TARGET_ARCH_S390X
       // On 31-bit, the top most bit may be 0 or 1, which can cause issues
       // for stackwalker.  The top bit should either be cleanse before being
@@ -1865,8 +1865,8 @@ bool Simulator::DecodeFourByte(Instruction* instr) {
       int r1 = rxinst->R1Value();
       int b2 = rxinst->B2Value();
       int x2 = rxinst->X2Value();
-      intptr_t b2_val = (b2 == 0) ? 0 : get_register(b2);
-      intptr_t x2_val = (x2 == 0) ? 0 : get_register(x2);
+      int64_t b2_val = (b2 == 0) ? 0 : get_register(b2);
+      int64_t x2_val = (x2 == 0) ? 0 : get_register(x2);
       intptr_t d2_val = rxinst->D2Value();
       int32_t  r1_val = get_low_register<int32_t>(r1);
 
@@ -1942,8 +1942,8 @@ bool Simulator::DecodeFourByte(Instruction* instr) {
       int x2 = rxinst->X2Value();
       int b2 = rxinst->B2Value();
 
-      intptr_t x2_val = (x2 == 0) ? 0 : get_register(x2);
-      intptr_t b2_val = (b2 == 0) ? 0 : get_register(b2);
+      int64_t x2_val = (x2 == 0) ? 0 : get_register(x2);
+      int64_t b2_val = (b2 == 0) ? 0 : get_register(b2);
       intptr_t d2_val = rxinst->D2Value();
       intptr_t mem_addr = x2_val + b2_val + d2_val;
 
@@ -2057,7 +2057,7 @@ bool Simulator::DecodeFourByte(Instruction* instr) {
       int b2 = rsInstr->B2Value();
       intptr_t d2 = rsInstr->D2Value();
       // only takes rightmost 6bits
-      intptr_t b2_val = b2 == 0 ? 0 : get_register(b2);
+      int64_t b2_val = b2 == 0 ? 0 : get_register(b2);
       int shiftBits = (b2_val + d2) & 0x3F;
       uint32_t r1_val = get_low_register<uint32_t>(r1);
       uint32_t alu_out = 0;
@@ -2078,7 +2078,7 @@ bool Simulator::DecodeFourByte(Instruction* instr) {
       int b2 = rsInstr->B2Value();
       intptr_t d2 = rsInstr->D2Value();
       // only takes rightmost 6bits
-      intptr_t b2_val = b2 == 0 ? 0 : get_register(b2);
+      int64_t b2_val = b2 == 0 ? 0 : get_register(b2);
       int shiftBits = (b2_val + d2) & 0x3F;
       int32_t r1_val = get_low_register<int32_t>(r1);
       int32_t alu_out = 0;
@@ -2104,8 +2104,8 @@ bool Simulator::DecodeFourByte(Instruction* instr) {
       int b2 = rxinst->B2Value();
       int x2 = rxinst->X2Value();
       int32_t  r1 = rxinst->R1Value();
-      intptr_t b2_val = (b2 == 0) ? 0 : get_register(b2);
-      intptr_t x2_val = (x2 == 0) ? 0 : get_register(x2);
+      int64_t b2_val = (b2 == 0) ? 0 : get_register(b2);
+      int64_t x2_val = (x2 == 0) ? 0 : get_register(x2);
       intptr_t d2_val = rxinst->D2Value();
       intptr_t addr = b2_val + x2_val + d2_val;
       if (op == L) {
@@ -2128,8 +2128,8 @@ bool Simulator::DecodeFourByte(Instruction* instr) {
       int b2 = rxinst->B2Value();
       int x2 = rxinst->X2Value();
       int32_t  r1_val = get_low_register<int32_t>(rxinst->R1Value());
-      intptr_t b2_val = (b2 == 0) ? 0 : get_register(b2);
-      intptr_t x2_val = (x2 == 0) ? 0 : get_register(x2);
+      int64_t b2_val = (b2 == 0) ? 0 : get_register(b2);
+      int64_t x2_val = (x2 == 0) ? 0 : get_register(x2);
       intptr_t d2_val = rxinst->D2Value();
       intptr_t addr = b2_val + x2_val + d2_val;
       int32_t mem_val = ReadW(addr, instr);
@@ -2142,7 +2142,7 @@ bool Simulator::DecodeFourByte(Instruction* instr) {
     case CLI: {
       // Compare Immediate (Mem - Imm) (8)
       int b1 = siInstr->B1Value();
-      intptr_t b1_val = (b1 == 0) ? 0 : get_register(b1);
+      int64_t b1_val = (b1 == 0) ? 0 : get_register(b1);
       intptr_t d1_val = siInstr->D1Value();
       intptr_t addr = b1_val + d1_val;
       uint8_t mem_val = ReadB(addr);
@@ -2153,7 +2153,7 @@ bool Simulator::DecodeFourByte(Instruction* instr) {
     case TM: {
       // Test Under Mask (Mem - Imm) (8)
       int b1 = siInstr->B1Value();
-      intptr_t b1_val = (b1 == 0) ? 0 : get_register(b1);
+      int64_t b1_val = (b1 == 0) ? 0 : get_register(b1);
       intptr_t d1_val = siInstr->D1Value();
       intptr_t addr = b1_val + d1_val;
       uint8_t mem_val = ReadB(addr);
@@ -2178,8 +2178,8 @@ bool Simulator::DecodeFourByte(Instruction* instr) {
       int b2 = rxinst->B2Value();
       int x2 = rxinst->X2Value();
       int32_t  r1_val = get_low_register<int32_t>(rxinst->R1Value());
-      intptr_t b2_val = (b2 == 0) ? 0 : get_register(b2);
-      intptr_t x2_val = (x2 == 0) ? 0 : get_register(x2);
+      int64_t b2_val = (b2 == 0) ? 0 : get_register(b2);
+      int64_t x2_val = (x2 == 0) ? 0 : get_register(x2);
       intptr_t d2_val = rxinst->D2Value();
       intptr_t addr = b2_val + x2_val + d2_val;
       if (op == ST) {
@@ -2223,7 +2223,7 @@ bool Simulator::DecodeFourByte(Instruction* instr) {
     }
     case TRAP4: {
       // whack the space of the caller allocated stack
-      intptr_t sp_addr = get_register(sp);
+      int64_t sp_addr = get_register(sp);
       for (int i = 0; i < kCalleeRegisterSaveAreaSize / kPointerSize; ++i) {
         // we dont want to whack the RA (r14)
         if (i != 14) (reinterpret_cast<intptr_t*>(sp_addr))[i] = 0xdeadbabe;
@@ -2237,8 +2237,8 @@ bool Simulator::DecodeFourByte(Instruction* instr) {
       int b2 = rxinst->B2Value();
       int x2 = rxinst->X2Value();
       uint8_t  r1_val = get_low_register<int32_t>(rxinst->R1Value());
-      intptr_t b2_val = (b2 == 0) ? 0 : get_register(b2);
-      intptr_t x2_val = (x2 == 0) ? 0 : get_register(x2);
+      int64_t b2_val = (b2 == 0) ? 0 : get_register(b2);
+      int64_t x2_val = (x2 == 0) ? 0 : get_register(x2);
       intptr_t d2_val = rxinst->D2Value();
       intptr_t mem_addr = b2_val + x2_val + d2_val;
       WriteB(mem_addr, r1_val);
@@ -2249,8 +2249,8 @@ bool Simulator::DecodeFourByte(Instruction* instr) {
       int b2 = rxinst->B2Value();
       int x2 = rxinst->X2Value();
       int16_t  r1_val = get_low_register<int32_t>(rxinst->R1Value());
-      intptr_t b2_val = (b2 == 0) ? 0 : get_register(b2);
-      intptr_t x2_val = (x2 == 0) ? 0 : get_register(x2);
+      int64_t b2_val = (b2 == 0) ? 0 : get_register(b2);
+      int64_t x2_val = (x2 == 0) ? 0 : get_register(x2);
       intptr_t d2_val = rxinst->D2Value();
       intptr_t mem_addr = b2_val + x2_val + d2_val;
       WriteH(mem_addr, r1_val, instr);
@@ -2279,7 +2279,7 @@ bool Simulator::DecodeFourByte(Instruction* instr) {
       int b2 = rsInstr->B2Value();
       intptr_t d2 = rsInstr->D2Value();
       // only takes rightmost 6bits
-      intptr_t b2_val = b2 == 0 ? 0 : get_register(b2);
+      int64_t b2_val = b2 == 0 ? 0 : get_register(b2);
       int shiftBits = (b2_val + d2) & 0x3F;
       int64_t opnd1 = static_cast<int64_t>(get_low_register<int32_t>(r1)) <<32;
       int64_t opnd2 = static_cast<uint64_t>(get_low_register<uint32_t>(r1+1));
@@ -2537,8 +2537,8 @@ bool Simulator::DecodeFourByteArithmetic(Instruction* instr) {
       int b2 = rxinst->B2Value();
       int x2 = rxinst->X2Value();
       int32_t  r1_val = get_low_register<int32_t>(rxinst->R1Value());
-      intptr_t b2_val = (b2 == 0) ? 0 : get_register(b2);
-      intptr_t x2_val = (x2 == 0) ? 0 : get_register(x2);
+      int64_t b2_val = (b2 == 0) ? 0 : get_register(b2);
+      int64_t x2_val = (x2 == 0) ? 0 : get_register(x2);
       intptr_t d2_val = rxinst->D2Value();
       int32_t mem_val = ReadW(b2_val + x2_val + d2_val, instr);
       int32_t alu_out = 0;
@@ -2625,8 +2625,8 @@ bool Simulator::DecodeFourByteArithmetic(Instruction* instr) {
       int b2 = rxinst->B2Value();
       int x2 = rxinst->X2Value();
       int32_t r1_val = get_low_register<int32_t>(rxinst->R1Value());
-      intptr_t b2_val = (b2 == 0) ? 0 : get_register(b2);
-      intptr_t x2_val = (x2 == 0) ? 0 : get_register(x2);
+      int64_t b2_val = (b2 == 0) ? 0 : get_register(b2);
+      int64_t x2_val = (x2 == 0) ? 0 : get_register(x2);
       intptr_t d2_val = rxinst->D2Value();
       intptr_t addr = b2_val + x2_val + d2_val;
       int16_t mem_val = ReadH(addr, instr);
@@ -2674,8 +2674,8 @@ bool Simulator::DecodeFourByteArithmetic(Instruction* instr) {
         int32_t r2_val = get_low_register<int32_t>(r2);
         set_low_register(r1, r1_val * r2_val);
       } else if (op == MSGR) {
-        intptr_t r1_val = get_register(r1);
-        intptr_t r2_val = get_register(r2);
+        int64_t r1_val = get_register(r1);
+        int64_t r2_val = get_register(r2);
         set_register(r1, r1_val * r2_val);
       } else {
         UNREACHABLE();
@@ -2687,8 +2687,8 @@ bool Simulator::DecodeFourByteArithmetic(Instruction* instr) {
       int r1 = rxinst->R1Value();
       int b2 = rxinst->B2Value();
       int x2 = rxinst->X2Value();
-      intptr_t x2_val = (x2 == 0) ? 0 : get_register(x2);
-      intptr_t b2_val = (b2 == 0) ? 0 : get_register(b2);
+      int64_t x2_val = (x2 == 0) ? 0 : get_register(x2);
+      int64_t b2_val = (b2 == 0) ? 0 : get_register(b2);
       intptr_t d2_val = rxinst->D2Value();
       int32_t mem_val = ReadW(b2_val + x2_val + d2_val, instr);
       int32_t r1_val = get_low_register<int32_t>(r1);
@@ -2785,7 +2785,7 @@ bool Simulator::DecodeFourByteFloatingPoint(Instruction* instr) {
             SetS390ConditionCode<double>(r1_val, r2_val);
           }
         } else if (op == CDGBR) {
-          intptr_t r2_val = get_register(r2);
+          int64_t r2_val = get_register(r2);
           double r1_val = static_cast<double>(r2_val);
           set_d_register_from_double(r1, r1_val);
         } else if (op == CDFBR) {
@@ -2810,13 +2810,6 @@ bool Simulator::DecodeFourByteFloatingPoint(Instruction* instr) {
           else
             condition_reg_ = 1;
 
-          // check for overflow, cast r2_val to 64bit integer
-          // then check value within the range of INT_MIN and INT_MAX
-          // and set condition code accordingly
-          int64_t temp = static_cast<int64_t>(r2_val);
-          if (temp < INT_MIN || temp > INT_MAX) {
-            condition_reg_ = 1;
-          }
           switch (mask_val) {
             case CURRENT_ROUNDING_MODE:
             case ROUND_TO_PREPARE_FOR_SHORTER_PRECISION: {
@@ -2826,9 +2819,9 @@ bool Simulator::DecodeFourByteFloatingPoint(Instruction* instr) {
             case ROUND_TO_NEAREST_WITH_TIES_AWAY_FROM_0: {
               double ceil_val = ceil(r2_val);
               double floor_val = floor(r2_val);
-              if (abs(r2_val - floor_val) > abs(r2_val - ceil_val)) {
+              if (fabs(r2_val - floor_val) > fabs(r2_val - ceil_val)) {
                 r1_val = static_cast<int32_t>(ceil_val);
-              } else if (abs(r2_val - floor_val) < abs(r2_val - ceil_val)) {
+              } else if (fabs(r2_val - floor_val) < fabs(r2_val - ceil_val)) {
                 r1_val = static_cast<int32_t>(floor_val);
               } else {  // round away from zero:
                 if (r2_val > 0.0) {
@@ -2842,9 +2835,9 @@ bool Simulator::DecodeFourByteFloatingPoint(Instruction* instr) {
             case ROUND_TO_NEAREST_WITH_TIES_TO_EVEN: {
               double ceil_val = ceil(r2_val);
               double floor_val = floor(r2_val);
-              if (abs(r2_val - floor_val) > abs(r2_val - ceil_val)) {
+              if (fabs(r2_val - floor_val) > fabs(r2_val - ceil_val)) {
                 r1_val = static_cast<int32_t>(ceil_val);
-              } else if (abs(r2_val - floor_val) < abs(r2_val - ceil_val)) {
+              } else if (fabs(r2_val - floor_val) < fabs(r2_val - ceil_val)) {
                 r1_val = static_cast<int32_t>(floor_val);
               } else {  // check which one is even:
                 int32_t c_v = static_cast<int32_t>(ceil_val);
@@ -2857,6 +2850,13 @@ bool Simulator::DecodeFourByteFloatingPoint(Instruction* instr) {
               break;
             }
             case ROUND_TOWARD_0: {
+              // check for overflow, cast r2_val to 64bit integer
+              // then check value within the range of INT_MIN and INT_MAX
+              // and set condition code accordingly
+              int64_t temp = static_cast<int64_t>(r2_val);
+              if (temp < INT_MIN || temp > INT_MAX) {
+                condition_reg_ = CC_OF;
+              }
               r1_val = static_cast<int32_t>(r2_val);
               break;
             }
@@ -2865,6 +2865,13 @@ bool Simulator::DecodeFourByteFloatingPoint(Instruction* instr) {
               break;
             }
             case ROUND_TOWARD_MINUS_INFINITE: {
+              // check for overflow, cast r2_val to 64bit integer
+              // then check value within the range of INT_MIN and INT_MAX
+              // and set condition code accordingly
+              int64_t temp = static_cast<int64_t>(floor(r2_val));
+              if (temp < INT_MIN || temp > INT_MAX) {
+                condition_reg_ = CC_OF;
+              }
               r1_val = static_cast<int32_t>(floor(r2_val));
               break;
             }
@@ -3075,7 +3082,7 @@ bool Simulator::DecodeSixByte(Instruction* instr) {
     case CLIY: {
       // Compare Immediate (Mem - Imm) (8)
       int b1 = siyInstr->B1Value();
-      intptr_t b1_val = (b1 == 0) ? 0 : get_register(b1);
+      int64_t b1_val = (b1 == 0) ? 0 : get_register(b1);
       intptr_t d1_val = siyInstr->D1Value();
       intptr_t addr = b1_val + d1_val;
       uint8_t mem_val = ReadB(addr);
@@ -3086,7 +3093,7 @@ bool Simulator::DecodeSixByte(Instruction* instr) {
     case TMY: {
       // Test Under Mask (Mem - Imm) (8)
       int b1 = siyInstr->B1Value();
-      intptr_t b1_val = (b1 == 0) ? 0 : get_register(b1);
+      int64_t b1_val = (b1 == 0) ? 0 : get_register(b1);
       intptr_t d1_val = siyInstr->D1Value();
       intptr_t addr = b1_val + d1_val;
       uint8_t mem_val = ReadB(addr);
@@ -3110,8 +3117,8 @@ bool Simulator::DecodeSixByte(Instruction* instr) {
       int rb = rxeInstr->B2Value();
       int rx = rxeInstr->X2Value();
       int offset = rxeInstr->D2Value();
-      intptr_t rb_val = (rb == 0) ? 0 : get_register(rb);
-      intptr_t rx_val = (rx == 0) ? 0 : get_register(rx);
+      int64_t rb_val = (rb == 0) ? 0 : get_register(rb);
+      int64_t rx_val = (rx == 0) ? 0 : get_register(rx);
       double ret = static_cast<double>(
           *reinterpret_cast<float*>(rx_val + rb_val + offset));
       set_d_register_from_double(r1, ret);
@@ -3123,8 +3130,8 @@ bool Simulator::DecodeSixByte(Instruction* instr) {
       int rb = rxyInstr->B2Value();
       int rx = rxyInstr->X2Value();
       int offset = rxyInstr->D2Value();
-      intptr_t rb_val = (rb == 0) ? 0 : get_register(rb);
-      intptr_t rx_val = (rx == 0) ? 0 : get_register(rx);
+      int64_t rb_val = (rb == 0) ? 0 : get_register(rb);
+      int64_t rx_val = (rx == 0) ? 0 : get_register(rx);
       set_register(r1, rx_val + rb_val + offset);
       break;
     }
@@ -3247,7 +3254,7 @@ bool Simulator::DecodeSixByte(Instruction* instr) {
       if (r3 < r1)
         r3 += 16;
 
-      intptr_t rb_val = (rb == 0) ? 0 : get_register(rb);
+      int64_t rb_val = (rb == 0) ? 0 : get_register(rb);
 
       // Store each register in ascending order.
       for (int i = 0; i <= r3 - r1; i++) {
@@ -3273,7 +3280,7 @@ bool Simulator::DecodeSixByte(Instruction* instr) {
       int b2 = rsyInstr->B2Value();
       intptr_t d2 = rsyInstr->D2Value();
       // only takes rightmost 6 bits
-      intptr_t b2_val = (b2 == 0) ? 0 : get_register(b2);
+      int64_t b2_val = (b2 == 0) ? 0 : get_register(b2);
       int shiftBits = (b2_val + d2) & 0x3F;
       // unsigned
       uint32_t r3_val = get_low_register<uint32_t>(r3);
@@ -3300,11 +3307,11 @@ bool Simulator::DecodeSixByte(Instruction* instr) {
       int b2 = rsyInstr->B2Value();
       intptr_t d2 = rsyInstr->D2Value();
       // only takes rightmost 6 bits
-      intptr_t b2_val = (b2 == 0) ? 0 : get_register(b2);
+      int64_t b2_val = (b2 == 0) ? 0 : get_register(b2);
       int shiftBits = (b2_val + d2) & 0x3F;
       // unsigned
-      uintptr_t r3_val = get_register(r3);
-      uintptr_t alu_out = 0;
+      uint64_t r3_val = get_register(r3);
+      uint64_t alu_out = 0;
       if (op == SLLG) {
         alu_out = r3_val << shiftBits;
       } else if (op == SRLG) {
@@ -3323,7 +3330,7 @@ bool Simulator::DecodeSixByte(Instruction* instr) {
       int b2 = rsyInstr->B2Value();
       intptr_t d2 = rsyInstr->D2Value();
       // only takes rightmost 6 bits
-      intptr_t b2_val = (b2 == 0) ? 0 : get_register(b2);
+      int64_t b2_val = (b2 == 0) ? 0 : get_register(b2);
       int shiftBits = (b2_val + d2) & 0x3F;
       int32_t r3_val = get_low_register<int32_t>(r3);
       int32_t alu_out = 0;
@@ -3347,9 +3354,9 @@ bool Simulator::DecodeSixByte(Instruction* instr) {
       int b2 = rsyInstr->B2Value();
       intptr_t d2 = rsyInstr->D2Value();
       // only takes rightmost 6 bits
-      intptr_t b2_val = (b2 == 0) ? 0 : get_register(b2);
+      int64_t b2_val = (b2 == 0) ? 0 : get_register(b2);
       int shiftBits = (b2_val + d2) & 0x3F;
-      intptr_t r3_val = get_register(r3);
+      int64_t r3_val = get_register(r3);
       intptr_t alu_out = 0;
       bool isOF = false;
       if (op == SLAG) {
@@ -3399,8 +3406,8 @@ bool Simulator::DecodeSixByte(Instruction* instr) {
       int b2 = rxyInstr->B2Value();
       int d2 = rxyInstr->D2Value();
 
-      intptr_t x2_val = (x2 == 0) ? 0 : get_register(x2);
-      intptr_t b2_val = (b2 == 0) ? 0 : get_register(b2);
+      int64_t x2_val = (x2 == 0) ? 0 : get_register(x2);
+      int64_t b2_val = (b2 == 0) ? 0 : get_register(b2);
       intptr_t addr = x2_val + b2_val + d2;
 
       if (op == LT) {
@@ -3429,8 +3436,8 @@ bool Simulator::DecodeSixByte(Instruction* instr) {
       int x2 = rxyInstr->X2Value();
       int b2 = rxyInstr->B2Value();
       int d2 = rxyInstr->D2Value();
-      intptr_t x2_val = (x2 == 0) ? 0 : get_register(x2);
-      intptr_t b2_val = (b2 == 0) ? 0 : get_register(b2);
+      int64_t x2_val = (x2 == 0) ? 0 : get_register(x2);
+      int64_t b2_val = (b2 == 0) ? 0 : get_register(b2);
       intptr_t addr = x2_val + b2_val + d2;
       if (op == LY) {
         uint32_t mem_val = ReadWU(addr, instr);
@@ -3473,8 +3480,8 @@ bool Simulator::DecodeSixByte(Instruction* instr) {
       int b2 = ssInstr->B2Value();
       intptr_t d2 = ssInstr->D2Value();
       int length = ssInstr->Length();
-      intptr_t b1_val = (b1 == 0) ? 0 : get_register(b1);
-      intptr_t b2_val = (b2 == 0) ? 0 : get_register(b2);
+      int64_t b1_val = (b1 == 0) ? 0 : get_register(b1);
+      int64_t b2_val = (b2 == 0) ? 0 : get_register(b2);
       intptr_t src_addr = b2_val + d2;
       intptr_t dst_addr = b1_val + d1;
       // remember that the length is the actual length - 1
@@ -3489,8 +3496,8 @@ bool Simulator::DecodeSixByte(Instruction* instr) {
       int r1 = rxyInstr->R1Value();
       int b2 = rxyInstr->B2Value();
       int x2 = rxyInstr->X2Value();
-      intptr_t b2_val = (b2 == 0) ? 0 : get_register(b2);
-      intptr_t x2_val = (x2 == 0) ? 0 : get_register(x2);
+      int64_t b2_val = (b2 == 0) ? 0 : get_register(b2);
+      int64_t x2_val = (x2 == 0) ? 0 : get_register(x2);
       intptr_t d2_val = rxyInstr->D2Value();
       uint16_t mem_val = ReadHU(b2_val + d2_val + x2_val, instr);
       if (op == LLH) {
@@ -3508,8 +3515,8 @@ bool Simulator::DecodeSixByte(Instruction* instr) {
       int r1 = rxyInstr->R1Value();
       int b2 = rxyInstr->B2Value();
       int x2 = rxyInstr->X2Value();
-      intptr_t b2_val = (b2 == 0) ? 0 : get_register(b2);
-      intptr_t x2_val = (x2 == 0) ? 0 : get_register(x2);
+      int64_t b2_val = (b2 == 0) ? 0 : get_register(b2);
+      int64_t x2_val = (x2 == 0) ? 0 : get_register(x2);
       intptr_t d2_val = rxyInstr->D2Value();
       uint16_t mem_val = ReadBU(b2_val + d2_val + x2_val);
       if (op == LLC) {
@@ -3592,6 +3599,9 @@ bool Simulator::DecodeSixByte(Instruction* instr) {
 bool Simulator::DecodeSixByteArithmetic(Instruction *instr) {
   Opcode op = instr->S390OpcodeValue();
 
+  // Pre-cast instruction to various types
+  SIYInstruction *silInstr = reinterpret_cast<SIYInstruction*>(instr);
+
   switch (op) {
     case CDB:
     case ADB:
@@ -3602,8 +3612,8 @@ bool Simulator::DecodeSixByteArithmetic(Instruction *instr) {
       RXEInstruction* rxeInstr = reinterpret_cast<RXEInstruction*>(instr);
       int b2 = rxeInstr->B2Value();
       int x2 = rxeInstr->X2Value();
-      intptr_t b2_val = (b2 == 0) ? 0 : get_register(b2);
-      intptr_t x2_val = (x2 == 0) ? 0 : get_register(x2);
+      int64_t b2_val = (b2 == 0) ? 0 : get_register(b2);
+      int64_t x2_val = (x2 == 0) ? 0 : get_register(x2);
       intptr_t d2_val = rxeInstr->D2Value();
       double r1_val = get_double_from_d_register(rxeInstr->R1Value());
       double dbl_val = ReadDouble(b2_val + x2_val + d2_val);
@@ -3651,8 +3661,8 @@ bool Simulator::DecodeSixByteArithmetic(Instruction *instr) {
       int b2 = rxyInstr->B2Value();
       int d2 = rxyInstr->D2Value();
       int32_t r1_val = get_low_register<int32_t>(r1);
-      intptr_t x2_val = (x2 == 0) ? 0 : get_register(x2);
-      intptr_t b2_val = (b2 == 0) ? 0 : get_register(b2);
+      int64_t x2_val = (x2 == 0) ? 0 : get_register(x2);
+      int64_t b2_val = (b2 == 0) ? 0 : get_register(b2);
       intptr_t mem_addr = b2_val + x2_val + d2;
 
       if (op == LRVH) {
@@ -3724,8 +3734,8 @@ bool Simulator::DecodeSixByteArithmetic(Instruction *instr) {
       int x2 = rxyInstr->X2Value();
       int b2 = rxyInstr->B2Value();
       int d2 = rxyInstr->D2Value();
-      intptr_t x2_val = (x2 == 0) ? 0 : get_register(x2);
-      intptr_t b2_val = (b2 == 0) ? 0 : get_register(b2);
+      int64_t x2_val = (x2 == 0) ? 0 : get_register(x2);
+      int64_t b2_val = (b2 == 0) ? 0 : get_register(b2);
       int32_t alu_out = get_low_register<int32_t>(r1);
       int32_t mem_val = ReadW(b2_val + x2_val + d2, instr);
       if (op == AY) {
@@ -3757,8 +3767,8 @@ bool Simulator::DecodeSixByteArithmetic(Instruction *instr) {
       int32_t r1_val = get_low_register<int32_t>(rxyInstr->R1Value());
       int b2 = rxyInstr->B2Value();
       int x2 = rxyInstr->X2Value();
-      intptr_t b2_val = (b2 == 0) ? 0 : get_register(b2);
-      intptr_t x2_val = (x2 == 0) ? 0 : get_register(x2);
+      int64_t b2_val = (b2 == 0) ? 0 : get_register(b2);
+      int64_t x2_val = (x2 == 0) ? 0 : get_register(x2);
       intptr_t d2_val = rxyInstr->D2Value();
       int16_t mem_val = ReadH(b2_val + d2_val + x2_val, instr);
       int32_t alu_out = 0;
@@ -3793,8 +3803,8 @@ bool Simulator::DecodeSixByteArithmetic(Instruction *instr) {
       int x2 = rxyInstr->X2Value();
       int b2 = rxyInstr->B2Value();
       int d2 = rxyInstr->D2Value();
-      intptr_t x2_val = (x2 == 0) ? 0 : get_register(x2);
-      intptr_t b2_val = (b2 == 0) ? 0 : get_register(b2);
+      int64_t x2_val = (x2 == 0) ? 0 : get_register(x2);
+      int64_t b2_val = (b2 == 0) ? 0 : get_register(b2);
       int64_t alu_out = get_register(r1);
       int64_t mem_val = ReadDW(b2_val + x2_val + d2);
 
@@ -3851,8 +3861,8 @@ bool Simulator::DecodeSixByteArithmetic(Instruction *instr) {
       int x2 = rxyInstr->X2Value();
       int b2 = rxyInstr->B2Value();
       int d2 = rxyInstr->D2Value();
-      intptr_t x2_val = (x2 == 0) ? 0 : get_register(x2);
-      intptr_t b2_val = (b2 == 0) ? 0 : get_register(b2);
+      int64_t x2_val = (x2 == 0) ? 0 : get_register(x2);
+      int64_t b2_val = (b2 == 0) ? 0 : get_register(b2);
       uint32_t alu_out = get_low_register<uint32_t>(r1);
       uint32_t mem_val = ReadWU(b2_val + x2_val + d2, instr);
 
@@ -3869,14 +3879,49 @@ bool Simulator::DecodeSixByteArithmetic(Instruction *instr) {
       }
       break;
     }
-    case AFI: {  // TODO(ALANLI): add overflow
+    case AFI: {
+      // 32-bit Add (Register + 32-bit Immediate)
       RILInstruction* rilInstr = reinterpret_cast<RILInstruction*>(instr);
       int r1 = rilInstr->R1Value();
       int i2 = rilInstr->I2Value();
       int32_t r1_val = get_low_register<int32_t>(r1);
+      int isOF = CheckOverflowForIntAdd(r1_val, i2);
       int32_t alu_out = r1_val + i2;
       set_low_register(r1, alu_out);
       SetS390ConditionCode<int32_t>(alu_out, 0);
+      SetS390OverflowCode(isOF);
+      break;
+    }
+    case ASI: {
+      int i2 = silInstr->I2Value();
+      int b1 = silInstr->B1Value();
+      intptr_t b1_val = (b1 == 0) ? 0 : get_register(b1);
+
+      int d1_val = silInstr->D1Value();
+      intptr_t addr = b1_val + d1_val;
+
+      int32_t mem_val = ReadW(addr, instr);
+      int isOF = CheckOverflowForIntAdd(mem_val, i2);
+      int32_t alu_out = mem_val + i2;
+      SetS390ConditionCode<int32_t>(alu_out, 0);
+      SetS390OverflowCode(isOF);
+      WriteW(addr, alu_out, instr);
+      break;
+    }
+    case AGSI: {
+      int i2 = silInstr->I2Value();
+      int b1 = silInstr->B1Value();
+      intptr_t b1_val = (b1 == 0) ? 0 : get_register(b1);
+
+      int d1_val = silInstr->D1Value();
+      intptr_t addr = b1_val + d1_val;
+
+      int64_t mem_val = ReadDW(addr);
+      int isOF = CheckOverflowForIntAdd(mem_val, i2);
+      int64_t alu_out = mem_val + i2;
+      SetS390ConditionCode<uint64_t>(alu_out, 0);
+      SetS390OverflowCode(isOF);
+      WriteDW(addr, alu_out);
       break;
     }
     case AGF:
@@ -3890,8 +3935,8 @@ bool Simulator::DecodeSixByteArithmetic(Instruction *instr) {
       uint64_t r1_val = get_register(rxyInstr->R1Value());
       int b2 = rxyInstr->B2Value();
       int x2 = rxyInstr->X2Value();
-      intptr_t b2_val = (b2 == 0) ? 0 : get_register(b2);
-      intptr_t x2_val = (x2 == 0) ? 0 : get_register(x2);
+      int64_t b2_val = (b2 == 0) ? 0 : get_register(b2);
+      int64_t x2_val = (x2 == 0) ? 0 : get_register(x2);
       intptr_t d2_val = rxyInstr->D2Value();
       uint64_t alu_out = r1_val;
       if (op == ALG) {
@@ -3941,8 +3986,8 @@ bool Simulator::DecodeSixByteArithmetic(Instruction *instr) {
       int r1 = rxyInstr->R1Value();
       int b2 = rxyInstr->B2Value();
       int x2 = rxyInstr->X2Value();
-      intptr_t b2_val = (b2 == 0) ? 0 : get_register(b2);
-      intptr_t x2_val = (x2 == 0) ? 0 : get_register(x2);
+      int64_t b2_val = (b2 == 0) ? 0 : get_register(b2);
+      int64_t x2_val = (x2 == 0) ? 0 : get_register(x2);
       intptr_t d2_val = rxyInstr->D2Value();
       if (op == MSY) {
         int32_t mem_val = ReadW(b2_val + d2_val + x2_val, instr);
@@ -3967,7 +4012,7 @@ bool Simulator::DecodeSixByteArithmetic(Instruction *instr) {
         alu_out = alu_out * i2;
         set_low_register(r1, alu_out);
       } else if (op == MSGFI) {
-        intptr_t alu_out = get_register(r1);
+        int64_t alu_out = get_register(r1);
         alu_out = alu_out *i2;
         set_register(r1, alu_out);
       } else {
@@ -4041,7 +4086,6 @@ void Simulator::Execute() {
   // raw PC value and not the one used as input to arithmetic instructions.
   intptr_t program_counter = get_pc();
 
-
   if (::v8::internal::FLAG_stop_sim_at == 0) {
     // Fast version of the dispatch loop without checking whether the simulator
     // should be stopping at a particular executed instruction.
@@ -4071,14 +4115,14 @@ void Simulator::Execute() {
 
 intptr_t Simulator::Call(byte* entry, int argument_count, ...) {
   // Remember the values of non-volatile registers.
-  intptr_t r6_val = get_register(r6);
-  intptr_t r7_val = get_register(r7);
-  intptr_t r8_val = get_register(r8);
-  intptr_t r9_val = get_register(r9);
-  intptr_t r10_val = get_register(r10);
-  intptr_t r11_val = get_register(r11);
-  intptr_t r12_val = get_register(r12);
-  intptr_t r13_val = get_register(r13);
+  int64_t r6_val = get_register(r6);
+  int64_t r7_val = get_register(r7);
+  int64_t r8_val = get_register(r8);
+  int64_t r9_val = get_register(r9);
+  int64_t r10_val = get_register(r10);
+  int64_t r11_val = get_register(r11);
+  int64_t r12_val = get_register(r12);
+  int64_t r13_val = get_register(r13);
 
   va_list parameters;
   va_start(parameters, argument_count);
@@ -4093,7 +4137,7 @@ intptr_t Simulator::Call(byte* entry, int argument_count, ...) {
   }
 
   // Remaining arguments passed on stack.
-  intptr_t original_stack = get_register(sp);
+  int64_t original_stack = get_register(sp);
   // Compute position of stack on entry to generated code.
   intptr_t entry_stack = (original_stack -
                           (kCalleeRegisterSaveAreaSize +
@@ -4173,13 +4217,13 @@ intptr_t Simulator::Call(byte* entry, int argument_count, ...) {
   set_register(sp, original_stack);
 
   // Return value register
-  intptr_t result = get_register(r2);
+  int64_t result = get_register(r2);
   return result;
 }
 
 
 uintptr_t Simulator::PushAddress(uintptr_t address) {
-  uintptr_t new_sp = get_register(sp) - sizeof(uintptr_t);
+  uint64_t new_sp = get_register(sp) - sizeof(uint64_t);
   uintptr_t* stack_slot = reinterpret_cast<uintptr_t*>(new_sp);
   *stack_slot = address;
   set_register(sp, new_sp);
@@ -4188,7 +4232,7 @@ uintptr_t Simulator::PushAddress(uintptr_t address) {
 
 
 uintptr_t Simulator::PopAddress() {
-  uintptr_t current_sp = get_register(sp);
+  uint64_t current_sp = get_register(sp);
   uintptr_t* stack_slot = reinterpret_cast<uintptr_t*>(current_sp);
   uintptr_t address = *stack_slot;
   set_register(sp, current_sp + sizeof(uintptr_t));
