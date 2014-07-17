@@ -1077,7 +1077,7 @@ void Assembler::rsy_form(Opcode op,
                         Register r3,
                         Register b2,
                         const Disp d2) {
-    ASSERT(is_uint20(d2));
+    ASSERT(is_int20(d2));
     ASSERT(is_uint16(op));
     uint64_t code = (static_cast<uint64_t>(op & 0xFF00)) * B32  |
                     (static_cast<uint64_t>(r1.code())) * B36     |
@@ -1637,7 +1637,6 @@ RIL1_FORM_EMIT(afi, AFI)
 RXY_FORM_EMIT(agf, AGF)
 RIL1_FORM_EMIT(agfi, AGFI)
 RRE_FORM_EMIT(agfr, AGFR)
-SIY_FORM_EMIT(agsi, AGSI)
 RRF1_FORM_EMIT(ahhhr, AHHHR)
 RRF1_FORM_EMIT(ahhlr, AHHLR)
 RIL1_FORM_EMIT(aih, AIH)
@@ -1657,7 +1656,6 @@ SIY_FORM_EMIT(alsi, ALSI)
 RIL1_FORM_EMIT(alsih, ALSIH)
 RIL1_FORM_EMIT(alsihn, ALSIHN)
 SS2_FORM_EMIT(ap, AP)
-SIY_FORM_EMIT(asi, ASI)
 RRE_FORM_EMIT(axbr, AXBR)
 RRF1_FORM_EMIT(axtr, AXTR)
 RRF1_FORM_EMIT(axtra, AXTRA)
@@ -2192,6 +2190,22 @@ void Assembler::ar(Register r1, Register r2) {
 // Add Register-Register-Register (32)
 void Assembler::ark(Register r1, Register r2, Register r3) {
   rrf1_form(ARK, r1, r2, r3);
+}
+
+// Add Storage-Imm (32)
+void Assembler::asi(const MemOperand& opnd, const Operand& imm) {
+  ASSERT(is_int8(imm.imm_));
+  ASSERT(is_int20(opnd.offset()));
+  siy_form(ASI, Operand(0xff & imm.imm_),
+            opnd.rb(), 0xfffff & opnd.offset());
+}
+
+// Add Storage-Imm (64)
+void Assembler::agsi(const MemOperand& opnd, const Operand& imm) {
+  ASSERT(is_int8(imm.imm_));
+  ASSERT(is_int20(opnd.offset()));
+  siy_form(AGSI, Operand(0xff & imm.imm_),
+            opnd.rb(), 0xfffff & opnd.offset());
 }
 
 // Subtract Register (32)
@@ -3013,12 +3027,10 @@ void Assembler::xc(const MemOperand& opnd1, const MemOperand& opnd2,
 }
 
 
-#ifdef V8_TARGET_ARCH_S390X
 // Store Register (64)
 void Assembler::stg(Register src, const MemOperand &dst) {
   rxy_form(STG, src, dst.rx(), dst.rb(), dst.offset());
 }
-#endif
 
 // Insert Character
 void Assembler::ic_z(Register r1, const MemOperand& opnd) {
