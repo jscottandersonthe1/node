@@ -144,7 +144,7 @@ void ElementsTransitionGenerator::GenerateSmiToDouble(
 
   __ bind(&aligned);
   // Store the filler at the end of the allocated memory.
-  __ Sub(r14, Operand(kPointerSize));
+  __ SubP(r14, Operand(kPointerSize));
   __ StorePX(ip, MemOperand(r8, r14));
 
   __ bind(&aligned_done);
@@ -249,7 +249,7 @@ void ElementsTransitionGenerator::GenerateSmiToDouble(
   __ AddP(r9, Operand(8));
 
   __ bind(&entry);
-  __ CmpRR(r9, r8);
+  __ CmpP(r9, r8);
   __ blt(&loop);
 
   __ pop(r14);
@@ -307,7 +307,7 @@ void ElementsTransitionGenerator::GenerateDoubleToObject(
   // r8: destination FixedArray
   // r9: the-hole pointer
   // r1: heap number map
-  __ b(&entry);
+  __ b(&entry, Label::kNear);
 
   // Call into runtime if GC is required.
   __ bind(&gc_required);
@@ -323,7 +323,7 @@ void ElementsTransitionGenerator::GenerateDoubleToObject(
   __ AddP(r6, Operand(8));
   // r3: current element's upper 32 bit
   // r6: address of next element's upper 32 bit
-  __ Cmpi(r3, Operand(kHoleNanUpper32));
+  __ CmpP(r3, Operand(kHoleNanUpper32));
   __ beq(&convert_hole);
 
   // Non-hole double, copy value into a heap number.
@@ -356,7 +356,7 @@ void ElementsTransitionGenerator::GenerateDoubleToObject(
                  kDontSaveFPRegs,
                  EMIT_REMEMBERED_SET,
                  OMIT_SMI_CHECK);
-  __ b(&entry);
+  __ b(&entry, Label::kNear);
 
   // Replace the-hole NaN with the-hole pointer.
   __ bind(&convert_hole);
@@ -364,7 +364,7 @@ void ElementsTransitionGenerator::GenerateDoubleToObject(
   __ AddP(r5, Operand(kPointerSize));
 
   __ bind(&entry);
-  __ Cmpl(r5, r7);
+  __ CmpLogicalP(r5, r7);
   __ blt(&loop);
 
   __ Pop(r5, r4, r3, r2);

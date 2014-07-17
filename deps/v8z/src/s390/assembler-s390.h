@@ -740,6 +740,8 @@ class Assembler : public AssemblerBase {
   }
 
   void mvc(const MemOperand& opnd1, const MemOperand& opnd2, uint32_t length);
+  void asi(const MemOperand&, const Operand&);
+  void agsi(const MemOperand&, const Operand&);
 
   // Data-processing instructions
 
@@ -924,7 +926,6 @@ RIL1_FORM(agfi);
 RRE_FORM(agfr);
 RI1_FORM(aghi);
 RRE_FORM(agr);
-SIY_FORM(agsi);
 RX_FORM(ah);
 RRF1_FORM(ahhhr);
 RRF1_FORM(ahhlr);
@@ -954,7 +955,6 @@ RIL1_FORM(alsihn);
 RXY_FORM(aly);
 SS2_FORM(ap);
 RR_FORM(ar);
-SIY_FORM(asi);
 RRE_FORM(axbr);
 RRF1_FORM(axtr);
 RRF1_FORM(axtra);
@@ -1733,9 +1733,7 @@ SS2_FORM(zap);
 // end of S390instructions
 void lhi(Register dst, const Operand& imm);
 
-#if V8_TARGET_ARCH_S390X
   void stg(Register rs, const MemOperand &src);
-#endif
 
   // Exception-generating instructions and debugging support
   void stop(const char* msg,
