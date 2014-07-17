@@ -184,10 +184,14 @@ void RegExpMacroAssemblerS390::AdvanceRegister(int reg, int by) {
   ASSERT(reg >= 0);
   ASSERT(reg < num_registers_);
   if (by != 0) {
-    __ LoadP(r2, register_location(reg), r0);
-    __ mov(r0, Operand(by));
-    __ AddRR(r2, r0);
-    __ StoreP(r2, register_location(reg));
+    if (CpuFeatures::IsSupported(GENERAL_INSTR_EXT) && is_int8(by)) {
+      __ AddMI(register_location(reg), Operand(by));
+    } else {
+      __ LoadP(r2, register_location(reg), r0);
+      __ mov(r0, Operand(by));
+      __ AddRR(r2, r0);
+      __ StoreP(r2, register_location(reg));
+    }
   }
 }
 
@@ -207,13 +211,13 @@ void RegExpMacroAssemblerS390::Bind(Label* label) {
 
 
 void RegExpMacroAssemblerS390::CheckCharacter(uint32_t c, Label* on_equal) {
-  __ Cmpli(current_character(), Operand(c));
+  __ CmpLogicalP(current_character(), Operand(c));
   BranchOrBacktrack(eq, on_equal);
 }
 
 
 void RegExpMacroAssemblerS390::CheckCharacterGT(uc16 limit, Label* on_greater) {
-  __ Cmpli(current_character(), Operand(limit));
+  __ CmpLogicalP(current_character(), Operand(limit));
   BranchOrBacktrack(gt, on_greater);
 }
 
@@ -222,13 +226,12 @@ void RegExpMacroAssemblerS390::CheckAtStart(Label* on_at_start) {
   Label not_at_start;
   // Did we start the match at the start of the string at all?
   __ LoadP(r2, MemOperand(frame_pointer(), kStartIndex));
-  __ Cmpi(r2, Operand::Zero());
+  __ CmpP(r2, Operand::Zero());
   BranchOrBacktrack(ne, &not_at_start);
 
   // If we did, are we still at the start of the input?
-  __ LoadP(r3, MemOperand(frame_pointer(), kInputStart));
   __ AddP(r2, current_input_offset(), end_of_input_address());
-  __ CmpRR(r3, r2);
+  __ CmpP(r2, MemOperand(frame_pointer(), kInputStart));
   BranchOrBacktrack(eq, on_at_start);
   __ bind(&not_at_start);
 }
@@ -237,22 +240,97 @@ void RegExpMacroAssemblerS390::CheckAtStart(Label* on_at_start) {
 void RegExpMacroAssemblerS390::CheckNotAtStart(Label* on_not_at_start) {
   // Did we start the match at the start of the string at all?
   __ LoadP(r2, MemOperand(frame_pointer(), kStartIndex));
-  __ Cmpi(r2, Operand::Zero());
+  __ CmpP(r2, Operand::Zero());
   BranchOrBacktrack(ne, on_not_at_start);
   // If we did, are we still at the start of the input?
-  __ LoadP(r3, MemOperand(frame_pointer(), kInputStart));
   __ AddP(r2, current_input_offset(), end_of_input_address());
-  __ CmpRR(r2, r3);
+  __ CmpP(r2, MemOperand(frame_pointer(), kInputStart));
   BranchOrBacktrack(ne, on_not_at_start);
 }
 
 
 void RegExpMacroAssemblerS390::CheckCharacterLT(uc16 limit, Label* on_less) {
-  __ Cmpli(current_character(), Operand(limit));
+  __ CmpLogicalP(current_character(), Operand(limit));
   BranchOrBacktrack(lt, on_less);
 }
 
 
+void RegExpMacroAssemblerS390::CheckCharacters(Vector<const uc16> str,
+                                               int cp_offset,
+                                               Label* on_failure,
+                                               bool check_end_of_string) {
+#ifdef DEBUG
+  // If input is ASCII, don't even bother calling here if the string to
+  // match contains a non-ASCII character.
+  if (mode_ == ASCII) {
+    ASSERT(String::IsAscii(str.start(), str.length()));
+  }
+#endif
+  int byte_length = str.length() * char_size();
+  int byte_offset = cp_offset * char_size();
+  if (check_end_of_string) {
+    // Check that there are at least str.length() characters left in the input.
+    __ CmpP(current_input_offset(), Operand(-(byte_offset + byte_length)));
+    BranchOrBacktrack(gt, on_failure);
+  }
+
+  if (on_failure == NULL) {
+    // Instead of inlining a backtrack, (re)use the global backtrack target.
+    on_failure = &backtrack_label_;
+  }
+
+  // Do one character test first to minimize loading for the case that
+  // we don't match at all (loading more than one character introduces that
+  // chance of reading unaligned and reading across cache boundaries).
+  // If the first character matches, expect a larger chance of matching the
+  // string, and start loading more characters at a time.
+  if (mode_ == ASCII) {
+    __ LoadlB(r0, MemOperand(end_of_input_address(),
+                  current_input_offset(), byte_offset));
+    __ CmpP(r0, Operand(static_cast<int8_t>(str[0])));
+    // __ cmpb(Operand(esi, edi, times_1, byte_offset),
+            // static_cast<int8_t>(str[0]));
+  } else {
+    // Don't use 16-bit immediate. The size changing prefix throws off
+    // pre-decoding.
+    __ LoadLogicalHalfWordP(r0, MemOperand(end_of_input_address(),
+                  current_input_offset(), byte_offset));
+    __ CmpP(r0, Operand(static_cast<int32_t>(str[0])));
+  }
+  BranchOrBacktrack(ne, on_failure);
+
+  __ la(r2, MemOperand(end_of_input_address(), current_input_offset()));
+  for (int i = 1, n = str.length(); i < n;) {
+    if (mode_ == ASCII) {
+      if (i <= n - 4) {
+        __ LoadlW(r0, MemOperand(r2, byte_offset + i));
+        __ CmpLogicalP(r0, Operand(*reinterpret_cast<const int*>(&str[i])));
+        i += 4;
+      } else {
+        __ LoadlB(r0, MemOperand(r2, byte_offset + i));
+        __ CmpLogicalP(r0, Operand(static_cast<int8_t>(str[i])));
+        i += 1;
+      }
+    } else {
+      ASSERT(mode_ == UC16);
+      if (i <= n - 2) {
+        __ LoadlW(r0, MemOperand(r2, byte_offset + i * sizeof(uc16)));
+        __ CmpLogicalP(r0, Operand(*reinterpret_cast<const int*>(&str[i])));
+        i += 2;
+      } else {
+        ASSERT(i == n - 2);
+        __ LoadLogicalHalfWordP(r0,
+              MemOperand(r2, byte_offset + i * sizeof(uc16)));
+        __ CmpLogicalP(r0, Operand(static_cast<int32_t>(str[i])));
+        i += 1;
+      }
+    }
+    BranchOrBacktrack(ne, on_failure);
+  }
+}
+
+
+/*
 void RegExpMacroAssemblerS390::CheckCharacters(Vector<const uc16> str,
                                               int cp_offset,
                                               Label* on_failure,
@@ -281,38 +359,38 @@ void RegExpMacroAssemblerS390::CheckCharacters(Vector<const uc16> str,
       __ LoadlB(r3, MemOperand(r2));
       __ AddP(r2, Operand(char_size()));
       ASSERT(str[i] <= String::kMaxAsciiCharCode);
-      __ Cmpi(r3, Operand(str[i]));
+      __ CmpP(r3, Operand(str[i]));
     } else {
       __ LoadLogicalHalfWordP(r3, MemOperand(r2));
       __ AddP(r2, Operand(char_size()));
       uc16 match_char = str[i];
       int match_high_byte = (match_char >> 8);
       if (match_high_byte == 0) {
-        __ Cmpi(r3, Operand(str[i]));
+        __ CmpP(r3, Operand(str[i]));
       } else {
         if (match_high_byte != stored_high_byte) {
           __ LoadImmP(r4, Operand(match_high_byte));
           stored_high_byte = match_high_byte;
         }
         __ AddP(r5, r4, Operand(match_char & 0xff));
-        __ CmpRR(r3, r5);
+        __ CmpP(r3, r5);
       }
     }
     BranchOrBacktrack(ne, on_failure);
   }
 }
+*/
 
 
 void RegExpMacroAssemblerS390::CheckGreedyLoop(Label* on_equal) {
   Label backtrack_non_equal;
-  __ LoadP(r2, MemOperand(backtrack_stackpointer(), 0));
-  __ CmpRR(current_input_offset(), r2);
+  __ CmpP(current_input_offset(), MemOperand(backtrack_stackpointer(), 0));
   __ bne(&backtrack_non_equal);
   __ AddP(backtrack_stackpointer(), Operand(kPointerSize));
 
+  // __ CmpP(current_input_offset(), r2);
+  BranchOrBacktrack(al, on_equal);
   __ bind(&backtrack_non_equal);
-  __ CmpRR(current_input_offset(), r2);
-  BranchOrBacktrack(eq, on_equal);
 }
 
 
@@ -320,23 +398,23 @@ void RegExpMacroAssemblerS390::CheckNotBackReferenceIgnoreCase(
     int start_reg,
     Label* on_no_match) {
   Label fallthrough;
-  __ LoadP(r2, register_location(start_reg), r0);  // Index of start of
+  __ LoadP(r2, register_location(start_reg));  // Index of start of
                                                        // capture
-  __ LoadP(r3, register_location(start_reg + 1), r0);  // Index of end
-  // Removing RC looks Okay here.
-  __ Sub(r3, r3, r2/*, LeaveOE, SetRC*/);  // Length of capture.
+  __ LoadP(r3, register_location(start_reg + 1));  // Index of end
+  __ SubP(r3, r3, r2);  // Length of capture.
+
+  // The length of a capture should not be negative. This can only happen
+  // if the end of the capture is unrecorded, or at a point earlier than
+  // the start of the capture.
+  BranchOrBacktrack(lt, on_no_match);
 
   // If length is zero, either the capture is empty or it is not participating.
   // In either case succeed immediately.
-  __ beq(&fallthrough /*, cr0*/);
+  __ beq(&fallthrough);
 
   // Check that there are enough characters left in the input.
-  // TODO(john): the RC bit set below is the condition for
-  //              the BranchOrBacktrack function
-  // __ Add(r0, r3, current_input_offset()/*, LeaveOE, SetRC*/);
   __ AddP(r0, r3, current_input_offset());
-//  __ cmn(r1_p, Operand(current_input_offset()));
-  BranchOrBacktrack(gt, on_no_match, cr0);
+  BranchOrBacktrack(gt, on_no_match);
 
   if (mode_ == ASCII) {
     Label success;
@@ -347,33 +425,34 @@ void RegExpMacroAssemblerS390::CheckNotBackReferenceIgnoreCase(
     // r3 - length of capture
     __ AddP(r2, end_of_input_address());
     __ AddP(r4, current_input_offset(), end_of_input_address());
-    __ AddP(r3, r2);
+    // __ AddP(r3, r2);
+    __ mov(r1, Operand::Zero());
 
+    // r1 - Loop index
     // r2 - Address of start of capture.
-    // r3 - Address of end of capture
     // r4 - Address of current input position.
 
     Label loop;
     __ bind(&loop);
-    __ LoadlB(r5, MemOperand(r2));
-    __ AddP(r2, Operand(char_size()));
-    __ LoadlB(r6, MemOperand(r4));
-    __ AddP(r4, Operand(char_size()));
-    __ CmpRR(r6, r5);
+    __ LoadlB(r5, MemOperand(r2, r1));
+    __ LoadlB(r6, MemOperand(r4, r1));
+
+    __ CmpP(r6, r5);
     __ beq(&loop_check);
 
     // Mismatch, try case-insensitive match (converting letters to lower-case).
-    __ OrP(r5, Operand(0x20));  // Convert capture character to lower-case.
-    __ OrP(r6, Operand(0x20));  // Also convert input character.
-    __ CmpRR(r6, r5);
+    __ Or(r5, Operand(0x20));  // Convert capture character to lower-case.
+    __ Or(r6, Operand(0x20));  // Also convert input character.
+    __ CmpP(r6, r5);
     __ bne(&fail);
-    __ Sub(r5, Operand('a'));
-    __ Cmpli(r5, Operand('z' - 'a'));  // Is r5 a lowercase letter?
+    __ SubP(r5, Operand('a'));
+    __ CmpLogicalP(r5, Operand('z' - 'a'));  // Is r5 a lowercase letter?
     __ bgt(&fail);
 
 
     __ bind(&loop_check);
-    __ CmpRR(r2, r3);
+    __ la(r1, MemOperand(r1, char_size()));
+    __ CmpP(r1, r3);
     __ blt(&loop);
     __ b(&success);
 
@@ -382,7 +461,8 @@ void RegExpMacroAssemblerS390::CheckNotBackReferenceIgnoreCase(
 
     __ bind(&success);
     // Compute new value of character position after the matched part.
-    __ Sub(current_input_offset(), r4, end_of_input_address());
+    __ SubP(current_input_offset(), r4, end_of_input_address());
+    __ AddP(current_input_offset(), r1);
   } else {
     ASSERT(mode_ == UC16);
     int argument_count = 4;
@@ -417,7 +497,7 @@ void RegExpMacroAssemblerS390::CheckNotBackReferenceIgnoreCase(
     }
 
     // Check if function returned non-zero for success or zero for failure.
-    __ Cmpi(r2, Operand::Zero());
+    __ CmpP(r2, Operand::Zero());
     BranchOrBacktrack(eq, on_no_match);
     // On success, increment position by length of capture.
     __ AddP(current_input_offset(), r6);
@@ -434,53 +514,54 @@ void RegExpMacroAssemblerS390::CheckNotBackReference(
   Label success;
 
   // Find length of back-referenced capture.
-  __ LoadP(r2, register_location(start_reg), r0);
-  __ LoadP(r3, register_location(start_reg + 1), r0);
-  // Removing RC looks Okay here.
-  __ Sub(r3, r3, r2/*, LeaveOE, SetRC*/);  // Length to check.
+  __ LoadP(r2, register_location(start_reg));
+  __ LoadP(r3, register_location(start_reg + 1));
+  __ SubP(r3, r3, r2);  // Length to check.
+
+  // The length of a capture should not be negative. This can only happen
+  // if the end of the capture is unrecorded, or at a point earlier than
+  // the start of the capture.
+  BranchOrBacktrack(lt, on_no_match);
+
   // Succeed on empty capture (including no capture).
   __ beq(&fallthrough /*, cr0*/);
 
   // Check that there are enough characters left in the input.
-  // TODO(john): the RC bit set below is the condition
-  //              for the BranchOrBacktrack function
-  // __ Add(r0, r3, current_input_offset()/*, LeaveOE, SetRC*/);
   __ AddP(r0, r3, current_input_offset());
   BranchOrBacktrack(gt, on_no_match, cr0);
 
   // Compute pointers to match string and capture string
-  __ AddP(r2, end_of_input_address());
-  __ AddP(r4, current_input_offset(), end_of_input_address());
-  __ AddP(r3, r2);
+  __ la(r2, MemOperand(r2, end_of_input_address()));
+  __ la(r4, MemOperand(current_input_offset(), end_of_input_address()));
+  __ mov(r1, Operand::Zero());
+  // __ AddP(r3, r2);
 
   Label loop;
   __ bind(&loop);
   if (mode_ == ASCII) {
-    __ LoadlB(r5, MemOperand(r2));
-    __ AddP(r2, Operand(char_size()));
-    __ LoadlB(r6, MemOperand(r4));
-    __ AddP(r4, Operand(char_size()));
+    __ LoadlB(r5, MemOperand(r2, r1));
+    __ LoadlB(r6, MemOperand(r4, r1));
   } else {
     ASSERT(mode_ == UC16);
-    __ LoadLogicalHalfWordP(r5, MemOperand(r2));
-    __ AddP(r2, Operand(char_size()));
-    __ LoadLogicalHalfWordP(r6, MemOperand(r4));
-    __ AddP(r4, Operand(char_size()));
+    __ LoadLogicalHalfWordP(r5, MemOperand(r2, r1));
+    __ LoadLogicalHalfWordP(r6, MemOperand(r4, r1));
   }
-  __ CmpRR(r5, r6);
+  __ la(r1, MemOperand(r1, char_size()));
+  __ CmpP(r5, r6);
   BranchOrBacktrack(ne, on_no_match);
-  __ CmpRR(r2, r3);
+  __ CmpP(r1, r3);
   __ blt(&loop);
 
   // Move current character position to position after match.
-  __ Sub(current_input_offset(), r4, end_of_input_address());
+  __ SubP(current_input_offset(), r4, end_of_input_address());
+  __ AddP(current_input_offset(), r1);
   __ bind(&fallthrough);
 }
 
 
 void RegExpMacroAssemblerS390::CheckNotCharacter(unsigned c,
                                                 Label* on_not_equal) {
-  __ Cmpli(current_character(), Operand(c));
+  __ CmpLogicalP(current_character(), Operand(c));
   BranchOrBacktrack(ne, on_not_equal);
 }
 
@@ -488,36 +569,22 @@ void RegExpMacroAssemblerS390::CheckNotCharacter(unsigned c,
 void RegExpMacroAssemblerS390::CheckCharacterAfterAnd(uint32_t c,
                                                      uint32_t mask,
                                                      Label* on_equal) {
-  __ mov(r0, Operand(mask));
-  if (c == 0) {
-    __ LoadRR(r2, r0);
-    __ AndP(r2, current_character()/*, SetRC*/);
-    // Should be okay to remove rc
-  } else {
-    __ LoadRR(r2, r0);
-    __ AndP(r2, current_character());
-    // TODO(JOHN): dont know if removing cr0 causes a problem
-    __ Cmpli(r2, Operand(c)/*, cr0*/);
+  __ AndP(r2, current_character(), Operand(mask));
+  if (c != 0) {
+    __ CmpLogicalP(r2, Operand(c));
   }
-  BranchOrBacktrack(eq, on_equal, cr0);
+  BranchOrBacktrack(eq, on_equal);
 }
 
 
 void RegExpMacroAssemblerS390::CheckNotCharacterAfterAnd(unsigned c,
                                                         unsigned mask,
                                                         Label* on_not_equal) {
-  __ mov(r0, Operand(mask));
-  if (c == 0) {
-    __ LoadRR(r2, r0);
-    __ AndP(r2, current_character()/*, SetRC*/);
-    // Should be okay to remove rc
-  } else {
-    __ LoadRR(r2, r0);
-    __ AndP(r2, current_character());
-    // TODO(JOHN): dont know if removing cr0 causes a problem
-    __ Cmpli(r2, Operand(c)/*, cr0*/);
+  __ AndP(r2, current_character(), Operand(mask));
+  if (c != 0) {
+    __ CmpLogicalP(r2, Operand(c));
   }
-  BranchOrBacktrack(ne, on_not_equal, cr0);
+  BranchOrBacktrack(ne, on_not_equal);
 }
 
 
@@ -527,10 +594,11 @@ void RegExpMacroAssemblerS390::CheckNotCharacterAfterMinusAnd(
     uc16 mask,
     Label* on_not_equal) {
   ASSERT(minus < String::kMaxUtf16CodeUnit);
-  __ Sub(r2, current_character(), Operand(minus));
-  __ mov(r0, Operand(mask));
-  __ AndP(r2, r0);
-  __ Cmpli(r2, Operand(c));
+  __ lay(r2, MemOperand(current_character(), -minus));
+  __ And(r2, Operand(mask));
+  if (c != 0) {
+    __ CmpLogicalP(r2, Operand(c));
+  }
   BranchOrBacktrack(ne, on_not_equal);
 }
 
@@ -539,9 +607,8 @@ void RegExpMacroAssemblerS390::CheckCharacterInRange(
     uc16 from,
     uc16 to,
     Label* on_in_range) {
-  __ mov(r0, Operand(from));
-  __ Sub(r2, current_character(), r0);
-  __ Cmpli(r2, Operand(to - from));
+  __ lay(r2, MemOperand(current_character(), -from));
+  __ CmpLogicalP(r2, Operand(to - from));
   BranchOrBacktrack(le, on_in_range);  // Unsigned lower-or-same condition.
 }
 
@@ -550,9 +617,8 @@ void RegExpMacroAssemblerS390::CheckCharacterNotInRange(
     uc16 from,
     uc16 to,
     Label* on_not_in_range) {
-  __ mov(r0, Operand(from));
-  __ Sub(r2, current_character(), r0);
-  __ Cmpli(r2, Operand(to - from));
+  __ lay(r2, MemOperand(current_character(), -from));
+  __ CmpLogicalP(r2, Operand(to - from));
   BranchOrBacktrack(gt, on_not_in_range);  // Unsigned higher condition.
 }
 
@@ -561,16 +627,14 @@ void RegExpMacroAssemblerS390::CheckBitInTable(
     Handle<ByteArray> table,
     Label* on_bit_set) {
   __ mov(r2, Operand(table));
+  Register index = current_character();
   if (mode_ != ASCII || kTableMask != String::kMaxAsciiCharCode) {
-    __ mov(r3, Operand(kTableSize - 1));
-    __ AndP(r3, current_character());
-    __ AddP(r3, Operand(ByteArray::kHeaderSize - kHeapObjectTag));
-  } else {
-    __ AddP(r3, current_character(),
-                Operand(ByteArray::kHeaderSize - kHeapObjectTag));
+    __ AndP(r3, current_character(), Operand(kTableSize - 1));
+    index = r3;
   }
-  __ LoadlB(r2, MemOperand(r2, r3));
-  __ Cmpi(r2, Operand::Zero());
+  __ LoadlB(r2, MemOperand(r2, index,
+                (ByteArray::kHeaderSize - kHeapObjectTag)));
+  __ CmpP(r2, Operand::Zero());
   BranchOrBacktrack(ne, on_bit_set);
 }
 
@@ -585,11 +649,11 @@ bool RegExpMacroAssemblerS390::CheckSpecialCharacterClass(uc16 type,
     if (mode_ == ASCII) {
       // ASCII space characters are '\t'..'\r' and ' '.
       Label success;
-      __ Cmpi(current_character(), Operand(' '));
+      __ CmpP(current_character(), Operand(' '));
       __ beq(&success);
       // Check range 0x09..0x0d
-      __ Sub(r2, current_character(), Operand('\t'));
-      __ Cmpli(r2, Operand('\r' - '\t'));
+      __ SubP(r2, current_character(), Operand('\t'));
+      __ CmpLogicalP(r2, Operand('\r' - '\t'));
       BranchOrBacktrack(gt, on_no_match);
       __ bind(&success);
       return true;
@@ -599,39 +663,39 @@ bool RegExpMacroAssemblerS390::CheckSpecialCharacterClass(uc16 type,
     // Match non-space characters.
     if (mode_ == ASCII) {
       // ASCII space characters are '\t'..'\r' and ' '.
-      __ Cmpi(current_character(), Operand(' '));
+      __ CmpP(current_character(), Operand(' '));
       BranchOrBacktrack(eq, on_no_match);
-      __ Sub(r2, current_character(), Operand('\t'));
-      __ Cmpli(r2, Operand('\r' - '\t'));
+      __ SubP(r2, current_character(), Operand('\t'));
+      __ CmpLogicalP(r2, Operand('\r' - '\t'));
       BranchOrBacktrack(le, on_no_match);
       return true;
     }
     return false;
   case 'd':
     // Match ASCII digits ('0'..'9')
-    __ Sub(r2, current_character(), Operand('0'));
-    __ Cmpli(current_character(), Operand('9' - '0'));
+    __ SubP(r2, current_character(), Operand('0'));
+    __ CmpLogicalP(current_character(), Operand('9' - '0'));
     BranchOrBacktrack(gt, on_no_match);
     return true;
   case 'D':
     // Match non ASCII-digits
-    __ Sub(r2, current_character(), Operand('0'));
-    __ Cmpli(r2, Operand('9' - '0'));
+    __ SubP(r2, current_character(), Operand('0'));
+    __ CmpLogicalP(r2, Operand('9' - '0'));
     BranchOrBacktrack(le, on_no_match);
     return true;
   case '.': {
     // Match non-newlines (not 0x0a('\n'), 0x0d('\r'), 0x2028 and 0x2029)
     __ XorP(r2, current_character(), Operand(0x01));
     // See if current character is '\n'^1 or '\r'^1, i.e., 0x0b or 0x0c
-    __ Sub(r2, Operand(0x0b));
-    __ Cmpli(r2, Operand(0x0c - 0x0b));
+    __ SubP(r2, Operand(0x0b));
+    __ CmpLogicalP(r2, Operand(0x0c - 0x0b));
     BranchOrBacktrack(le, on_no_match);
     if (mode_ == UC16) {
       // Compare original value to 0x2028 and 0x2029, using the already
       // computed (current_char ^ 0x01 - 0x0b). I.e., check for
       // 0x201d (0x2028 - 0x0b) or 0x201e.
-      __ Sub(r2, Operand(0x2028 - 0x0b));
-      __ Cmpli(r2, Operand(1));
+      __ SubP(r2, Operand(0x2028 - 0x0b));
+      __ CmpLogicalP(r2, Operand(1));
       BranchOrBacktrack(le, on_no_match);
     }
     return true;
@@ -640,8 +704,8 @@ bool RegExpMacroAssemblerS390::CheckSpecialCharacterClass(uc16 type,
     // Match newlines (0x0a('\n'), 0x0d('\r'), 0x2028 and 0x2029)
     __ XorP(r2, current_character(), Operand(0x01));
     // See if current character is '\n'^1 or '\r'^1, i.e., 0x0b or 0x0c
-    __ Sub(r2, Operand(0x0b));
-    __ Cmpli(r2, Operand(0x0c - 0x0b));
+    __ SubP(r2, Operand(0x0b));
+    __ CmpLogicalP(r2, Operand(0x0c - 0x0b));
     if (mode_ == ASCII) {
       BranchOrBacktrack(gt, on_no_match);
     } else {
@@ -650,8 +714,8 @@ bool RegExpMacroAssemblerS390::CheckSpecialCharacterClass(uc16 type,
       // Compare original value to 0x2028 and 0x2029, using the already
       // computed (current_char ^ 0x01 - 0x0b). I.e., check for
       // 0x201d (0x2028 - 0x0b) or 0x201e.
-      __ Sub(r2, Operand(0x2028 - 0x0b));
-      __ Cmpli(r2, Operand(1));
+      __ SubP(r2, Operand(0x2028 - 0x0b));
+      __ CmpLogicalP(r2, Operand(1));
       BranchOrBacktrack(gt, on_no_match);
       __ bind(&done);
     }
@@ -660,13 +724,13 @@ bool RegExpMacroAssemblerS390::CheckSpecialCharacterClass(uc16 type,
   case 'w': {
     if (mode_ != ASCII) {
       // Table is 128 entries, so all ASCII characters can be tested.
-      __ Cmpi(current_character(), Operand('z'));
+      __ CmpP(current_character(), Operand('z'));
       BranchOrBacktrack(gt, on_no_match);
     }
     ExternalReference map = ExternalReference::re_word_character_map();
     __ mov(r2, Operand(map));
     __ LoadlB(r2, MemOperand(r2, current_character()));
-    __ Cmpli(r2, Operand::Zero());
+    __ CmpLogicalP(r2, Operand::Zero());
     BranchOrBacktrack(eq, on_no_match);
     return true;
   }
@@ -674,13 +738,13 @@ bool RegExpMacroAssemblerS390::CheckSpecialCharacterClass(uc16 type,
     Label done;
     if (mode_ != ASCII) {
       // Table is 128 entries, so all ASCII characters can be tested.
-      __ Cmpli(current_character(), Operand('z'));
+      __ CmpLogicalP(current_character(), Operand('z'));
       __ bgt(&done);
     }
     ExternalReference map = ExternalReference::re_word_character_map();
     __ mov(r2, Operand(map));
     __ LoadlB(r2, MemOperand(r2, current_character()));
-    __ Cmpli(r2, Operand::Zero());
+    __ CmpLogicalP(r2, Operand::Zero());
     BranchOrBacktrack(ne, on_no_match);
     if (mode_ != ASCII) {
       __ bind(&done);
@@ -704,7 +768,7 @@ void RegExpMacroAssemblerS390::Fail() {
 
 
 Handle<HeapObject> RegExpMacroAssemblerS390::GetCode(Handle<String> source) {
-  Label return_r3;
+  Label return_r2;
 
   if (masm_->has_exception()) {
     // If the code gets corrupted due to long regular expressions and lack of
@@ -723,7 +787,6 @@ Handle<HeapObject> RegExpMacroAssemblerS390::GetCode(Handle<String> source) {
     FrameScope scope(masm_, StackFrame::MANUAL);
 
     // Ensure register assigments are consistent with callee save mask
-#if 0
     ASSERT(r6.bit() & kRegExpCalleeSaved);
     ASSERT(code_pointer().bit() & kRegExpCalleeSaved);
     ASSERT(current_input_offset().bit() & kRegExpCalleeSaved);
@@ -731,18 +794,6 @@ Handle<HeapObject> RegExpMacroAssemblerS390::GetCode(Handle<String> source) {
     ASSERT(backtrack_stackpointer().bit() & kRegExpCalleeSaved);
     ASSERT(end_of_input_address().bit() & kRegExpCalleeSaved);
     ASSERT(frame_pointer().bit() & kRegExpCalleeSaved);
-
-#endif
-    // 31bit ABI requires you to store f4 and f6:
-    // http://refspecs.linuxbase.org/ELF/zSeries/lzsabi0_s390.html#AEN417
-    __ std(d6, MemOperand(sp,
-          kStackFrameExtraParamSlot * kPointerSize - kDoubleSize));
-    __ std(d4, MemOperand(sp,
-          kStackFrameExtraParamSlot * kPointerSize - 2 * kDoubleSize));
-    __ std(d2, MemOperand(sp,
-          kStackFrameExtraParamSlot * kPointerSize - 3 * kDoubleSize));
-    __ std(d0, MemOperand(sp,
-          kStackFrameExtraParamSlot * kPointerSize - 4 * kDoubleSize));
 
     // zLinux ABI
     //    Incoming parameters:
@@ -754,18 +805,14 @@ Handle<HeapObject> RegExpMacroAssemblerS390::GetCode(Handle<String> source) {
     //    Requires us to save the callee-preserved registers r6-r13
     //    General convention is to also save r14 (return addr) and
     //    sp/r15 as well in a single STM/STMG
-    __ StoreMultipleP(r2, sp, MemOperand(sp, 2 * kPointerSize));
-    // BackChain
-    // __ StoreP(frame_pointer(), MemOperand(sp));
+    __ StoreMultipleP(r6, sp, MemOperand(sp, 6 * kPointerSize));
 
     // Load stack parameters from caller stack frame
-    // __ lay(fp, MemOperand(sp, kStackFrameExtraParamSlot * kPointerSize));
-    __ LoadP(r7, MemOperand(sp, kStackFrameExtraParamSlot * kPointerSize +
-            0 * kPointerSize));   // capture array size
-    __ LoadP(r8, MemOperand(sp, kStackFrameExtraParamSlot * kPointerSize +
-            1 * kPointerSize));  // stack area base
-    __ LoadP(r9, MemOperand(sp, kStackFrameExtraParamSlot * kPointerSize +
-            2 * kPointerSize));  // direct call
+    __ LoadMultipleP(r7, r9, MemOperand(sp,
+          kStackFrameExtraParamSlot * kPointerSize));
+    // r7 = capture array size
+    // r8 = stack area base
+    // r9 = direct call
 
     // Actually emit code to start a new stack frame.
     // Push arguments
@@ -779,7 +826,7 @@ Handle<HeapObject> RegExpMacroAssemblerS390::GetCode(Handle<String> source) {
     __ LoadRR(frame_pointer(), sp);
     __ lay(sp, MemOperand(sp, -10 * kPointerSize));
     __ mov(r1, Operand::Zero());        // success counter
-    __ mov(r0, Operand::Zero());        // offset of location
+    __ LoadRR(r0, r1);        // offset of location
     __ StoreMultipleP(r0, r9, MemOperand(sp, 0));
 
     // Check if we have space on the stack for registers.
@@ -790,23 +837,23 @@ Handle<HeapObject> RegExpMacroAssemblerS390::GetCode(Handle<String> source) {
       ExternalReference::address_of_stack_limit(masm_->isolate());
     __ mov(r2, Operand(stack_limit));
     __ LoadP(r2, MemOperand(r2));
-    __ SubP(r2, sp, r2/*, LeaveOE, SetRC*/);  // Removing RC looks okay here
+    __ SubP(r2, sp, r2);
     // Handle it if the stack pointer is already below the stack limit.
-    __ ble(&stack_limit_hit /*, cr0*/);
+    __ ble(&stack_limit_hit);
     // Check if there is room for the variable number of registers above
     // the stack limit.
-    __ Cmpli(r2, Operand(num_registers_ * kPointerSize));
+    __ CmpLogicalP(r2, Operand(num_registers_ * kPointerSize));
     __ bge(&stack_ok);
     // Exit with OutOfMemory exception. There is not enough space on the stack
     // for our working registers.
-    __ LoadImmP(r2, Operand(EXCEPTION));
-    __ b(&return_r3);
+    __ mov(r2, Operand(EXCEPTION));
+    __ b(&return_r2);
 
     __ bind(&stack_limit_hit);
     CallCheckStackGuardState(r2);
-    __ Cmpi(r2, Operand::Zero());
+    __ CmpP(r2, Operand::Zero());
     // If returned value is non-zero, we exit with the returned value as result.
-    __ bne(&return_r3);
+    __ bne(&return_r2);
 
     __ bind(&stack_ok);
 
@@ -824,12 +871,12 @@ Handle<HeapObject> RegExpMacroAssemblerS390::GetCode(Handle<String> source) {
 
     // Set r1 to address of char before start of the input string
     // (effectively string position -1).
-    __ Sub(r1, current_input_offset(), Operand(char_size()));
+    __ SubP(r1, current_input_offset(), Operand(char_size()));
     if (mode_ == UC16) {
       __ ShiftLeftP(r0, r3, Operand(1));
-      __ Sub(r1, r1, r0);
+      __ SubP(r1, r1, r0);
     } else {
-      __ Sub(r1, r1, r3);
+      __ SubP(r1, r1, r3);
     }
     // Store this value in a local variable, for use when clearing
     // position registers.
@@ -840,9 +887,9 @@ Handle<HeapObject> RegExpMacroAssemblerS390::GetCode(Handle<String> source) {
 
     Label load_char_start_regexp, start_regexp;
     // Load newline if index is at start, previous character otherwise.
-    __ Cmpi(r3, Operand::Zero());
+    __ CmpP(r3, Operand::Zero());
     __ bne(&load_char_start_regexp);
-    __ LoadImmP(current_character(), Operand('\n'));
+    __ mov(current_character(), Operand('\n'));
     __ b(&start_regexp);
 
     // Global regexp restarts matching here.
@@ -888,42 +935,64 @@ Handle<HeapObject> RegExpMacroAssemblerS390::GetCode(Handle<String> source) {
       __ bind(&success_label_);
       if (num_saved_registers_ > 0) {
         // copy captures to output
-        __ LoadP(r3, MemOperand(frame_pointer(), kInputStart));
+        __ LoadP(r0, MemOperand(frame_pointer(), kInputStart));
         __ LoadP(r2, MemOperand(frame_pointer(), kRegisterOutput));
         __ LoadP(r4, MemOperand(frame_pointer(), kStartIndex));
-        __ Sub(r3, end_of_input_address(), r3);
-        // r3 is length of input in bytes.
+        __ SubP(r0, end_of_input_address(), r0);
+        // r0 is length of input in bytes.
         if (mode_ == UC16) {
-          __ ShiftRightP(r3, r3, Operand(1));
+          __ ShiftRightP(r0, r0, Operand(1));
         }
-        // r3 is length of input in characters.
-        __ AddP(r3, r4);
-        // r3 is length of string in characters.
+        // r0 is length of input in characters.
+        __ AddP(r0, r4);
+        // r0 is length of string in characters.
 
         ASSERT_EQ(0, num_saved_registers_ % 2);
         // Always an even number of capture registers. This allows us to
         // unroll the loop once to add an operation between a load of a register
         // and the following use of that register.
-        for (int i = 0; i < num_saved_registers_; i += 2) {
-          __ LoadP(r4, register_location(i), r0);
-          __ LoadP(r5, register_location(i + 1), r0);
-          if (i == 0 && global_with_zero_length_check()) {
-            // Keep capture start in r6 for the zero-length check later.
-            __ LoadRR(r6, r4);
-          }
-          if (mode_ == UC16) {
-            __ ShiftRightArithP(r4, r4, Operand(1));
-            __ AddP(r4, r3, r4);
-            __ ShiftRightArithP(r5, r5, Operand(1));
-            __ AddP(r5, r3, r5);
+        __ la(r2, MemOperand(r2, num_saved_registers_ * kIntSize));
+        for (int i = 0; i < num_saved_registers_;) {
+          if (false && i < num_saved_registers_ - 4) {
+            // TODO(john): Can be optimized by SIMD instructions
+            __ LoadMultipleP(r3, r6, register_location(i + 3));
+            if (mode_ == UC16) {
+              __ ShiftRightArithP(r3, r3, Operand(1));
+              __ ShiftRightArithP(r4, r4, Operand(1));
+              __ ShiftRightArithP(r5, r5, Operand(1));
+              __ ShiftRightArithP(r6, r6, Operand(1));
+            }
+            __ AddP(r3, r0);
+            __ AddP(r4, r0);
+            __ AddP(r5, r0);
+            __ AddP(r6, r0);
+            __ StoreW(r3, MemOperand(r2,
+                    -(num_saved_registers_ - i - 3) * kIntSize));
+            __ StoreW(r4, MemOperand(r2,
+                    -(num_saved_registers_ - i - 2) * kIntSize));
+            __ StoreW(r5, MemOperand(r2,
+                    -(num_saved_registers_ - i - 1) * kIntSize));
+            __ StoreW(r6, MemOperand(r2,
+                    -(num_saved_registers_ - i) * kIntSize));
+            i += 4;
           } else {
-            __ AddP(r4, r3, r4);
-            __ AddP(r5, r3, r5);
+            __ LoadMultipleP(r3, r4, register_location(i + 1));
+            if (mode_ == UC16) {
+              __ ShiftRightArithP(r3, r3, Operand(1));
+              __ ShiftRightArithP(r4, r4, Operand(1));
+            }
+            __ AddP(r3, r0);
+            __ AddP(r4, r0);
+            __ StoreW(r3, MemOperand(r2,
+                  -(num_saved_registers_ - i - 1) * kIntSize));
+            __ StoreW(r4, MemOperand(r2,
+                  -(num_saved_registers_ - i) * kIntSize));
+            i += 2;
           }
-          __ StoreW(r4, MemOperand(r2));
-          __ AddP(r2, Operand(kIntSize));
-          __ StoreW(r5, MemOperand(r2));
-          __ AddP(r2, Operand(kIntSize));
+        }
+        if (global_with_zero_length_check()) {
+          // Keep capture start in r6 for the zero-length check later.
+          __ LoadP(r6, register_location(0));
         }
       }
 
@@ -937,10 +1006,10 @@ Handle<HeapObject> RegExpMacroAssemblerS390::GetCode(Handle<String> source) {
         __ StoreP(r2, MemOperand(frame_pointer(), kSuccessfulCaptures));
         // Capture results have been stored, so the number of remaining global
         // output registers is reduced by the number of stored captures.
-        __ Sub(r3, Operand(num_saved_registers_));
+        __ SubP(r3, Operand(num_saved_registers_));
         // Check whether we have enough room for another set of capture results.
-        __ Cmpi(r3, Operand(num_saved_registers_));
-        __ blt(&return_r3);
+        __ CmpP(r3, Operand(num_saved_registers_));
+        __ blt(&return_r2);
 
         __ StoreP(r3, MemOperand(frame_pointer(), kNumOutputRegisters));
         // Advance the location for output.
@@ -953,11 +1022,11 @@ Handle<HeapObject> RegExpMacroAssemblerS390::GetCode(Handle<String> source) {
         if (global_with_zero_length_check()) {
           // Special case for zero-length matches.
           // r6: capture start index
-          __ CmpRR(current_input_offset(), r6);
+          __ CmpP(current_input_offset(), r6);
           // Not a zero-length match, restart.
           __ bne(&load_char_start_regexp);
           // Offset from the end is zero if we already reached the end.
-          __ Cmpi(current_input_offset(), Operand::Zero());
+          __ CmpP(current_input_offset(), Operand::Zero());
           __ beq(&exit_label_);
           // Advance current position after a zero-length match.
           __ AddP(current_input_offset(), Operand((mode_ == UC16) ? 2 : 1));
@@ -975,16 +1044,12 @@ Handle<HeapObject> RegExpMacroAssemblerS390::GetCode(Handle<String> source) {
       __ LoadP(r2, MemOperand(frame_pointer(), kSuccessfulCaptures));
     }
 
-    __ bind(&return_r3);
+    __ bind(&return_r2);
     // Skip sp past regexp registers and local variables..
     __ LoadRR(sp, frame_pointer());
     // Restore registers r6..r15.
     __ LoadMultipleP(r6, sp, MemOperand(sp, 6 * kPointerSize));
 
-    __ ld(d0, MemOperand(sp, kCalleeRegisterSaveAreaSize - 4 * kDoubleSize));
-    __ ld(d2, MemOperand(sp, kCalleeRegisterSaveAreaSize - 3 * kDoubleSize));
-    __ ld(d4, MemOperand(sp, kCalleeRegisterSaveAreaSize - 2 * kDoubleSize));
-    __ ld(d6, MemOperand(sp, kCalleeRegisterSaveAreaSize - 1 * kDoubleSize));
     __ b(r14);
 
     // Backtrack code (branch target for conditional backtracks).
@@ -1000,10 +1065,10 @@ Handle<HeapObject> RegExpMacroAssemblerS390::GetCode(Handle<String> source) {
       SafeCallTarget(&check_preempt_label_);
 
       CallCheckStackGuardState(r2);
-      __ Cmpi(r2, Operand::Zero());
+      __ CmpP(r2, Operand::Zero());
       // If returning non-zero, we should end execution with the given
       // result as return value.
-      __ bne(&return_r3);
+      __ bne(&return_r2);
 
       // String might have moved: Reload end of string from frame.
       __ LoadP(end_of_input_address(), MemOperand(frame_pointer(), kInputEnd));
@@ -1027,7 +1092,7 @@ Handle<HeapObject> RegExpMacroAssemblerS390::GetCode(Handle<String> source) {
       __ CallCFunction(grow_stack, num_arguments);
       // If return NULL, we have failed to grow the stack, and
       // must exit with a stack-overflow exception.
-      __ Cmpi(r2, Operand::Zero());
+      __ CmpP(r2, Operand::Zero());
       __ beq(&exit_with_exception);
       // Otherwise use return value as new stack pointer.
       __ LoadRR(backtrack_stackpointer(), r2);
@@ -1040,7 +1105,7 @@ Handle<HeapObject> RegExpMacroAssemblerS390::GetCode(Handle<String> source) {
       __ bind(&exit_with_exception);
       // Exit with Result EXCEPTION(-1) to signal thrown exception.
       __ LoadImmP(r2, Operand(EXCEPTION));
-      __ b(&return_r3);
+      __ b(&return_r2);
     }
   }
 
@@ -1063,7 +1128,7 @@ void RegExpMacroAssemblerS390::IfRegisterGE(int reg,
                                            int comparand,
                                            Label* if_ge) {
   __ LoadP(r2, register_location(reg), r0);
-  __ Cmpi(r2, Operand(comparand));
+  __ CmpP(r2, Operand(comparand));
   BranchOrBacktrack(ge, if_ge);
 }
 
@@ -1072,7 +1137,7 @@ void RegExpMacroAssemblerS390::IfRegisterLT(int reg,
                                            int comparand,
                                            Label* if_lt) {
   __ LoadP(r2, register_location(reg), r0);
-  __ Cmpi(r2, Operand(comparand));
+  __ CmpP(r2, Operand(comparand));
   BranchOrBacktrack(lt, if_lt);
 }
 
@@ -1080,7 +1145,7 @@ void RegExpMacroAssemblerS390::IfRegisterLT(int reg,
 void RegExpMacroAssemblerS390::IfRegisterEqPos(int reg,
                                               Label* if_eq) {
   __ LoadP(r2, register_location(reg), r0);
-  __ CmpRR(r2, current_input_offset());
+  __ CmpP(r2, current_input_offset());
   BranchOrBacktrack(eq, if_eq);
 }
 
@@ -1154,7 +1219,7 @@ void RegExpMacroAssemblerS390::ReadStackPointerFromRegister(int reg) {
 
 void RegExpMacroAssemblerS390::SetCurrentPositionFromEnd(int by) {
   Label after_position;
-  __ Cmpi(current_input_offset(), Operand(-by * char_size()));
+  __ CmpP(current_input_offset(), Operand(-by * char_size()));
   __ bge(&after_position);
   __ mov(current_input_offset(), Operand(-by * char_size()));
   // On RegExp code entry (where this operation is used), the character before
@@ -1183,8 +1248,7 @@ void RegExpMacroAssemblerS390::WriteCurrentPositionToRegister(int reg,
   if (cp_offset == 0) {
     __ StoreP(current_input_offset(), register_location(reg));
   } else {
-    __ mov(r0, Operand(cp_offset * char_size()));
-    __ AddP(r2, current_input_offset(), r0);
+    __ AddP(r2, current_input_offset(), Operand(cp_offset * char_size()));
     __ StoreP(r2, register_location(reg));
   }
 }
@@ -1201,7 +1265,7 @@ void RegExpMacroAssemblerS390::ClearRegisters(int reg_from, int reg_to) {
 
 void RegExpMacroAssemblerS390::WriteStackPointerToRegister(int reg) {
   __ LoadP(r3, MemOperand(frame_pointer(), kStackHighEnd));
-  __ Sub(r2, backtrack_stackpointer(), r3);
+  __ SubP(r2, backtrack_stackpointer(), r3);
   __ StoreP(r2, register_location(reg));
 }
 
@@ -1346,7 +1410,7 @@ MemOperand RegExpMacroAssemblerS390::register_location(int register_index) {
 
 void RegExpMacroAssemblerS390::CheckPosition(int cp_offset,
                                             Label* on_outside_input) {
-  __ Cmpi(current_input_offset(), Operand(-cp_offset * char_size()));
+  __ CmpP(current_input_offset(), Operand(-cp_offset * char_size()));
   BranchOrBacktrack(ge, on_outside_input);
 }
 
@@ -1370,30 +1434,25 @@ void RegExpMacroAssemblerS390::BranchOrBacktrack(Condition condition,
 }
 
 
-void RegExpMacroAssemblerS390::SafeCall(Label* to, Condition cond,
-                                       CRegister cr) {
-  Label skip;
-  __ b(NegateCondition(cond), &skip);
-  __ b(r14, to /*, cr*/ /*, SetLK*/);
-  __ bind(&skip);
+void RegExpMacroAssemblerS390::SafeCall(Label* to) {
+  Label return_to;
+  __ larl(r14, &return_to);
+  // __ SubP(r14, r14, Operand(masm_->CodeObject()));
+  __ push(r14);
+  __ b(to);
+  __ bind(&return_to);
 }
 
 
 void RegExpMacroAssemblerS390::SafeReturn() {
   __ pop(r14);
-  __ mov(ip, Operand(masm_->CodeObject()));
-  __ AddP(r14, ip);
+  // __ AddP(r14, Operand(masm_->CodeObject()));
   __ Ret();
 }
 
 
 void RegExpMacroAssemblerS390::SafeCallTarget(Label* name) {
   __ bind(name);
-  __ CleanseP(r14);
-  __ LoadRR(r0, r14);
-  __ mov(ip, Operand(masm_->CodeObject()));
-  __ Sub(r0, r0, ip);
-  __ push(r0);
 }
 
 
@@ -1415,20 +1474,30 @@ void RegExpMacroAssemblerS390::Pop(Register target) {
 
 void RegExpMacroAssemblerS390::CheckPreemption() {
   // Check for preemption.
+  Label no_preempt;
   ExternalReference stack_limit =
       ExternalReference::address_of_stack_limit(masm_->isolate());
   __ mov(r2, Operand(stack_limit));
   __ CmpLogicalP(sp, MemOperand(r2));
-  SafeCall(&check_preempt_label_, le);
+  __ bgt(&no_preempt);
+
+  SafeCall(&check_preempt_label_);
+
+  __ bind(&no_preempt);
 }
 
 
 void RegExpMacroAssemblerS390::CheckStackLimit() {
+  Label no_stack_overflow;
   ExternalReference stack_limit =
       ExternalReference::address_of_regexp_stack_limit(masm_->isolate());
   __ mov(r2, Operand(stack_limit));
   __ CmpLogicalP(backtrack_stackpointer(), MemOperand(r2));
-  SafeCall(&stack_overflow_label_, le);
+  __ bgt(&no_stack_overflow);
+
+  SafeCall(&stack_overflow_label_);
+
+  __ bind(&no_stack_overflow);
 }
 
 
@@ -1464,25 +1533,14 @@ bool RegExpMacroAssemblerS390::CanReadUnaligned() {
 
 void RegExpMacroAssemblerS390::LoadCurrentCharacterUnchecked(int cp_offset,
                                                             int characters) {
-  Register offset = current_input_offset();
-  if (cp_offset != 0) {
-    // r6 is not being used to store the capture start index at this point.
-    __ AddP(r6, current_input_offset(), Operand(cp_offset * char_size()));
-    offset = r6;
-  }
-  // The lwz, stw, lhz, sth instructions can do unaligned accesses, if the CPU
-  // and the operating system running on the target allow it.
-  // We assume we don't want to do unaligned loads on PPC, so this function
-  // must only be used to load a single character at a time.
-
   ASSERT(characters == 1);
-  __ AddP(current_character(), end_of_input_address(), offset);
   if (mode_ == ASCII) {
-    __ LoadlB(current_character(), MemOperand(current_character()));
+    __ LoadlB(current_character(), MemOperand(end_of_input_address(),
+                        current_input_offset(), cp_offset * char_size()));
   } else {
     ASSERT(mode_ == UC16);
-    __ LoadLogicalHalfWordP(current_character(),
-                            MemOperand(current_character()));
+    __ LoadLogicalHalfWordP(current_character(), MemOperand(
+      end_of_input_address(), current_input_offset(), cp_offset * char_size()));
   }
 }
 
