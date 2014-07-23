@@ -93,10 +93,8 @@ class S390Debugger {
   void RedoBreakpoints();
 };
 
-
 S390Debugger::~S390Debugger() {
 }
-
 
 
 #ifdef GENERATED_CODE_COVERAGE
@@ -2017,6 +2015,35 @@ bool Simulator::DecodeFourByte(Instruction* instr) {
       }
       break;
     }
+    case BXH: {
+      RSInstruction* rsinst = reinterpret_cast<RSInstruction*>(instr);
+      int r1 = rsinst->R1Value();
+      int r3 = rsinst->R3Value();
+      int b2 = rsinst->B2Value();
+      int d2 = rsinst->D2Value();
+
+      // r1_val is the first operand, r3_val is the increment
+      int32_t r1_val = r1 == 0 ? 0 : get_register(r1);
+      int32_t r3_val = r2 == 0 ? 0 : get_register(r3);
+      int32_t b2_val = b2 == 0 ? 0 : get_register(b2);
+      int branch_address = b2_val + d2;
+      // increment r1_val
+      r1_val += r3_val;
+
+      // if the increment is even, then it designates a pair of registers
+      // and the contents of the even and odd registers of the pair are used as
+      // the increment and compare value respectively. If the increment is odd,
+      // the increment itself is used as both the increment and compare value
+      int32_t compare_val = r3 % 2 == 0 ? get_register(r3+1) : r3_val;
+      if (r1_val > compare_val) {
+        // branch to address if r1_val is greater than compare value
+        set_pc(branch_address);
+      }
+
+      // update contents of register in r1 with the new incremented value
+      set_register(r1, r1_val);
+      break;
+    }
     case IIHH: case IIHL: case IILH: case IILL: {
       UNIMPLEMENTED();
       break;
@@ -3387,7 +3414,7 @@ bool Simulator::DecodeSixByte(Instruction* instr) {
       int32_t b2_val = (b2 == 0) ? 0 : get_low_register<int32_t>(b2);
 
       // Store each register in ascending order.
-      for (int i = 0; i < r3 - r1; i++) {
+      for (int i = 0; i <= r3 - r1; i++) {
         if (op == LMY) {
           int32_t value = ReadW(b2_val + offset + 4*i, instr);
           set_low_register((r1 + i) % 16, value);
