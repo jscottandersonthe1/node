@@ -529,7 +529,25 @@
           'sources': [ 'src/node_crypto.cc' ],
           'conditions': [
             [ 'node_shared_openssl=="false"', {
-              'dependencies': [ './deps/openssl/openssl.gyp:openssl' ],
+              'dependencies': [
+                './deps/openssl/openssl.gyp:openssl',
+
+                # For tests
+                './deps/openssl/openssl.gyp:openssl-cli',
+              ],
+              # Do not let unused OpenSSL symbols to slip away
+              'xcode_settings': {
+                'OTHER_LDFLAGS': [
+                  '-Wl,-force_load,<(PRODUCT_DIR)/libopenssl.a',
+                ],
+              },
+              'conditions': [
+                ['OS=="linux"', {
+                  'ldflags': [
+                    '-Wl,--whole-archive <(PRODUCT_DIR)/libopenssl.a -Wl,--no-whole-archive',
+                  ],
+                }],
+              ],
             }]]
         }, {
           'defines': [ 'HAVE_OPENSSL=0' ]
@@ -660,6 +678,14 @@
             # we need to use node's preferred "darwin" rather than gyp's preferred "mac"
             'PLATFORM="darwin"',
           ],
+        }],
+        [ 'OS=="mac" and v8_postmortem_support=="true"', {
+          # Do not let `v8dbg_` symbols slip away
+          'xcode_settings': {
+            'OTHER_LDFLAGS': [
+              '-Wl,-force_load,<(V8_BASE)',
+            ],
+          },
         }],
         [ 'OS=="freebsd"', {
           'libraries': [
