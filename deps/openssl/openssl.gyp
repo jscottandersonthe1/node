@@ -1098,7 +1098,6 @@
     ],
     'defines': [
       # No clue what these are for.
-      'L_ENDIAN',
       'PURIFY',
       '_REENTRANT',
 
