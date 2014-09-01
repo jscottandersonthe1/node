@@ -661,6 +661,7 @@ const char *CRYPTO_get_lock_name(int type)
 		return(sk_OPENSSL_STRING_value(app_locks,type-CRYPTO_NUM_LOCKS));
 	}
 
+#if	!defined(__arm__)
 #if	defined(__i386)   || defined(__i386__)   || defined(_M_IX86) || \
 	defined(__INTEL__) || \
 	defined(__x86_64) || defined(__x86_64__) || defined(_M_AMD64) || defined(_M_X64)
@@ -721,6 +722,7 @@ unsigned long *OPENSSL_ia32cap_loc(void) { return NULL; }
 int OPENSSL_NONPIC_relocated = 0;
 #if !defined(OPENSSL_CPUID_SETUP) && !defined(OPENSSL_CPUID_OBJ)
 void OPENSSL_cpuid_setup(void) {}
+#endif
 #endif
 
 #if (defined(_WIN32) || defined(__CYGWIN__)) && defined(_WINDLL)
