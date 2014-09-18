@@ -423,7 +423,7 @@ class MacroAssembler: public Assembler {
   void Xor(Register dst, Register src, const Operand& opnd);
   void XorP(Register dst, Register src, const Operand& opnd);
 
-
+  void Not32(Register dst);
   void NotP(Register dst);
 
   void mov(Register dst, const Operand& src);
@@ -751,10 +751,11 @@ class MacroAssembler: public Assembler {
   void LoadMultipleW(Register dst1, Register dst2, const MemOperand& mem);
   void StoreMultipleW(Register dst1, Register dst2, const MemOperand& mem);
 
-  // Cleanse pointer address on 31bit by zero out top  bit.
+  // Cleanse pointer address on 31bit by zeroing out top bit.
+  // Generate only when running 31-bit s390 build on s390 host architecture
   // This is a NOP on 64-bit.
   void CleanseP(Register src) {
-#ifndef V8_TARGET_ARCH_S390X
+#if (defined(V8_HOST_ARCH_S390) && !defined(V8_TARGET_ARCH_S390X))
     nilh(src, Operand(0x7FFF));
 #endif
   }

@@ -435,14 +435,13 @@ void MacroAssembler::RememberedSetHelper(Register object,  // For debug tests.
   StoreP(scratch, MemOperand(ip));
   // Call stub on end of buffer.
   // Check for end of buffer.
-  mov(r0, Operand(StoreBuffer::kStoreBufferOverflowBit));
-  AndP(r0, scratch/*, SetRC*/);  // Should be okay to remove rc
+  AndP(r0, scratch, Operand(StoreBuffer::kStoreBufferOverflowBit));
 
   if (and_then == kFallThroughAtEnd) {
-    beq(&done /*, cr0*/);
+    beq(&done, Label::kNear);
   } else {
     ASSERT(and_then == kReturnAtEnd);
-    beq(&done /*, cr0*/);
+    beq(&done, Label::kNear);
   }
   push(r14);
   StoreBufferOverflowStub store_buffer_overflow =
@@ -4577,12 +4576,18 @@ void MacroAssembler::XorP(Register dst, Register src, const Operand& opnd) {
   XorP(dst, opnd);
 }
 
+// NOT 32-bit
+void MacroAssembler::Not32(Register dst) {
+  XorP(dst, Operand(0xFFFFFFFF));
+}
+
+// NOT Pointer Size
 void MacroAssembler::NotP(Register dst) {
 #if V8_TARGET_ARCH_S390X
   xihf(dst, Operand(0xFFFFFFFF));
   xilf(dst, Operand(0xFFFFFFFF));
 #else
-  XorP(dst, Operand(0xFFFFFFFF));
+  Not32(dst);
 #endif
 }
 
