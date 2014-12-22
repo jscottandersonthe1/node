@@ -10,14 +10,14 @@ Secure Socket Layer: encrypted stream communication.
 TLS/SSL is a public/private key infrastructure. Each client and each
 server must have a private key. A private key is created like this:
 
-    openssl genrsa -out ryans-key.pem 1024
+    openssl genrsa -out ryans-key.pem 2048
 
 All servers and some clients need to have a certificate. Certificates are public
 keys signed by a Certificate Authority or self-signed. The first step to
 getting a certificate is to create a "Certificate Signing Request" (CSR)
 file. This is done with:
 
-    openssl req -new -key ryans-key.pem -out ryans-csr.pem
+    openssl req -new -sha256 -key ryans-key.pem -out ryans-csr.pem
 
 To create a self-signed certificate with the CSR, do this:
 
@@ -59,7 +59,7 @@ and SSLv2 by setting the `secureOptions` to be
 `SSL_OP_NO_SSLv3|SSL_OP_NO_SSLv2` (again, unless you have passed
 `--enable-ssl3`, or `--enable-ssl2`, or `SSLv3_method` as `secureProtocol`).
 
-If you have set `securityOptions` to anything, we will not override your
+If you have set `secureOptions` to anything, we will not override your
 options.
 
 The ramifications of this behavior change:
@@ -197,7 +197,7 @@ automatically set as a listener for the [secureConnection][] event.  The
     SecureContext). If `SNICallback` wasn't provided - default callback with
     high-level API will be used (see below).
 
-  - `sessionIdContext`: A string containing a opaque identifier for session
+  - `sessionIdContext`: A string containing an opaque identifier for session
     resumption. If `requestCert` is `true`, the default is MD5 hash value
     generated from command-line. Otherwise, the default is not provided.
 
@@ -421,7 +421,7 @@ connections using TLS or SSL.
 `function (cleartextStream) {}`
 
 This event is emitted after a new connection has been successfully
-handshaked. The argument is a instance of [CleartextStream][]. It has all the
+handshaked. The argument is an instance of [CleartextStream][]. It has all the
 common stream methods and events.
 
 `cleartextStream.authorized` is a boolean value which indicates if the
