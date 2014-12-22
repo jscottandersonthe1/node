@@ -663,7 +663,8 @@ void FloatingPointHelper::ConvertIntToDouble(MacroAssembler* masm,
 void FloatingPointHelper::ConvertUnsignedIntToDouble(MacroAssembler* masm,
                                                     Register src,
                                                     DoubleRegister double_dst) {
-  __ cdlfbr(Condition(5), Condition(5), double_dst, src);
+  __ llgfr(src, src);
+  __ cdgbr(double_dst, src);
 }
 
 void FloatingPointHelper::ConvertIntToFloat(MacroAssembler* masm,
