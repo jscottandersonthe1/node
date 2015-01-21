@@ -428,6 +428,7 @@
       ],
 
       'sources': [
+        'src/async-wrap.cc',
         'src/fs_event_wrap.cc',
         'src/cares_wrap.cc',
         'src/handle_wrap.cc',
