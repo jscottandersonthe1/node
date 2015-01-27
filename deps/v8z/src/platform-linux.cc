@@ -825,17 +825,6 @@ void Thread::SetThreadLocal(LocalStorageKey key, void* value) {
 }
 
 
-void Thread::YieldCPU() {
-#ifdef V8_TARGET_ARCH_PPC
-  i::OS::Sleep(0);
-#elif V8_TARGET_ARCH_S390
-  i::OS::Sleep(0);
-#else
-  sched_yield();
-#endif
-}
-
-
 class LinuxMutex : public Mutex {
  public:
   LinuxMutex() {
