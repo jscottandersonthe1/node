@@ -1029,11 +1029,13 @@ void Builtins::Generate_OnStackReplacement(MacroAssembler* masm) {
   // <deopt_data> = <code>[#deoptimization_data_offset]
   __ LoadP(r4, FieldMemOperand(r3, Code::kDeoptimizationDataOffset));
 
-#if V8_OOL_CONSTANT_POOL
-  { ConstantPoolUnavailableScope constant_pool_unavailable(masm);
-    __ LoadP(kConstantPoolRegister,
-             FieldMemOperand(r3, Code::kConstantPoolOffset));
-#endif
+  {
+    ConstantPoolUnavailableScope constant_pool_unavailable(masm);
+    __ addi(r3, r3, Operand(Code::kHeaderSize - kHeapObjectTag));  // Code start
+
+    if (FLAG_enable_ool_constant_pool) {
+      __ LoadConstantPoolPointerRegister(r3);
+    }
 
     // Load the OSR entrypoint offset from the deoptimization data.
     // <osr_offset> = <deopt_data>[#header_size + #osr_pc_offset]
@@ -1041,17 +1043,13 @@ void Builtins::Generate_OnStackReplacement(MacroAssembler* masm) {
                                  DeoptimizationInputData::kOsrPcOffsetIndex)));
     __ SmiUntag(r4);
 
-    // Compute the target address = code_obj + header_size + osr_offset
-    // <entry_addr> = <code_obj> + #header_size + <osr_offset>
-    __ add(r3, r3, r4);
-    __ addi(r0, r3, Operand(Code::kHeaderSize - kHeapObjectTag));
-    __ mtlr(r0);
+    // Compute the target address = code start + osr_offset
+    __ add(r0, r3, r4);
 
     // And "return" to the OSR entry point of the function.
-    __ Ret();
-#if V8_OOL_CONSTANT_POOL
+    __ mtlr(r0);
+    __ blr();
   }
-#endif
 }
 
 
@@ -1109,13 +1107,21 @@ void Builtins::Generate_FunctionCall(MacroAssembler* masm) {
     __ LoadP(r5, FieldMemOperand(r4, JSFunction::kSharedFunctionInfoOffset));
     __ lwz(r6, FieldMemOperand(r5, SharedFunctionInfo::kCompilerHintsOffset));
     __ TestBit(r6,
+#if V8_TARGET_ARCH_PPC64
+               SharedFunctionInfo::kStrictModeFunction,
+#else
                SharedFunctionInfo::kStrictModeFunction + kSmiTagSize,
+#endif
                r0);
     __ bne(&shift_arguments, cr0);
 
     // Do not transform the receiver for native (Compilerhints already in r6).
     __ TestBit(r6,
+#if V8_TARGET_ARCH_PPC64
+               SharedFunctionInfo::kNative,
+#else
                SharedFunctionInfo::kNative + kSmiTagSize,
+#endif
                r0);
     __ bne(&shift_arguments, cr0);
 
@@ -1326,13 +1332,21 @@ void Builtins::Generate_FunctionApply(MacroAssembler* masm) {
     Label call_to_object, use_global_proxy;
     __ lwz(r5, FieldMemOperand(r5, SharedFunctionInfo::kCompilerHintsOffset));
     __ TestBit(r5,
+#if V8_TARGET_ARCH_PPC64
+               SharedFunctionInfo::kStrictModeFunction,
+#else
                SharedFunctionInfo::kStrictModeFunction + kSmiTagSize,
+#endif
                r0);
     __ bne(&push_receiver, cr0);
 
     // Do not transform the receiver for strict mode functions.
     __ TestBit(r5,
+#if V8_TARGET_ARCH_PPC64
+               SharedFunctionInfo::kNative,
+#else
                SharedFunctionInfo::kNative + kSmiTagSize,
+#endif
                r0);
     __ bne(&push_receiver, cr0);
 
@@ -1449,13 +1463,13 @@ static void EnterArgumentsAdaptorFrame(MacroAssembler* masm) {
   __ LoadSmiLiteral(r7, Smi::FromInt(StackFrame::ARGUMENTS_ADAPTOR));
   __ mflr(r0);
   __ push(r0);
-#if V8_OOL_CONSTANT_POOL
-  __ Push(fp, kConstantPoolRegister, r7, r4, r3);
-#else
-  __ Push(fp, r7, r4, r3);
-#endif
-  __ addi(fp, sp,
-         Operand(StandardFrameConstants::kFixedFrameSizeFromFp + kPointerSize));
+  if (FLAG_enable_ool_constant_pool) {
+    __ Push(fp, kConstantPoolRegister, r7, r4, r3);
+  } else {
+    __ Push(fp, r7, r4, r3);
+  }
+  __ addi(fp, sp, Operand(StandardFrameConstants::kFixedFrameSizeFromFp +
+                          kPointerSize));
 }
 
 

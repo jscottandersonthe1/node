@@ -1498,11 +1498,10 @@ void JSEntryStub::GenerateBody(MacroAssembler* masm, bool is_construct) {
   // r7: argv
   __ li(r0, Operand(-1));  // Push a bad frame pointer to fail if it is used.
   __ push(r0);
-#if V8_OOL_CONSTANT_POOL
-  __ mov(kConstantPoolRegister,
-         Operand(isolate()->factory()->empty_constant_pool_array()));
-  __ push(kConstantPoolRegister);
-#endif
+  if (FLAG_enable_ool_constant_pool) {
+    __ li(kConstantPoolRegister, Operand::Zero());
+    __ push(kConstantPoolRegister);
+  }
   int marker = is_construct ? StackFrame::ENTRY_CONSTRUCT : StackFrame::ENTRY;
   __ LoadSmiLiteral(r0, Smi::FromInt(marker));
   __ push(r0);
@@ -1653,7 +1652,8 @@ void InstanceofStub::Generate(MacroAssembler* masm) {
 
   // delta = mov + tagged LoadP + cmp + bne
   const int32_t kDeltaToLoadBoolResult =
-      (Assembler::kMovInstructions + 3) * Assembler::kInstrSize;
+      (Assembler::kMovInstructions + Assembler::kTaggedLoadInstructions + 2) *
+      Assembler::kInstrSize;
 
   Label slow, loop, is_instance, is_not_instance, not_js_object;
 
@@ -2850,13 +2850,21 @@ static void EmitContinueIfStrictOrNative(MacroAssembler* masm, Label* cont) {
   __ LoadP(r6, FieldMemOperand(r4, JSFunction::kSharedFunctionInfoOffset));
   __ lwz(r7, FieldMemOperand(r6, SharedFunctionInfo::kCompilerHintsOffset));
   __ TestBit(r7,
+#if V8_TARGET_ARCH_PPC64
+             SharedFunctionInfo::kStrictModeFunction,
+#else
              SharedFunctionInfo::kStrictModeFunction + kSmiTagSize,
+#endif
              r0);
   __ bne(cont, cr0);
 
   // Do not transform the receiver for native.
   __ TestBit(r7,
+#if V8_TARGET_ARCH_PPC64
+             SharedFunctionInfo::kNative,
+#else
              SharedFunctionInfo::kNative + kSmiTagSize,
+#endif
              r0);
   __ bne(cont, cr0);
 }

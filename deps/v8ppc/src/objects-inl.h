@@ -4984,12 +4984,23 @@ bool Code::is_debug_stub() {
 }
 
 
-ConstantPoolArray* Code::constant_pool() {
-  return ConstantPoolArray::cast(READ_FIELD(this, kConstantPoolOffset));
+Address Code::constant_pool() {
+  Address constant_pool = NULL;
+  if (FLAG_enable_ool_constant_pool_in_heapobject) {
+    constant_pool = reinterpret_cast<Address>(
+        READ_FIELD(this, kConstantPoolOffset));
+  } else if (FLAG_enable_ool_constant_pool_in_code) {
+    int offset = constant_pool_offset();
+    if (offset < instruction_size()) {
+      constant_pool = FIELD_ADDR(this, kHeaderSize + offset);
+    }
+  }
+  return constant_pool;
 }
 
 
 void Code::set_constant_pool(Object* value) {
+  DCHECK(FLAG_enable_ool_constant_pool_in_heapobject);
   DCHECK(value->IsConstantPoolArray());
   WRITE_FIELD(this, kConstantPoolOffset, value);
   WRITE_BARRIER(GetHeap(), this, kConstantPoolOffset, value);
@@ -5523,23 +5534,22 @@ SMI_ACCESSORS(SharedFunctionInfo, profiler_ticks, kProfilerTicksOffset)
 #define PSEUDO_SMI_LO_ALIGN kIntSize
 #define PSEUDO_SMI_HI_ALIGN 0
 #endif
-#ifdef DEBUG
-#define PSEUDO_SMI_LO_MASK ~((1 << (31 - kSmiTagSize)) - 1)
-#endif
 
 #define PSEUDO_SMI_ACCESSORS_LO(holder, name, offset)             \
   STATIC_ASSERT(holder::offset % kPointerSize == PSEUDO_SMI_LO_ALIGN);  \
   int holder::name() const {                                      \
     int value = READ_INT_FIELD(this, offset);                     \
-    DCHECK((value & kSmiTagMask) == kSmiTag);                     \
-    return value >> kSmiTagSize;                                  \
+    DCHECK(kHeapObjectTag == 1);                                  \
+    DCHECK((value & kHeapObjectTag) == 0);                        \
+    return value >> 1;                                            \
   }                                                               \
   void holder::set_##name(int value) {                            \
-    DCHECK((value & PSEUDO_SMI_LO_MASK) == PSEUDO_SMI_LO_MASK ||  \
-           (value & PSEUDO_SMI_LO_MASK) == 0x0);                  \
+    DCHECK(kHeapObjectTag == 1);                                  \
+    DCHECK((value & 0xC0000000) == 0xC0000000 ||                  \
+           (value & 0xC0000000) == 0x0);                          \
     WRITE_INT_FIELD(this,                                         \
                     offset,                                       \
-                    value << kSmiTagSize);                        \
+                    (value << 1) & ~kHeapObjectTag);              \
   }
 
 #define PSEUDO_SMI_ACCESSORS_HI(holder, name, offset)             \
@@ -5566,12 +5576,12 @@ PSEUDO_SMI_ACCESSORS_LO(SharedFunctionInfo,
                         function_token_position,
                         kFunctionTokenPositionOffset)
 PSEUDO_SMI_ACCESSORS_HI(SharedFunctionInfo,
-                        opt_count_and_bailout_reason,
-                        kOptCountAndBailoutReasonOffset)
-
-PSEUDO_SMI_ACCESSORS_LO(SharedFunctionInfo,
                         compiler_hints,
                         kCompilerHintsOffset)
+
+PSEUDO_SMI_ACCESSORS_LO(SharedFunctionInfo,
+                        opt_count_and_bailout_reason,
+                        kOptCountAndBailoutReasonOffset)
 PSEUDO_SMI_ACCESSORS_HI(SharedFunctionInfo, counters, kCountersOffset)
 
 PSEUDO_SMI_ACCESSORS_LO(SharedFunctionInfo,
@@ -6163,6 +6173,7 @@ SMI_ACCESSORS(JSMessageObject, end_position, kEndPositionOffset)
 
 INT_ACCESSORS(Code, instruction_size, kInstructionSizeOffset)
 INT_ACCESSORS(Code, prologue_offset, kPrologueOffset)
+INT_ACCESSORS(Code, constant_pool_offset, kConstantPoolOffset)
 ACCESSORS(Code, relocation_info, ByteArray, kRelocationInfoOffset)
 ACCESSORS(Code, handler_table, FixedArray, kHandlerTableOffset)
 ACCESSORS(Code, deoptimization_data, FixedArray, kDeoptimizationDataOffset)
@@ -6174,7 +6185,9 @@ void Code::WipeOutHeader() {
   WRITE_FIELD(this, kRelocationInfoOffset, NULL);
   WRITE_FIELD(this, kHandlerTableOffset, NULL);
   WRITE_FIELD(this, kDeoptimizationDataOffset, NULL);
-  WRITE_FIELD(this, kConstantPoolOffset, NULL);
+  if (FLAG_enable_ool_constant_pool_in_heapobject) {
+    WRITE_FIELD(this, kConstantPoolOffset, NULL);
+  }
   // Do not wipe out major/minor keys on a code stub or IC
   if (!READ_FIELD(this, kTypeFeedbackInfoOffset)->IsSmi()) {
     WRITE_FIELD(this, kTypeFeedbackInfoOffset, NULL);
@@ -6659,16 +6672,11 @@ void String::SetForwardedInternalizedString(String* canonical) {
   DCHECK(SlowEquals(canonical));
   DCHECK(canonical->IsInternalizedString());
   DCHECK(canonical->HasHashCode());
+  WRITE_FIELD(this, kHashFieldSlot, canonical);
 
   // Setting the hash field to a tagged value sets the LSB, causing the hash
   // code to be interpreted as uninitialized.  We use this fact to recognize
   // that we have a forwarded string.
-  if (kHashNotComputedMask != kHeapObjectTag) {
-    canonical = reinterpret_cast<String *>(
-        (uintptr_t)canonical | kHashNotComputedMask);
-  }
-
-  WRITE_FIELD(this, kHashFieldSlot, canonical);
   DCHECK(!HasHashCode());
 }
 
@@ -6676,14 +6684,7 @@ void String::SetForwardedInternalizedString(String* canonical) {
 String* String::GetForwardedInternalizedString() {
   DCHECK(IsInternalizedString());
   if (HasHashCode()) return this;
-  Object *object = READ_FIELD(this, kHashFieldSlot);
-
-  if (kHashNotComputedMask != kHeapObjectTag) {
-    object = reinterpret_cast<Object *>(
-        (uintptr_t)object & ~kHashNotComputedMask);
-  }
-
-  String* canonical = String::cast(object);
+  String* canonical = String::cast(READ_FIELD(this, kHashFieldSlot));
   DCHECK(canonical->IsInternalizedString());
   DCHECK(SlowEquals(canonical));
   DCHECK(canonical->HasHashCode());
