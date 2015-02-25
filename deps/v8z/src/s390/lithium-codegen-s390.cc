@@ -1509,8 +1509,11 @@ void LCodeGen::DoMultiplyAddD(LMultiplyAddD* instr) {
   DoubleRegister multiplicand = ToDoubleRegister(instr->multiplicand());
   DoubleRegister result = ToDoubleRegister(instr->result());
 
-  __ ldr(result, addend);
-  __ madbr(result, multiplier, multiplicand);
+  // Unable to use madbr as the intermediate value is not rounded
+  // to proper precision
+  __ ldr(result, multiplier);
+  __ mdbr(result, multiplicand);
+  __ adbr(result, addend);
 }
 
 
@@ -1520,8 +1523,11 @@ void LCodeGen::DoMultiplySubD(LMultiplySubD* instr) {
   DoubleRegister multiplicand = ToDoubleRegister(instr->multiplicand());
   DoubleRegister result = ToDoubleRegister(instr->result());
 
-  __ ldr(result, minuend);
-  __ msdbr(result, multiplier, multiplicand);
+  // Unable to use msdbr as the intermediate value is not rounded
+  // to proper precision
+  __ ldr(result, multiplier);
+  __ mdbr(result, multiplicand);
+  __ sdbr(result, minuend);
 }
 
 
@@ -3229,7 +3235,6 @@ void LCodeGen::DoLoadContextSlot(LLoadContextSlot* instr) {
   if (instr->hydrogen()->RequiresHoleCheck()) {
     __ CompareRoot(result, Heap::kTheHoleValueRootIndex);
     if (instr->hydrogen()->DeoptimizesOnHole()) {
-      __ CmpP(result, ip);
       DeoptimizeIf(eq, instr->environment());
     } else {
       Label skip;
@@ -3592,7 +3597,7 @@ void LCodeGen::DoLoadKeyedFixedArray(LLoadKeyed* instr) {
 #endif
 
   __ LoadRepresentation(result, MemOperand(store_base, offset),
-                        representation, r0);
+                        representation, r1);
 
   // Check for the hole value.
   if (requires_hole_check) {
@@ -4154,9 +4159,11 @@ void LCodeGen::DoMathRound(LMathRound* instr) {
 void LCodeGen::DoMathFround(LMathFround* instr) {
   DoubleRegister input_reg = ToDoubleRegister(instr->value());
   DoubleRegister output_reg = ToDoubleRegister(instr->result());
-  DCHECK(0);
-  // TODO(joransiu): Confirm this is the correct instruction
+
+  // Round double to float
   __ ledbr(output_reg, input_reg);
+  // Extend from float to double
+  __ ldebr(output_reg, output_reg);
 }
 
 
