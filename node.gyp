@@ -295,8 +295,8 @@
             'tools/msvs/genfiles/node_perfctr_provider.rc',
           ]
         } ],
-        # Conditionally include v8 or v8ppc
-        [ 'v8_postmortem_support=="true" and target_arch!="ppc" and target_arch!="ppc64"', {
+        # Conditionally include v8 or v8ppc or v8z
+        [ 'v8_postmortem_support=="true" and target_arch not in "ppc ppc64 s390 s390x"', {
           'dependencies': [ 'deps/v8/tools/gyp/v8.gyp:postmortem-metadata' ],
           'xcode_settings': {
             'OTHER_LDFLAGS': [
@@ -304,23 +304,33 @@
             ],
           },
         }],
-        [ 'v8_postmortem_support=="true" and (target_arch=="ppc" or target_arch=="ppc64")', {
+        [ 'v8_postmortem_support=="true" and target_arch in "ppc ppc64"', {
           'dependencies': [ 'deps/v8ppc/tools/gyp/v8.gyp:postmortem-metadata' ],
         }],
-        # Conditionally include v8 or v8ppc
-        [ 'node_shared_v8=="false" and target_arch!="ppc" and target_arch!="ppc64"', {
+        [ 'v8_postmortem_support=="true" and target_arch in "s390 s390x"', {
+          'dependencies': [ 'deps/v8z/tools/gyp/v8.gyp:postmortem-metadata' ],
+        }],
+        # Conditionally include v8 or v8ppc or v8z
+        [ 'node_shared_v8=="false" and target_arch not in "ppc ppc64 s390 s390x"', {
           'sources': [
             'deps/v8/include/v8.h',
             'deps/v8/include/v8-debug.h',
           ],
           'dependencies': [ 'deps/v8/tools/gyp/v8.gyp:v8' ],
         }],
-        [ 'node_shared_v8=="false" and (target_arch=="ppc" or target_arch=="ppc64")', {
+        [ 'node_shared_v8=="false" and target_arch in "ppc ppc64"', {
           'sources': [
             'deps/v8ppc/include/v8.h',
             'deps/v8ppc/include/v8-debug.h',
           ],
           'dependencies': [ 'deps/v8ppc/tools/gyp/v8.gyp:v8' ],
+        }],
+        [ 'node_shared_v8=="false" and target_arch in "s390 s390x"', {
+          'sources': [
+            'deps/v8z/include/v8.h',
+            'deps/v8z/include/v8-debug.h',
+          ],
+          'dependencies': [ 'deps/v8z/tools/gyp/v8.gyp:v8' ],
         }],
 
         [ 'node_shared_zlib=="false"', {
@@ -614,29 +624,38 @@
             'tools/msvs/genfiles/node_perfctr_provider.rc',
           ]
         } ],
-        # Conditionally include v8 or v8ppc
-        [ 'v8_postmortem_support=="true" and target_arch!="ppc" and target_arch!="ppc64"', {
+        # Conditionally include v8 or v8ppc or v8z
+        [ 'v8_postmortem_support=="true" and target_arch not in "ppc ppc64 s390 s390x"', {
           'dependencies': [ 'deps/v8/tools/gyp/v8.gyp:postmortem-metadata' ],
         }],
-        [ 'v8_postmortem_support=="true" and (target_arch=="ppc" or target_arch=="ppc64")', {
+        [ 'v8_postmortem_support=="true" and target_arch in "ppc ppc64"', {
           'dependencies': [ 'deps/v8ppc/tools/gyp/v8.gyp:postmortem-metadata' ],
         }],
-        # Conditionally include v8 or v8ppc
-        [ 'node_shared_v8=="false" and target_arch!="ppc" and target_arch!="ppc64"', {
+        [ 'v8_postmortem_support=="true" and target_arch in "s390 s390x"', {
+          'dependencies': [ 'deps/v8z/tools/gyp/v8.gyp:postmortem-metadata' ],
+        }],
+        # Conditionally include v8 or v8ppc or v8z
+        [ 'node_shared_v8=="false" and target_arch not in "ppc ppc64 s390 s390x"', {
           'sources': [
             'deps/v8/include/v8.h',
             'deps/v8/include/v8-debug.h',
           ],
           'dependencies': [ 'deps/v8/tools/gyp/v8.gyp:v8' ],
         }],
-        [ 'node_shared_v8=="false" and (target_arch=="ppc" or target_arch=="ppc64")', {
+        [ 'node_shared_v8=="false" and target_arch in "ppc ppc64"', {
           'sources': [
             'deps/v8ppc/include/v8.h',
             'deps/v8ppc/include/v8-debug.h',
           ],
           'dependencies': [ 'deps/v8ppc/tools/gyp/v8.gyp:v8' ],
         }],
-
+        [ 'node_shared_v8=="false" and target_arch in "s390 s390x"', {
+          'sources': [
+            'deps/v8z/include/v8.h',
+            'deps/v8z/include/v8-debug.h',
+          ],
+          'dependencies': [ 'deps/v8z/tools/gyp/v8.gyp:v8' ],
+        }],
         [ 'node_shared_zlib=="false"', {
           'dependencies': [ 'deps/zlib/zlib.gyp:zlib' ],
         }],
@@ -702,7 +721,7 @@
           ],
         }],
         [
-          'OS in "linux freebsd" and node_shared_v8=="false"', {
+          'OS=="linux freebsd" and node_shared_v8=="false" and target_arch not in "ppc ppc64 s390 s390x"', {
             'ldflags': [
               '-Wl,--whole-archive <(V8_BASE) -Wl,--no-whole-archive',
             ],

@@ -28,13 +28,17 @@
         'OBJ_DIR': '<(PRODUCT_DIR)/obj',
         'V8_BASE': '<(PRODUCT_DIR)/libv8_base.a',
       }],
-      ['GENERATOR != "ninja" and OS!="mac" and target_arch not in "ppc ppc64"', {   
+      ['GENERATOR != "ninja" and OS!="mac" and target_arch not in "ppc ppc64 s390 s390x"', {   
         'OBJ_DIR': '<(PRODUCT_DIR)/obj.target',
         'V8_BASE': '<(PRODUCT_DIR)/obj.target/deps/v8/tools/gyp/libv8_base.a',
       }],
       ['GENERATOR != "ninja" and OS!="mac" and target_arch in "ppc ppc64"', {   
         'OBJ_DIR': '<(PRODUCT_DIR)/obj.target',
         'V8_BASE': '<(PRODUCT_DIR)/obj.target/deps/v8ppc/tools/gyp/libv8_base.a',
+      }],
+      ['GENERATOR != "ninja" and OS!="mac" and target_arch in "s390 s390x"', {   
+        'OBJ_DIR': '<(PRODUCT_DIR)/obj.target',
+        'V8_BASE': '<(PRODUCT_DIR)/obj.target/deps/v8z/tools/gyp/libv8_base.a',
       }],
     ],
   },
@@ -205,6 +209,10 @@
           [ 'target_arch=="ppc64" and OS!="aix"', {
             'cflags': [ '-m64', '-mminimal-toc' ],
             'ldflags': [ '-m64' ],
+          }],
+          [ 'target_arch=="s390"', {
+            'cflags': [ '-m31' ],
+            'ldflags': [ '-m31' ],
           }],
           [ 'OS=="solaris"', {
             'cflags': [ '-pthreads' ],
