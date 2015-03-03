@@ -3528,29 +3528,41 @@ void LCodeGen::DoLoadKeyedFixedDoubleArray(LLoadKeyed* instr) {
     key = ToRegister(instr->key());
   }
 
-  int base_offset = instr->base_offset() + constant_key * kDoubleSize;
+  bool use_scratch = false;
+  intptr_t base_offset = instr->base_offset() + constant_key * kDoubleSize;
   if (!key_is_constant) {
-    __ IndexToArrayOffset(r0, key, element_size_shift, key_is_smi);
-    __ AddP(scratch, elements, r0);
-    elements = scratch;
+    use_scratch = true;
+    __ IndexToArrayOffset(scratch, key, element_size_shift, key_is_smi);
   }
-  // TODO(joransiu): Optimize this for Z.
-  if (!is_int16(base_offset)) {
-    __ AddP(scratch, elements, Operand(base_offset));
+
+  // Memory references support up to 20-bits signed displacement in RXY form
+  // Include Register::kExponentOffset in check, so we are guaranteed not to
+  // overflow displacement later.
+  if (!is_int20(base_offset + Register::kExponentOffset)) {
+    use_scratch = true;
+    if (key_is_constant) {
+      __ mov(scratch, Operand(base_offset));
+    } else {
+      __ AddP(scratch, Operand(base_offset));
+    }
     base_offset = 0;
-    elements = scratch;
   }
-  __ ld(result, MemOperand(elements, base_offset));
+
+  if (!use_scratch) {
+    __ ld(result, MemOperand(elements, base_offset));
+  } else {
+    __ ld(result, MemOperand(scratch, elements, base_offset));
+  }
 
   if (instr->hydrogen()->RequiresHoleCheck()) {
-    if (is_int16(base_offset + Register::kExponentOffset)) {
-      __ LoadlW(scratch, MemOperand(elements,
-                                 base_offset + Register::kExponentOffset));
+    if (!use_scratch) {
+      __ LoadlW(r0, MemOperand(elements,
+          base_offset + Register::kExponentOffset));
     } else {
-      __ AddP(scratch, elements, Operand(base_offset));
-      __ LoadlW(scratch, MemOperand(scratch, Register::kExponentOffset));
+      __ LoadlW(r0, MemOperand(scratch, elements,
+          base_offset + Register::kExponentOffset));
     }
-    __ CmpP(scratch, Operand(kHoleNanUpper32));
+    __ CmpP(r0, Operand(kHoleNanUpper32));
     DeoptimizeIf(eq, instr->environment());
   }
 }
@@ -3561,14 +3573,11 @@ void LCodeGen::DoLoadKeyedFixedArray(LLoadKeyed* instr) {
   Register elements = ToRegister(instr->elements());
   Register result = ToRegister(instr->result());
   Register scratch = scratch0();
-  Register store_base = scratch;
-  // TODO(joransiu) : Exploit RX form - see 3.14 branch
   int offset = instr->base_offset();
 
   if (instr->key()->IsConstantOperand()) {
     LConstantOperand* const_operand = LConstantOperand::cast(instr->key());
     offset += ToInteger32(const_operand) * kPointerSize;
-    store_base = elements;
   } else {
     Register key = ToRegister(instr->key());
     // Even though the HLoadKeyed instruction forces the input
@@ -3576,11 +3585,10 @@ void LCodeGen::DoLoadKeyedFixedArray(LLoadKeyed* instr) {
     // during bound check elimination with the index argument to the bounds
     // check, which can be tagged, so that case must be handled here, too.
     if (hinstr->key()->representation().IsSmi()) {
-      __ SmiToPtrArrayOffset(r0, key);
+      __ SmiToPtrArrayOffset(scratch, key);
     } else {
-      __ ShiftLeftP(r0, key, Operand(kPointerSizeLog2));
+      __ ShiftLeftP(scratch, key, Operand(kPointerSizeLog2));
     }
-    __ AddP(scratch, elements, r0);
   }
 
   bool requires_hole_check = hinstr->RequiresHoleCheck();
@@ -3596,8 +3604,13 @@ void LCodeGen::DoLoadKeyedFixedArray(LLoadKeyed* instr) {
   }
 #endif
 
-  __ LoadRepresentation(result, MemOperand(store_base, offset),
+  if (instr->key()->IsConstantOperand()) {
+     __ LoadRepresentation(result, MemOperand(elements, offset),
                         representation, r1);
+  } else {
+    __ LoadRepresentation(result, MemOperand(scratch, elements, offset),
+                        representation, r1);
+}
 
   // Check for the hole value.
   if (requires_hole_check) {
@@ -4760,7 +4773,6 @@ void LCodeGen::DoStoreKeyedFixedArray(LStoreKeyed* instr) {
   Register elements = ToRegister(instr->elements());
   Register key = instr->key()->IsRegister() ? ToRegister(instr->key()) : no_reg;
   Register scratch = scratch0();
-  Register store_base = scratch;
   int offset = instr->base_offset();
 
   // Do the store.
@@ -4768,7 +4780,6 @@ void LCodeGen::DoStoreKeyedFixedArray(LStoreKeyed* instr) {
     DCHECK(!hinstr->NeedsWriteBarrier());
     LConstantOperand* const_operand = LConstantOperand::cast(instr->key());
     offset += ToInteger32(const_operand) * kPointerSize;
-    store_base = elements;
   } else {
     // Even though the HLoadKeyed instruction forces the input
     // representation for the key to be an integer, the input gets replaced
@@ -4779,7 +4790,6 @@ void LCodeGen::DoStoreKeyedFixedArray(LStoreKeyed* instr) {
     } else {
       __ ShiftLeftP(scratch, key, Operand(kPointerSizeLog2));
     }
-    __ AddP(scratch, elements, scratch);
   }
 
   Representation representation = hinstr->value()->representation();
@@ -4794,14 +4804,23 @@ void LCodeGen::DoStoreKeyedFixedArray(LStoreKeyed* instr) {
   }
 #endif
 
-  __ StoreRepresentation(value, MemOperand(store_base, offset),
+  if (instr->key()->IsConstantOperand()) {
+    __ StoreRepresentation(value, MemOperand(elements, offset),
                          representation, r0);
+  } else {
+    __ StoreRepresentation(value, MemOperand(scratch, elements, offset),
+                         representation, r0);
+  }
 
   if (hinstr->NeedsWriteBarrier()) {
     SmiCheck check_needed = hinstr->value()->type().IsHeapObject()
                             ? OMIT_SMI_CHECK : INLINE_SMI_CHECK;
     // Compute address of modified element and store it into key register.
-    __ AddP(key, store_base, Operand(offset));
+    if (instr->key()->IsConstantOperand()) {
+      __ lay(key, MemOperand(elements, offset));
+    } else {
+      __ lay(key, MemOperand(scratch, elements, offset));
+    }
     __ RecordWrite(elements,
                    key,
                    value,
