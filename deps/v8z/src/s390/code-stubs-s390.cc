@@ -1917,7 +1917,7 @@ void ArgumentsAccessStub::GenerateReadElement(MacroAssembler* masm) {
   // Read the argument from the stack and return it.
   __ SubP(r5, r2, r3);
   __ SmiToPtrArrayOffset(r5, r5);
-  __ AddP(r5, fp);
+  __ lay(r5, MemOperand(r5, fp));
   __ LoadP(r2, MemOperand(r5, kDisplacement));
   __ Ret();
 
@@ -4278,16 +4278,13 @@ void NameDictionaryLookupStub::GenerateNegativeLookup(MacroAssembler* masm,
     __ CompareRoot(entity_name, Heap::kUndefinedValueRootIndex);
     __ beq(done);
 
-    // Load the hole ready for use below:
-    __ LoadRoot(tmp, Heap::kTheHoleValueRootIndex);
-
    // Stop if found the property.
     __ mov(r0, Operand(Handle<Name>(name)));
     __ CmpP(entity_name, r0);
     __ beq(miss);
 
     Label good;
-    __ CmpP(entity_name, tmp);
+    __ CompareRoot(entity_name, Heap::kTheHoleValueRootIndex);
     __ beq(&good);
 
     // Check if the entry name is not a unique name.
