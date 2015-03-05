@@ -53,11 +53,15 @@ class SimpleTestCase(test.TestCase):
     # delete the whole tmp dir
     try:
       rmtree(self.tmpdir)
+      if "NODE_PIPE_DIR" in os.environ:
+        rmtree(os.environ["NODE_PIPE_DIR"]);
     except:
       pass
     # make it again.
     try:
       mkdir(self.tmpdir)
+      if "NODE_PIPE_DIR" in os.environ:
+        mkdir(os.environ["NODE_PIPE_DIR"]);
     except:
       pass
 
@@ -65,6 +69,8 @@ class SimpleTestCase(test.TestCase):
     # delete the whole tmp dir
     try:
       rmtree(self.tmpdir)
+      if "NODE_PIPE_DIR" in os.environ:
+        rmtree(os.environ["NODE_PIPE_DIR"]);
     except:
       pass
     # make it again.
@@ -72,6 +78,8 @@ class SimpleTestCase(test.TestCase):
     while not os.path.exists(self.tmpdir):
       try:
         mkdir(self.tmpdir)
+        if "NODE_PIPE_DIR" in os.environ:
+          mkdir(os.environ["NODE_PIPE_DIR"]);
       except:
         pass
   

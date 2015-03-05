@@ -35,7 +35,11 @@ if (process.platform === 'win32') {
   exports.PIPE = '\\\\.\\pipe\\libuv-test';
   exports.opensslCli += '.exe';
 } else {
-  exports.PIPE = exports.tmpDir + '/test.sock';
+  if (typeof process.env.NODE_PIPE_DIR == 'undefined') {
+    exports.PIPE = exports.tmpDir + '/test.sock';
+  } else {
+    exports.PIPE = process.env.NODE_PIPE_DIR + '/test.sock';
+  } 
 }
 if (!fs.existsSync(exports.opensslCli))
   exports.opensslCli = false;
