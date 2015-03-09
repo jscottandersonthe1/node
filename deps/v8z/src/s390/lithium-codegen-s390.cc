@@ -2637,8 +2637,7 @@ void LCodeGen::DoCmpObjectEqAndBranch(LCmpObjectEqAndBranch* instr) {
 void LCodeGen::DoCmpHoleAndBranch(LCmpHoleAndBranch* instr) {
   if (instr->hydrogen()->representation().IsTagged()) {
     Register input_reg = ToRegister(instr->object());
-    __ mov(ip, Operand(factory()->the_hole_value()));
-    __ CmpP(input_reg, ip);
+    __ CmpP(input_reg, Operand(factory()->the_hole_value()));
     EmitBranch(instr, eq);
     return;
   }
@@ -3435,6 +3434,7 @@ void LCodeGen::DoLoadKeyedExternalArray(LLoadKeyed* instr) {
   int element_size_shift = ElementsKindToShiftSize(elements_kind);
   bool key_is_smi = instr->hydrogen()->key()->representation().IsSmi();
   int base_offset = instr->base_offset();
+  bool use_scratch = false;
 
   if (elements_kind == EXTERNAL_FLOAT32_ELEMENTS ||
       elements_kind == FLOAT32_ELEMENTS ||
@@ -3442,17 +3442,31 @@ void LCodeGen::DoLoadKeyedExternalArray(LLoadKeyed* instr) {
       elements_kind == FLOAT64_ELEMENTS) {
     DoubleRegister result = ToDoubleRegister(instr->result());
     if (key_is_constant) {
-      __ AddP(scratch0(), external_pointer,
-             Operand(constant_key << element_size_shift));
+      base_offset += constant_key << element_size_shift;
+      if (!is_int20(base_offset)) {
+        __ mov(scratch0(), Operand(base_offset));
+        base_offset = 0;
+        use_scratch = true;
+      }
     } else {
-      __ IndexToArrayOffset(r0, key, element_size_shift, key_is_smi);
-      __ AddP(scratch0(), external_pointer, r0);
+      __ IndexToArrayOffset(scratch0(), key, element_size_shift, key_is_smi);
+      use_scratch = true;
     }
     if (elements_kind == EXTERNAL_FLOAT32_ELEMENTS ||
         elements_kind == FLOAT32_ELEMENTS) {
-      __ ldeb(result, MemOperand(scratch0(), base_offset));
+      if (!use_scratch) {
+        __ ldeb(result, MemOperand(external_pointer, base_offset));
+      } else {
+        __ ldeb(result,
+                MemOperand(scratch0(), external_pointer, base_offset));
+      }
     } else  {  // i.e. elements_kind == EXTERNAL_DOUBLE_ELEMENTS
-      __ ld(result, MemOperand(scratch0(), base_offset));
+      if (!use_scratch) {
+        __ ld(result, MemOperand(external_pointer, base_offset));
+      } else {
+        __ ld(result,
+                MemOperand(scratch0(), external_pointer, base_offset));
+      }
     }
   } else {
     Register result = ToRegister(instr->result());
@@ -3651,28 +3665,25 @@ MemOperand LCodeGen::PrepareKeyedOperand(Register key,
       __ mov(scratch, Operand(offset));
       return MemOperand(base, scratch);
     } else {
-    return MemOperand(base, (constant_key << element_size_shift) + base_offset);
+      return MemOperand(base,
+                    (constant_key << element_size_shift) + base_offset);
     }
   }
 
   bool needs_shift = (element_size_shift != (key_is_smi ?
                                              kSmiTagSize + kSmiShiftSize : 0));
 
-  if (!(base_offset || needs_shift)) {
-    return MemOperand(base, key);
-  }
-
   if (needs_shift) {
     __ IndexToArrayOffset(scratch, key, element_size_shift, key_is_smi);
-    key = scratch;
+  } else {
+    scratch = key;
   }
 
-  // TODO(joransiu): Fold base_offset into memOperand
-  if (base_offset) {
-    __ AddP(scratch, key, Operand(base_offset));
+  if (!is_int20(base_offset)) {
+    __ AddP(scratch, Operand(base_offset));
+    base_offset = 0;
   }
-
-  return MemOperand(base, scratch);
+  return MemOperand(base, scratch, base_offset);
 }
 
 
@@ -4432,8 +4443,8 @@ void LCodeGen::DoCallRuntime(LCallRuntime* instr) {
 void LCodeGen::DoStoreCodeEntry(LStoreCodeEntry* instr) {
   Register function = ToRegister(instr->function());
   Register code_object = ToRegister(instr->code_object());
-  __ AddP(code_object, code_object,
-          Operand(Code::kHeaderSize - kHeapObjectTag));
+  __ lay(code_object, MemOperand(code_object,
+          Code::kHeaderSize - kHeapObjectTag));
   __ StoreP(code_object,
             FieldMemOperand(function, JSFunction::kCodeEntryOffset), r0);
 }
@@ -4444,10 +4455,10 @@ void LCodeGen::DoInnerAllocatedObject(LInnerAllocatedObject* instr) {
   Register base = ToRegister(instr->base_object());
   if (instr->offset()->IsConstantOperand()) {
     LConstantOperand* offset = LConstantOperand::cast(instr->offset());
-    __ AddP(result, base, Operand(ToInteger32(offset)));
+    __ lay(result, MemOperand(base, ToInteger32(offset)));
   } else {
     Register offset = ToRegister(instr->offset());
-    __ AddP(result, base, offset);
+    __ lay(result, MemOperand(base, offset));
   }
 }
 
@@ -4626,30 +4637,44 @@ void LCodeGen::DoStoreKeyedExternalArray(LStoreKeyed* instr) {
   int element_size_shift = ElementsKindToShiftSize(elements_kind);
   bool key_is_smi = instr->hydrogen()->key()->representation().IsSmi();
   int base_offset = instr->base_offset();
+  bool use_scratch = false;
 
   if (elements_kind == EXTERNAL_FLOAT32_ELEMENTS ||
       elements_kind == FLOAT32_ELEMENTS ||
       elements_kind == EXTERNAL_FLOAT64_ELEMENTS ||
       elements_kind == FLOAT64_ELEMENTS) {
-    Register address = scratch0();
+    Register scratch = scratch0();
     DoubleRegister value(ToDoubleRegister(instr->value()));
     if (key_is_constant) {
       if (constant_key != 0) {
-        __ AddP(address, external_pointer,
-                Operand(constant_key << element_size_shift));
-      } else {
-        address = external_pointer;
+        base_offset += constant_key << element_size_shift;
+        if (!is_int20(base_offset)) {
+          __ mov(scratch, Operand(base_offset));
+          base_offset = 0;
+          use_scratch = true;
+        }
       }
     } else {
-      __ IndexToArrayOffset(r0, key, element_size_shift, key_is_smi);
-      __ AddP(address, external_pointer, r0);
+      __ IndexToArrayOffset(scratch, key, element_size_shift, key_is_smi);
+      use_scratch = true;
     }
     if (elements_kind == EXTERNAL_FLOAT32_ELEMENTS ||
         elements_kind == FLOAT32_ELEMENTS) {
       __ ledbr(double_scratch0(), value);
-      __ StoreShortF(double_scratch0(), MemOperand(address, base_offset));
+      if (!use_scratch) {
+        __ StoreShortF(double_scratch0(),
+                  MemOperand(external_pointer, base_offset));
+      } else {
+        __ StoreShortF(double_scratch0(),
+                  MemOperand(scratch, external_pointer, base_offset));
+      }
     } else {  // Storing doubles, not floats.
-      __ StoreF(value, MemOperand(address, base_offset));
+      if (!use_scratch) {
+        __ StoreF(value, MemOperand(external_pointer, base_offset));
+      } else {
+        __ StoreF(value,
+                  MemOperand(scratch, external_pointer, base_offset));
+      }
     }
   } else {
     Register value(ToRegister(instr->value()));

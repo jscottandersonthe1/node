@@ -1812,8 +1812,7 @@ void InstanceofStub::Generate(MacroAssembler* masm) {
   __ bne(&slow);
 
   // Null is not instance of anything.
-  __ mov(r0, Operand(isolate()->factory()->null_value()));
-  __ CmpP(scratch, r0);
+  __ CmpP(scratch, Operand(isolate()->factory()->null_value()));
   __ bne(&object_not_null, Label::kNear);
   if (ReturnTrueFalseObject()) {
     __ Move(r2, factory->false_value());
@@ -2392,7 +2391,7 @@ void RegExpExecStub::Generate(MacroAssembler* masm) {
 
   // Reset offset for possibly sliced string.
   __ LoadImmP(r13, Operand::Zero());
-  __ LoadP(subject, MemOperand(sp, kSubjectOffset));
+  __ LoadP(subject, MemOperand(fp, kSubjectOffset));
   __ JumpIfSmi(subject, &runtime);
   __ LoadRR(r5, subject);  // Make a copy of the original subject string.
   __ LoadP(r2, FieldMemOperand(subject, HeapObject::kMapOffset));
@@ -2741,6 +2740,8 @@ void RegExpExecStub::Generate(MacroAssembler* masm) {
 
   // Do the runtime call to execute the regexp.
   __ bind(&runtime);
+  __ LoadMultipleP(r3, sp, MemOperand(sp, 0));
+  __ la(sp, MemOperand(sp, 13 * kPointerSize));
   __ TailCallRuntime(Runtime::kRegExpExecRT, 4, 1);
 
   // Deferred code for string handling.
@@ -4170,11 +4171,9 @@ void ICCompareStub::GenerateKnownObjects(MacroAssembler* masm) {
   __ JumpIfSmi(r4, &miss);
   __ LoadP(r4, FieldMemOperand(r2, HeapObject::kMapOffset));
   __ LoadP(r5, FieldMemOperand(r3, HeapObject::kMapOffset));
-  __ mov(r0, Operand(known_map_));
-  __ CmpP(r4, r0);
+  __ CmpP(r4, Operand(known_map_));
   __ bne(&miss);
-  __ mov(r0, Operand(known_map_));
-  __ CmpP(r5, r0);
+  __ CmpP(r5, Operand(known_map_));
   __ bne(&miss);
 
   __ SubP(r2, r2, r3);
@@ -4279,8 +4278,7 @@ void NameDictionaryLookupStub::GenerateNegativeLookup(MacroAssembler* masm,
     __ beq(done);
 
    // Stop if found the property.
-    __ mov(r0, Operand(Handle<Name>(name)));
-    __ CmpP(entity_name, r0);
+    __ CmpP(entity_name, Operand(Handle<Name>(name)));
     __ beq(miss);
 
     Label good;
@@ -4971,8 +4969,7 @@ static void CreateArrayDispatchOneArgument(MacroAssembler* masm,
         TERMINAL_FAST_ELEMENTS_KIND);
     for (int i = 0; i <= last_index; ++i) {
       ElementsKind kind = GetFastElementsKindFromSequenceIndex(i);
-      __ mov(r0, Operand(kind));
-      __ CmpP(r5, r0);
+      __ CmpP(r5, Operand(kind));
       ArraySingleArgumentConstructorStub stub(masm->isolate(), kind);
       __ TailCallStub(&stub, eq);
     }

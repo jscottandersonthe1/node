@@ -709,8 +709,9 @@ bool RegExpMacroAssemblerS390::CheckSpecialCharacterClass(uc16 type,
     }
     ExternalReference map = ExternalReference::re_word_character_map();
     __ mov(r2, Operand(map));
+//    __ CmpLogicalByte(MemOperand(r2, current_character()), Operand::Zero());
     __ LoadlB(r2, MemOperand(r2, current_character()));
-    __ CmpLogicalP(r2, Operand::Zero());
+     __ CmpLogicalP(r2, Operand::Zero());
     BranchOrBacktrack(eq, on_no_match);
     return true;
   }
@@ -931,7 +932,7 @@ Handle<HeapObject> RegExpMacroAssemblerS390::GetCode(Handle<String> source) {
         // Always an even number of capture registers. This allows us to
         // unroll the loop once to add an operation between a load of a register
         // and the following use of that register.
-        __ la(r2, MemOperand(r2, num_saved_registers_ * kIntSize));
+        __ lay(r2, MemOperand(r2, num_saved_registers_ * kIntSize));
         for (int i = 0; i < num_saved_registers_;) {
           if (false && i < num_saved_registers_ - 4) {
             // TODO(john): Can be optimized by SIMD instructions

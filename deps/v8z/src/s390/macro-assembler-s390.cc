@@ -301,8 +301,7 @@ void MacroAssembler::InNewSpace(Register object,
   mov(r0, Operand(ExternalReference::new_space_mask(isolate())));
 
   AndP(scratch, object, r0);
-  mov(r0, Operand(ExternalReference::new_space_start(isolate())));
-  CmpP(scratch, r0);
+  CmpP(scratch, Operand(ExternalReference::new_space_start(isolate())));
   b(cond, branch);
 }
 
@@ -330,7 +329,7 @@ void MacroAssembler::RecordWriteField(
   // of the object, so so offset must be a multiple of kPointerSize.
   DCHECK(IsAligned(offset, kPointerSize));
 
-  AddP(dst, object, Operand(offset - kHeapObjectTag));
+  lay(dst, MemOperand(object, offset - kHeapObjectTag));
   if (emit_debug_code()) {
     Label ok;
     AndP(r0, dst, Operand((1 << kPointerSizeLog2) - 1));
@@ -393,7 +392,7 @@ void MacroAssembler::RecordWriteForMap(Register object,
                 eq,
                 &done);
 
-  AddP(dst, object, Operand(HeapObject::kMapOffset - kHeapObjectTag));
+  lay(dst, MemOperand(object, HeapObject::kMapOffset - kHeapObjectTag));
   if (emit_debug_code()) {
     Label ok;
     AndP(r0, dst, Operand((1 << kPointerSizeLog2) - 1));
@@ -522,8 +521,7 @@ void MacroAssembler::RememberedSetHelper(Register object,  // For debug tests.
   StoreP(scratch, MemOperand(ip));
   // Call stub on end of buffer.
   // Check for end of buffer.
-  mov(r0, Operand(StoreBuffer::kStoreBufferOverflowBit));
-  AndP(r0, scratch/*, SetRC*/);  // Should be okay to remove rc
+  AndP(scratch, Operand(StoreBuffer::kStoreBufferOverflowBit));
 
   if (and_then == kFallThroughAtEnd) {
     beq(&done, Label::kNear);
@@ -1977,9 +1975,9 @@ void MacroAssembler::CheckFastElements(Register map,
   STATIC_ASSERT(FAST_HOLEY_SMI_ELEMENTS == 1);
   STATIC_ASSERT(FAST_ELEMENTS == 2);
   STATIC_ASSERT(FAST_HOLEY_ELEMENTS == 3);
-  LoadlB(scratch, FieldMemOperand(map, Map::kBitField2Offset));
   STATIC_ASSERT(Map::kMaximumBitField2FastHoleyElementValue < 0x8000);
-  CmpLogicalP(scratch, Operand(Map::kMaximumBitField2FastHoleyElementValue));
+  CmpLogicalByte(FieldMemOperand(map, Map::kBitField2Offset),
+      Operand(Map::kMaximumBitField2FastHoleyElementValue));
   bgt(fail);
 }
 
@@ -1991,10 +1989,11 @@ void MacroAssembler::CheckFastObjectElements(Register map,
   STATIC_ASSERT(FAST_HOLEY_SMI_ELEMENTS == 1);
   STATIC_ASSERT(FAST_ELEMENTS == 2);
   STATIC_ASSERT(FAST_HOLEY_ELEMENTS == 3);
-  LoadlB(scratch, FieldMemOperand(map, Map::kBitField2Offset));
-  CmpLogicalP(scratch, Operand(Map::kMaximumBitField2FastHoleySmiElementValue));
+  CmpLogicalByte(FieldMemOperand(map, Map::kBitField2Offset),
+      Operand(Map::kMaximumBitField2FastHoleySmiElementValue));
   ble(fail);
-  CmpLogicalP(scratch, Operand(Map::kMaximumBitField2FastHoleyElementValue));
+  CmpLogicalByte(FieldMemOperand(map, Map::kBitField2Offset),
+      Operand(Map::kMaximumBitField2FastHoleyElementValue));
   bgt(fail);
 }
 
@@ -2004,8 +2003,8 @@ void MacroAssembler::CheckFastSmiElements(Register map,
                                           Label* fail) {
   STATIC_ASSERT(FAST_SMI_ELEMENTS == 0);
   STATIC_ASSERT(FAST_HOLEY_SMI_ELEMENTS == 1);
-  LoadlB(scratch, FieldMemOperand(map, Map::kBitField2Offset));
-  CmpLogicalP(scratch, Operand(Map::kMaximumBitField2FastHoleySmiElementValue));
+  CmpLogicalByte(FieldMemOperand(map, Map::kBitField2Offset),
+      Operand(Map::kMaximumBitField2FastHoleySmiElementValue));
   bgt(fail);
 }
 
@@ -2213,8 +2212,7 @@ void MacroAssembler::DispatchMap(Register obj,
     JumpIfSmi(obj, &fail);
   }
   LoadP(scratch, FieldMemOperand(obj, HeapObject::kMapOffset));
-  mov(r0, Operand(map));
-  CmpP(scratch, r0);
+  CmpP(scratch, Operand(map));
   bne(&fail);
   Jump(success, RelocInfo::CODE_TARGET, al);
   bind(&fail);
