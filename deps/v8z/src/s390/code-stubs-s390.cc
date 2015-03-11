@@ -1509,6 +1509,7 @@ void JSEntryStub::GenerateBody(MacroAssembler* masm, bool is_construct) {
   __ lay(sp, MemOperand(sp, -5 * kPointerSize));
   // Push a bad frame pointer to fail if it is used.
   __ LoadImmP(r10, Operand(-1));
+
   int marker = is_construct ? StackFrame::ENTRY_CONSTRUCT : StackFrame::ENTRY;
   __ LoadSmiLiteral(r9, Smi::FromInt(marker));
   __ LoadSmiLiteral(r8, Smi::FromInt(marker));
@@ -1516,7 +1517,6 @@ void JSEntryStub::GenerateBody(MacroAssembler* masm, bool is_construct) {
   __ mov(r7, Operand(ExternalReference(Isolate::kCEntryFPAddress, isolate())));
   __ LoadP(r7, MemOperand(r7));
   __ StoreMultipleP(r7, r10, MemOperand(sp, kPointerSize));
-
   // Set up frame pointer for the frame to be pushed.
   // Need to add kPointerSize, because sp has one extra
   // frame already for the frame type being pushed later.
@@ -2550,8 +2550,7 @@ void RegExpExecStub::Generate(MacroAssembler* masm) {
 
   // Argument 2 (r3): Previous index.
   // Already there
-
-  __ AddP(r1, r6, Operand(SeqString::kHeaderSize - kHeapObjectTag));
+  __ AddP(r1, subject, Operand(SeqString::kHeaderSize - kHeapObjectTag));
 
   // Argument 5 (r6): static offsets vector buffer.
   __ mov(r6,
@@ -2567,13 +2566,12 @@ void RegExpExecStub::Generate(MacroAssembler* masm) {
   // Argument 3, r4: Start of string data
   // Prepare start and end index of the input.
   __ ShiftLeftP(r13, r13, r5);
-// @TODO Tara:Check if the mapping for r18 to r1 is correct
   __ AddP(r13, r1, r13);
   __ ShiftLeftP(r4, r3, r5);
   __ AddP(r4, r13, r4);
 
   // Argument 4, r5: End of string data
-  __ LoadP(r1, FieldMemOperand(subject, String::kLengthOffset));
+  __ LoadP(r1, FieldMemOperand(r2, String::kLengthOffset));
   __ SmiUntag(r1);
   __ ShiftLeftP(r0, r1, r5);
   __ AddP(r5, r13, r0);
