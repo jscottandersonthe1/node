@@ -4,6 +4,9 @@ test-crypto-domains               : PASS,FLAKY
 test-debug-signal-cluster         : PASS,FLAKY
 test-cluster-basic                : PASS,FLAKY
 
+[$system==aix]
+test-fs-watch                     : FAIL
+
 [$system==win32]
 test-timers-first-fire            : PASS,FLAKY
 
