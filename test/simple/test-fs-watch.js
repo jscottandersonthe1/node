@@ -24,11 +24,6 @@ var assert = require('assert');
 var path = require('path');
 var fs = require('fs');
 
-// Temporarily excluding the test in AIX until
-// a comprehensive fix is devised in v0.13.0
-if (process.platform === 'aix') {
-  process.exit(0);
-}
 var expectFilePath = process.platform === 'win32' ||
                      process.platform === 'linux' ||
                      process.platform === 'darwin';
