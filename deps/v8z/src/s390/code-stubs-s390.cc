@@ -2467,7 +2467,7 @@ void RegExpExecStub::Generate(MacroAssembler* masm) {
   // Load previous index and check range before r5 is overwritten.  We have to
   // use r5 instead of subject here because subject might have been only made
   // to look like a sequential string when it actually is an external string.
-  __ LoadP(r3, MemOperand(sp, kPreviousIndexOffset));
+  __ LoadP(r3, MemOperand(fp, kPreviousIndexOffset));
   __ JumpIfNotSmi(r3, &runtime);
   __ LoadP(r5, FieldMemOperand(r5, String::kLengthOffset));
   __ CmpLogicalP(r5, r3);
@@ -2657,7 +2657,7 @@ void RegExpExecStub::Generate(MacroAssembler* masm) {
   __ SmiToShortArrayOffset(r3, r3);
   __ AddP(r3, Operand(2));
 
-  __ LoadP(r2, MemOperand(sp, kLastMatchInfoOffset));
+  __ LoadP(r2, MemOperand(fp, kLastMatchInfoOffset));
   __ JumpIfSmi(r2, &runtime);
   __ CompareObjectType(r2, r4, r4, JS_ARRAY_TYPE);
   __ bne(&runtime);
