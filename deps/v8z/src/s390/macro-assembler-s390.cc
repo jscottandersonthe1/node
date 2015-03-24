@@ -829,8 +829,8 @@ void MacroAssembler::EnterExitFrame(bool save_doubles, int stack_space) {
   lay(sp, MemOperand(sp, - ExitFrameConstants::kFrameSize));
 
   if (emit_debug_code()) {
-    LoadImmP(r1, Operand::Zero());
-    StoreP(r1, MemOperand(fp, ExitFrameConstants::kSPOffset));
+    StoreP(MemOperand(fp, ExitFrameConstants::kSPOffset),
+           Operand::Zero(), r1);
   }
   mov(r1, Operand(CodeObject()));
   StoreP(r1, MemOperand(fp, ExitFrameConstants::kCodeOffset));
@@ -877,8 +877,8 @@ void MacroAssembler::EnterExitFrame(bool save_doubles, int stack_space) {
     ClearRightImm(sp, sp, Operand(3));  // equivalent to &= -8
   }
 
-  LoadImmP(r0, Operand::Zero());
-  StoreP(r0, MemOperand(sp, -kNumRequiredStackFrameSlots * kPointerSize));
+  StoreP(MemOperand(sp, -kNumRequiredStackFrameSlots * kPointerSize),
+         Operand::Zero(), r0);
   lay(sp, MemOperand(sp, -kNumRequiredStackFrameSlots * kPointerSize));
   // Set the exit frame sp value to point just before the return address
   // location.
@@ -895,9 +895,9 @@ void MacroAssembler::InitializeNewString(Register string,
   SmiTag(scratch1, length);
   LoadRoot(scratch2, map_index);
   StoreP(scratch1, FieldMemOperand(string, String::kLengthOffset));
-  LoadImmP(scratch1, Operand(String::kEmptyHashField));
+  StoreP(FieldMemOperand(string, String::kHashFieldSlot),
+         Operand(String::kEmptyHashField), scratch1);
   StoreP(scratch2, FieldMemOperand(string, HeapObject::kMapOffset));
-  StoreP(scratch1, FieldMemOperand(string, String::kHashFieldSlot));
 }
 
 
@@ -3629,7 +3629,7 @@ void MacroAssembler::SetRelocatedValue(Register patch_location,
 #if V8_TARGET_ARCH_S390X
   // On 64-bit, we expect a IIHF instruction here.
   if (emit_debug_code()) {
-#if __BYTE_ORDER == __LITTLE_ENDIAN
+#if V8_TARGET_LITTLE_ENDIAN
     // Instructions are stored in Big Endian format
     lrvh(scratch, MemOperand(patch_location));
 #else
@@ -3644,7 +3644,7 @@ void MacroAssembler::SetRelocatedValue(Register patch_location,
 
   srlg(scratch, new_value, Operand(32));
   // insert new high word into iihf instruction
-#if __BYTE_ORDER == __LITTLE_ENDIAN
+#if V8_TARGET_LITTLE_ENDIAN
   // Instructions are stored in Big Endian format
   strv(scratch, MemOperand(patch_location, 2));
 #else
@@ -3656,7 +3656,7 @@ void MacroAssembler::SetRelocatedValue(Register patch_location,
 
   // At this point scratch is a iilf instruction.
   if (emit_debug_code()) {
-#if __BYTE_ORDER == __LITTLE_ENDIAN
+#if V8_TARGET_LITTLE_ENDIAN
     // Instructions are stored in Big Endian format
     lrvh(scratch, MemOperand(patch_location, offset));
 #else
@@ -3670,7 +3670,7 @@ void MacroAssembler::SetRelocatedValue(Register patch_location,
   }
 
   // insert low word into iilf instruction
-#if __BYTE_ORDER == __LITTLE_ENDIAN
+#if V8_TARGET_LITTLE_ENDIAN
   // Instructions are stored in Big Endian format
   strv(new_value, MemOperand(patch_location, 2 + offset));
 #else
@@ -3696,7 +3696,7 @@ void MacroAssembler::GetRelocatedValue(Register patch_location,
 #if V8_TARGET_ARCH_S390X
   // On 64-bit, we expect a IIHF instruction here.
   if (emit_debug_code()) {
-#if __BYTE_ORDER == __LITTLE_ENDIAN
+#if V8_TARGET_LITTLE_ENDIAN
     // Instructions are stored in Big Endian format
     lrvh(scratch, MemOperand(patch_location));
 #else
@@ -3710,7 +3710,7 @@ void MacroAssembler::GetRelocatedValue(Register patch_location,
   }
 
   // load high word from iihf instruction
-#if __BYTE_ORDER == __LITTLE_ENDIAN
+#if V8_TARGET_LITTLE_ENDIAN
   // Instructions are stored in Big Endian format
   lrv(result, MemOperand(patch_location, 2));
 #else
@@ -3724,7 +3724,7 @@ void MacroAssembler::GetRelocatedValue(Register patch_location,
 
   // At this point scratch is a iilf instruction.
   if (emit_debug_code()) {
-#if __BYTE_ORDER == __LITTLE_ENDIAN
+#if V8_TARGET_LITTLE_ENDIAN
     // Instructions are stored in Big Endian format
     lrvh(scratch, MemOperand(patch_location, offset));
 #else
@@ -3738,7 +3738,7 @@ void MacroAssembler::GetRelocatedValue(Register patch_location,
   }
 
   // load low word from iilf instruction
-#if __BYTE_ORDER == __LITTLE_ENDIAN
+#if V8_TARGET_LITTLE_ENDIAN
   // Instructions are stored in Big Endian format
   lrv(result, MemOperand(patch_location, 2 + offset));
 #else
@@ -3774,7 +3774,7 @@ void MacroAssembler::CheckPageFlag(
       byte_offset = kPointerSize - 4;
       shifted_mask = mask >> 24;
     }
-#if __BYTE_ORDER == __LITTLE_ENDIAN
+#if V8_TARGET_LITTLE_ENDIAN
     // Reverse the byte_offset if emulating on little endian platform
     byte_offset = kPointerSize - byte_offset - 1;
 #endif

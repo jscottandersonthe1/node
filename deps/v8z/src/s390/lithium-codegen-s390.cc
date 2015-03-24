@@ -1927,7 +1927,7 @@ void LCodeGen::DoSubI(LSubI* instr) {
     if (!isInteger) {
       __ SubP(ToRegister(result), mem);
     } else {
-#if V8_TARGET_ARCH_S390X &&  __BYTE_ORDER == __BIG_ENDIAN
+#if V8_TARGET_ARCH_S390X &&  !V8_TARGET_LITTLE_ENDIAN
       // We want to read the 32-bits directly from memory
       MemOperand Upper32Mem = MemOperand(mem.rb(), mem.rx(),
                                          mem.offset() + 4);
@@ -2162,7 +2162,7 @@ void LCodeGen::DoAddI(LAddI* instr) {
     if (!isInteger) {
       __ AddP(ToRegister(result), mem);
     } else {
-#if V8_TARGET_ARCH_S390X &&  __BYTE_ORDER == __BIG_ENDIAN
+#if V8_TARGET_ARCH_S390X &&  !V8_TARGET_LITTLE_ENDIAN
       // We want to read the 32-bits directly from memory
       MemOperand Upper32Mem = MemOperand(mem.rb(), mem.rx(),
                                          mem.offset() + 4);
@@ -2268,46 +2268,20 @@ void LCodeGen::DoArithmeticD(LArithmeticD* instr) {
   DoubleRegister left = ToDoubleRegister(instr->left());
   DoubleRegister right = ToDoubleRegister(instr->right());
   DoubleRegister result = ToDoubleRegister(instr->result());
+  // All operations except MOD are computed in-place.
+  DCHECK(instr->op() == Token::MOD || left.is(result));
   switch (instr->op()) {
     case Token::ADD:
-      if (result.is(right)) {   // Ensure we don't clobber right
-        __ adbr(result, left);
-      } else {
-        if (!result.is(left))
-          __ ldr(result, left);
-        __ adbr(result, right);
-      }
+      __ adbr(result, right);
       break;
     case Token::SUB:
-      if (result.is(right)) {  // right = left - right
-        __ ldr(double_scratch0(), right);
-        __ ldr(result, left);
-        __ sdbr(result, double_scratch0());
-      } else {
-        if (!result.is(left))
-          __ ldr(result, left);
-        __ sdbr(result, right);
-      }
+      __ sdbr(result, right);
       break;
     case Token::MUL:
-      if (result.is(right)) {  // Ensure we don't clobber right
-        __ mdbr(result, left);
-      } else {
-        if (!result.is(left))
-          __ ldr(result, left);
-        __ mdbr(result, right);
-      }
+      __ mdbr(result, right);
       break;
     case Token::DIV:
-      if (result.is(right)) {  // right = left / right
-        __ ldr(double_scratch0(), right);
-        __ ldr(result, left);
-        __ ddbr(result, double_scratch0());
-      } else {
-        if (!result.is(left))
-          __ ldr(result, left);
-        __ ddbr(result, right);
-      }
+      __ ddbr(result, right);
       break;
     case Token::MOD: {
       __ PrepareCallCFunction(0, 2, scratch0());
@@ -3694,7 +3668,7 @@ MemOperand LCodeGen::PrepareKeyedOperand(Register key,
     __ AddP(scratch, Operand(base_offset));
     base_offset = 0;
   }
-  return MemOperand(base, scratch, base_offset);
+  return MemOperand(scratch, base, base_offset);
 }
 
 
