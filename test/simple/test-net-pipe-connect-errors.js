@@ -31,11 +31,8 @@ var accessErrorFired = false;
 
 // Test if ENOTSOCK is fired when trying to connect to a file which is not
 // a socket.
-var emptyTxt = path.join(common.fixturesDir, 'empty.txt');
-if (typeof process.env.NODE_PIPE_DIR !== 'undefined') {
-  emptyTxt = path.join(process.env.NODE_PIPE_DIR, 'empty.txt');
-  fs.closeSync(fs.openSync(emptyTxt, 'w'));
-}
+var emptyTxt = path.join(common.pipeTmpDir, 'empty.txt');
+fs.closeSync(fs.openSync(emptyTxt, 'w'));
 
 var notSocketClient = net.createConnection(emptyTxt, function() {
   assert.ok(false);
