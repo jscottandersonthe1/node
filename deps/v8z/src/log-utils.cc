@@ -204,7 +204,7 @@ void Log::MessageBuilder::AppendDetailed(String* str, bool show_impl_info) {
 
   if (output_handle_ != NULL) {
     LogMessageBuilder msg(logger_);
-    msg.Append("v8-version,%d,%d,%d,%d,%d\n", Version::GetMajor(),
+    msg.Append("v8-version,%d,%d,%d,%d,%d", Version::GetMajor(),
                Version::GetMinor(), Version::GetBuild(), Version::GetPatch(),
                Version::IsCandidate());
     msg.WriteToLogFile();
