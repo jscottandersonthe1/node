@@ -891,7 +891,6 @@ void LCodeGen::DoUnknownOSRValue(LUnknownOSRValue* instr) {
 void LCodeGen::DoModI(LModI* instr) {
   Register dividend = ToRegister(instr->left());
   Register result = ToRegister(instr->result());
-  Register scratch = scratch0();
   Label done;
 
   if (instr->hydrogen()->HasPowerOf2Divisor()) {
@@ -923,7 +922,6 @@ void LCodeGen::DoModI(LModI* instr) {
         DeoptimizeIf(eq, instr->environment());
     }
 
-    ASSERT(scratch.is(r1));
     __ LoadRR(r0, dividend);
     __ srda(r0, Operand(32));
     __ dr(r0, divisor);     // R0:R1 = R1 / divisor - R0 remainder
