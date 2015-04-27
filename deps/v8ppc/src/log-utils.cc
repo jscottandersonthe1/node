@@ -51,6 +51,14 @@ void Log::Initialize(const char* log_file_name) {
       OpenFile(log_file_name);
     }
   }
+
+  if (output_handle_ != NULL) {
+    Log::MessageBuilder msg(this);
+    msg.Append("v8-version,%d,%d,%d,%d,%d", Version::GetMajor(),
+               Version::GetMinor(), Version::GetBuild(), Version::GetPatch(),
+               Version::IsCandidate());
+    msg.WriteToLogFile();
+  }
 }
 
 
@@ -200,14 +208,6 @@ void Log::MessageBuilder::AppendDetailed(String* str, bool show_impl_info) {
     } else {
       Append("%lc", c);
     }
-  }
-
-  if (output_handle_ != NULL) {
-    LogMessageBuilder msg(logger_);
-    msg.Append("v8-version,%d,%d,%d,%d,%d", Version::GetMajor(),
-               Version::GetMinor(), Version::GetBuild(), Version::GetPatch(),
-               Version::IsCandidate());
-    msg.WriteToLogFile();
   }
 }
 
