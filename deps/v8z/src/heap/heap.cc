@@ -68,7 +68,7 @@ Heap::Heap()
       max_semi_space_size_(8 * (kPointerSize / 4) * MB),
       initial_semispace_size_(Page::kPageSize),
       max_old_generation_size_(700ul * (kPointerSize / 4) * MB),
-      max_executable_size_(256ul * (kPointerSize / 4) * MB),
+      max_executable_size_(512ul * (kPointerSize / 4) * MB),
       // Variables set based on semispace_size_ and old_generation_size_ in
       // ConfigureHeap.
       // Will be 4 * reserved_semispace_size_ to ensure that young
@@ -4837,10 +4837,10 @@ bool Heap::ConfigureHeap(int max_semi_space_size, int max_old_space_size,
     max_semi_space_size_ = max_semi_space_size * MB;
   }
   if (max_old_space_size > 0) {
-    max_old_generation_size_ = max_old_space_size * MB;
+    max_old_generation_size_ = static_cast<intptr_t>(max_old_space_size) * MB;
   }
   if (max_executable_size > 0) {
-    max_executable_size_ = max_executable_size * MB;
+    max_executable_size_ = static_cast<intptr_t>(max_executable_size) * MB;
   }
 
   // If max space size flags are specified overwrite the configuration.
@@ -4848,10 +4848,11 @@ bool Heap::ConfigureHeap(int max_semi_space_size, int max_old_space_size,
     max_semi_space_size_ = FLAG_max_semi_space_size * MB;
   }
   if (FLAG_max_old_space_size > 0) {
-    max_old_generation_size_ = FLAG_max_old_space_size * MB;
+    max_old_generation_size_ =
+        static_cast<intptr_t>(FLAG_max_old_space_size) * MB;
   }
   if (FLAG_max_executable_size > 0) {
-    max_executable_size_ = FLAG_max_executable_size * MB;
+    max_executable_size_ = static_cast<intptr_t>(FLAG_max_executable_size) * MB;
   }
 
   if (Page::kPageSize > MB) {
