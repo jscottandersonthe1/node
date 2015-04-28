@@ -659,7 +659,7 @@
            # Define Little Endian
            'defines':['L_ENDIAN']
         }],
-        ['target_arch!="ia32" and target_arch!="x64" and target_arch!="arm" or openssl_no_asm!=0', {
+        ['target_arch!="ia32" and target_arch!="x64" and target_arch!="arm" and target_arch!="s390" and target_arch!="s390x" or openssl_no_asm!=0', {
           # Disable asm
           'defines': [
             'OPENSSL_NO_ASM'
@@ -693,8 +693,8 @@
             'GHASH_ASM',
           ],
           'conditions': [
-            # Extended assembly on non-arm platforms
-            ['target_arch!="arm"', {
+            # Extended assembly on non-arm and non-s390 platforms
+            ['target_arch!="arm" and target_arch!="s390" and target_arch!="s390x"', {
               'defines': [
                 'VPAES_ASM',
                 'BN_ASM',
@@ -957,6 +957,69 @@
                   'process_outputs_as_sources': 0,
                   'message': 'Assembling <(RULE_INPUT_PATH) to <(INTERMEDIATE_DIR)/<(RULE_INPUT_ROOT).obj.',
                 }
+              ]
+            }],
+            ['target_arch=="s390"', {
+              'defines': [
+                'OPENSSL_BN_ASM_MONT',
+                'OPENSSL_BN_ASM_GF2m',
+                'AES_CTR_ASM',
+                'AES_XTS_ASM',
+              ],
+              'sources': [
+                'asm/s390-elf-gas/rc4/rc4-s390.s',
+                'asm/s390-elf-gas/modes/ghash-s390.s',
+                'asm/s390-elf-gas/aes/aes-s390.s',
+                'asm/s390-elf-gas/sha/sha1-s390.s',
+                'asm/s390-elf-gas/sha/sha256-s390.s',
+                'asm/s390-elf-gas/sha/sha512-s390.s',
+                'asm/s390-elf-gas/bn/s390-gf2m.s',
+                'asm/s390-elf-gas/bn/s390-mont.s',
+                # No asm available
+                'openssl/crypto/bf/bf_enc.c',
+                'openssl/crypto/bn/bn_asm.c',
+                'openssl/crypto/cast/c_enc.c',
+                'openssl/crypto/camellia/camellia.c',
+                'openssl/crypto/camellia/cmll_cbc.c',
+                'openssl/crypto/camellia/cmll_misc.c',
+                'openssl/crypto/des/des_enc.c',
+                'openssl/crypto/des/fcrypt_b.c',
+                'openssl/crypto/whrlpool/wp_block.c',
+                # PCAP stuff
+                'openssl/crypto/s390xcap.c',
+                'openssl/crypto/s390xcpuid.S',
+              ],
+              'cflags': ['-Wa,-mzarch']
+            }],
+            ['target_arch=="s390x"', {
+              'defines': [
+                'OPENSSL_BN_ASM_MONT',
+                'OPENSSL_BN_ASM_GF2m',
+                'AES_CTR_ASM',
+                'AES_XTS_ASM',
+              ],
+              'sources': [
+                'asm/s390x-elf-gas/rc4/rc4-s390x.s',
+                'asm/s390x-elf-gas/modes/ghash-s390x.s',
+                'asm/s390x-elf-gas/aes/aes-s390x.s',
+                'asm/s390x-elf-gas/sha/sha1-s390x.s',
+                'asm/s390x-elf-gas/sha/sha256-s390x.s',
+                'asm/s390x-elf-gas/sha/sha512-s390x.s',
+                'asm/s390x-elf-gas/bn/s390x-gf2m.s',
+                'asm/s390x-elf-gas/bn/s390x-mont.s',
+                # No asm available
+                'openssl/crypto/bf/bf_enc.c',
+                'openssl/crypto/bn/bn_asm.c',
+                'openssl/crypto/cast/c_enc.c',
+                'openssl/crypto/camellia/camellia.c',
+                'openssl/crypto/camellia/cmll_cbc.c',
+                'openssl/crypto/camellia/cmll_misc.c',
+                'openssl/crypto/des/des_enc.c',
+                'openssl/crypto/des/fcrypt_b.c',
+                'openssl/crypto/whrlpool/wp_block.c',
+                # PCAP stuff
+                'openssl/crypto/s390xcap.c',
+                'openssl/crypto/s390xcpuid.S',
               ]
             }]
           ]

@@ -127,9 +127,31 @@ OUTPUTS	= \
 	x64-win32-masm/whrlpool/wp-x86_64.asm \
 	x64-win32-masm/modes/ghash-x86_64.asm \
 	x64-win32-masm/x86_64cpuid.asm \
+	s390-elf-gas/rc4/rc4-s390.s \
+	s390-elf-gas/modes/ghash-s390.s \
+	s390-elf-gas/aes/aes-s390.s \
+	s390-elf-gas/sha/sha1-s390.s \
+	s390-elf-gas/sha/sha256-s390.s \
+	s390-elf-gas/sha/sha512-s390.s \
+	s390-elf-gas/bn/s390-gf2m.s \
+	s390-elf-gas/bn/s390-mont.s \
+	s390x-elf-gas/rc4/rc4-s390x.s \
+	s390x-elf-gas/modes/ghash-s390x.s \
+	s390x-elf-gas/aes/aes-s390x.s \
+	s390x-elf-gas/sha/sha1-s390x.s \
+	s390x-elf-gas/sha/sha256-s390x.s \
+	s390x-elf-gas/sha/sha512-s390x.s \
+	s390x-elf-gas/bn/s390x-gf2m.s \
+	s390x-elf-gas/bn/s390x-mont.s \
 
 arm-elf-gas/%.S x64-elf-gas/%.s x86-elf-gas/%.s:
 	$(PERL) $< elf > $@
+
+s390-elf-gas/%.s:
+	$(PERL) $< 31 $@
+
+s390x-elf-gas/%.s:
+	$(PERL) $< 64 $@
 
 x64-macosx-gas/%.s x86-macosx-gas/%.s:
 	$(PERL) $< macosx > $@
@@ -276,3 +298,19 @@ arm-elf-gas/sha/sha1-armv4-large.S: ../openssl/crypto/sha/asm/sha1-armv4-large.p
 arm-elf-gas/sha/sha512-armv4.S: ../openssl/crypto/sha/asm/sha512-armv4.pl
 arm-elf-gas/sha/sha256-armv4.S: ../openssl/crypto/sha/asm/sha256-armv4.pl
 arm-elf-gas/modes/ghash-armv4.S: ../openssl/crypto/modes/asm/ghash-armv4.pl
+s390-elf-gas/rc4/rc4-s390.s: ../openssl/crypto/rc4/asm/rc4-s390x.pl
+s390-elf-gas/modes/ghash-s390.s: ../openssl/crypto/modes/asm/ghash-s390x.pl
+s390-elf-gas/aes/aes-s390.s: ../openssl/crypto/aes/asm/aes-s390x.pl
+s390-elf-gas/sha/sha1-s390.s: ../openssl/crypto/sha/asm/sha1-s390x.pl
+s390-elf-gas/sha/sha256-s390.s: ../openssl/crypto/sha/asm/sha512-s390x.pl
+s390-elf-gas/sha/sha512-s390.s: ../openssl/crypto/sha/asm/sha512-s390x.pl
+s390-elf-gas/bn/s390-gf2m.s: ../openssl/crypto/bn/asm/s390x-gf2m.pl
+s390-elf-gas/bn/s390-mont.s: ../openssl/crypto/bn/asm/s390x-mont.pl
+s390x-elf-gas/rc4/rc4-s390x.s: ../openssl/crypto/rc4/asm/rc4-s390x.pl
+s390x-elf-gas/modes/ghash-s390x.s: ../openssl/crypto/modes/asm/ghash-s390x.pl
+s390x-elf-gas/aes/aes-s390x.s: ../openssl/crypto/aes/asm/aes-s390x.pl
+s390x-elf-gas/sha/sha1-s390x.s: ../openssl/crypto/sha/asm/sha1-s390x.pl
+s390x-elf-gas/sha/sha256-s390x.s: ../openssl/crypto/sha/asm/sha512-s390x.pl
+s390x-elf-gas/sha/sha512-s390x.s: ../openssl/crypto/sha/asm/sha512-s390x.pl
+s390x-elf-gas/bn/s390x-gf2m.s: ../openssl/crypto/bn/asm/s390x-gf2m.pl
+s390x-elf-gas/bn/s390x-mont.s: ../openssl/crypto/bn/asm/s390x-mont.pl
