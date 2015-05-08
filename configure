@@ -6,6 +6,7 @@ import re
 import shlex
 import subprocess
 import sys
+import platform
 
 CC = os.environ.get('CC', 'cc')
 
@@ -420,6 +421,7 @@ def host_arch_cc():
       rtn = matchup[i]
       break
 
+  rtn = platform.machine()
   return rtn
 
 
