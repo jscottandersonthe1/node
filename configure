@@ -8,6 +8,7 @@ import subprocess
 import sys
 import shutil
 import string
+import platform
 
 CC = os.environ.get('CC', 'cc')
 
@@ -460,6 +461,7 @@ def host_arch_cc():
       rtn = matchup[i]
       break
 
+  rtn = platform.machine()
   return rtn
 
 
