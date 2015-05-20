@@ -31,7 +31,8 @@
 #else
 #define V8_TURBOFAN_BACKEND 0
 #endif
-#if V8_TURBOFAN_BACKEND && !(V8_OS_WIN && V8_TARGET_ARCH_X64)
+#if V8_TURBOFAN_BACKEND && !V8_TARGET_ARCH_ARM64 && \
+    !(V8_OS_WIN && V8_TARGET_ARCH_X64)
 #define V8_TURBOFAN_TARGET 1
 #else
 #define V8_TURBOFAN_TARGET 0
@@ -76,11 +77,27 @@ namespace internal {
 #endif
 
 // Determine whether the architecture uses an out-of-line constant pool.
+#define OOL_CONSTANT_POOL_NONE 0
+#define OOL_CONSTANT_POOL_HEAP_OBJECT 1
+#define OOL_CONSTANT_POOL_CODE 2
+
 #if V8_TARGET_ARCH_PPC
-#define V8_OOL_CONSTANT_POOL 1
+#define V8_OOL_CONSTANT_POOL OOL_CONSTANT_POOL_CODE
 #else
-#define V8_OOL_CONSTANT_POOL 0
+#define V8_OOL_CONSTANT_POOL OOL_CONSTANT_POOL_NONE
 #endif
+
+#ifdef V8_TARGET_ARCH_ARM
+// Set stack limit lower for ARM than for other architectures because
+// stack allocating MacroAssembler takes 120K bytes.
+// See issue crbug.com/405338
+#define V8_DEFAULT_STACK_SIZE_KB 864
+#else
+// Slightly less than 1MB, since Windows' default stack size for
+// the main execution thread is 1MB for both 32 and 64-bit.
+#define V8_DEFAULT_STACK_SIZE_KB 984
+#endif
+
 
 // Support for alternative bool type. This is only enabled if the code is
 // compiled with USE_MYBOOL defined. This catches some nasty type bugs.
@@ -406,13 +423,15 @@ enum NativesFlag { NOT_NATIVES_CODE, NATIVES_CODE };
 // A CodeDesc describes a buffer holding instructions and relocation
 // information. The instructions start at the beginning of the buffer
 // and grow forward, the relocation information starts at the end of
-// the buffer and grows backward.
+// the buffer and grows backward.  A constant pool may exist at the
+// end of the instructions.
 //
-//  |<--------------- buffer_size ---------------->|
-//  |<-- instr_size -->|        |<-- reloc_size -->|
-//  +==================+========+==================+
-//  |   instructions   |  free  |    reloc info    |
-//  +==================+========+==================+
+//  |<--------------- buffer_size ----------------------------------->|
+//  |<------------- instr_size ---------->|        |<-- reloc_size -->|
+//  |               |<- const_pool_size ->|                           |
+//  +=====================================+========+==================+
+//  |  instructions |        data         |  free  |    reloc info    |
+//  +=====================================+========+==================+
 //  ^
 //  |
 //  buffer
@@ -422,6 +441,7 @@ struct CodeDesc {
   int buffer_size;
   int instr_size;
   int reloc_size;
+  int constant_pool_size;
   Assembler* origin;
 };
 

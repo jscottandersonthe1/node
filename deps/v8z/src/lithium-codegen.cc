@@ -31,8 +31,8 @@
 #include "src/ppc/lithium-ppc.h"  // NOLINT
 #include "src/ppc/lithium-codegen-ppc.h"  // NOLINT
 #elif V8_TARGET_ARCH_S390
-#include "src/s390/lithium-s390.h"  // NOLINT
-#include "src/s390/lithium-codegen-s390.h"  // NOLINT
+#include "src/s390/lithium-s390.h" // NOLINT
+#include "src/s390/lithium-codegen-s390.h" // NOLINT
 #else
 #error Unsupported target architecture.
 #endif
@@ -200,8 +200,10 @@ void LCodeGenBase::RegisterWeakObjectsInOptimizedCode(Handle<Code> code) {
       }
     }
   }
-  if (FLAG_enable_ool_constant_pool) {
-    code->constant_pool()->set_weak_object_state(
+  if (FLAG_enable_ool_constant_pool_in_heapobject) {
+    ConstantPoolArray* constant_pool =
+        reinterpret_cast<ConstantPoolArray*>(code->constant_pool());
+    constant_pool->set_weak_object_state(
         ConstantPoolArray::WEAK_OBJECTS_IN_OPTIMIZED_CODE);
   }
 #ifdef VERIFY_HEAP

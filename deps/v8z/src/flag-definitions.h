@@ -460,9 +460,7 @@ DEFINE_BOOL(enable_liveedit, true, "enable liveedit experimental feature")
 DEFINE_BOOL(hard_abort, true, "abort by crashing")
 
 // execution.cc
-// Slightly less than 1MB, since Windows' default stack size for
-// the main execution thread is 1MB for both 32 and 64-bit.
-DEFINE_INT(stack_size, 984,
+DEFINE_INT(stack_size, V8_DEFAULT_STACK_SIZE_KB,
            "default size of stack region v8 is allowed to use (in kBytes)")
 
 // frames.cc
@@ -902,9 +900,16 @@ DEFINE_INT(dump_allocations_digest_at_alloc, 0,
 #undef FLAG
 #define FLAG FLAG_READONLY
 
-// assembler-arm.h
-DEFINE_BOOL(enable_ool_constant_pool, V8_OOL_CONSTANT_POOL,
-            "enable use of out-of-line constant pools (ARM only)")
+// assembler.h
+DEFINE_BOOL(enable_ool_constant_pool,
+            V8_OOL_CONSTANT_POOL != OOL_CONSTANT_POOL_NONE,
+            "enable use of out-of-line constant pools")
+DEFINE_BOOL(enable_ool_constant_pool_in_heapobject,
+            V8_OOL_CONSTANT_POOL == OOL_CONSTANT_POOL_HEAP_OBJECT,
+            "enable use of out-of-line constant pools (HeapObject)")
+DEFINE_BOOL(enable_ool_constant_pool_in_code,
+            V8_OOL_CONSTANT_POOL == OOL_CONSTANT_POOL_CODE,
+            "enable use of out-of-line constant pools (Code)")
 
 // Cleanup...
 #undef FLAG_FULL

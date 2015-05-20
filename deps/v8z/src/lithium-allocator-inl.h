@@ -15,6 +15,8 @@
 #include "src/arm64/lithium-arm64.h" // NOLINT
 #elif V8_TARGET_ARCH_ARM
 #include "src/arm/lithium-arm.h" // NOLINT
+#elif V8_TARGET_ARCH_S390
+#include "src/s390/lithium-s390.h" // NOLINT
 #elif V8_TARGET_ARCH_PPC
 #include "src/ppc/lithium-ppc.h"  // NOLINT
 #elif V8_TARGET_ARCH_MIPS
@@ -23,8 +25,6 @@
 #include "src/mips64/lithium-mips64.h" // NOLINT
 #elif V8_TARGET_ARCH_X87
 #include "src/x87/lithium-x87.h" // NOLINT
-#elif V8_TARGET_ARCH_S390
-#include "src/s390/lithium-s390.h"  // NOLINT
 #else
 #error "Unknown architecture."
 #endif

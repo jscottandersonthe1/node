@@ -65,12 +65,19 @@ const int kInvalidProtoDepth = -1;
 #include "src/code.h"                     // NOLINT, must be after assembler_*.h
 #include "src/arm/macro-assembler-arm.h"  // NOLINT
 #elif V8_TARGET_ARCH_PPC
+#include "src/assembler.h"
 #include "src/ppc/constants-ppc.h"
-#include "src/assembler.h"                // NOLINT
-#include "src/ppc/assembler-ppc.h"        // NOLINT
+#include "src/ppc/assembler-ppc.h"  // NOLINT
 #include "src/ppc/assembler-ppc-inl.h"
 #include "src/code.h"                     // NOLINT, must be after assembler_*.h
-#include "src/ppc/macro-assembler-ppc.h"
+#include "src/ppc/macro-assembler-ppc.h"  // NOLINT
+#elif V8_TARGET_ARCH_S390
+#include "src/s390/constants-s390.h"
+#include "src/assembler.h" // NOLINT
+#include "src/s390/assembler-s390.h" // NOLINT
+#include "src/s390/assembler-s390-inl.h"
+#include "src/code.h" // NOLINT,must be after assembler_*.h
+#include "src/s390/macro-assembler-s390.h"
 #elif V8_TARGET_ARCH_MIPS
 #include "src/mips/constants-mips.h"
 #include "src/assembler.h"            // NOLINT
@@ -85,13 +92,6 @@ const int kInvalidProtoDepth = -1;
 #include "src/mips64/assembler-mips64-inl.h"
 #include "src/code.h"  // NOLINT, must be after assembler_*.h
 #include "src/mips64/macro-assembler-mips64.h"
-#elif V8_TARGET_ARCH_S390
-#include "src/s390/constants-s390.h"
-#include "src/assembler.h"            // NOLINT
-#include "src/s390/assembler-s390.h"  // NOLINT
-#include "src/s390/assembler-s390-inl.h"
-#include "src/code.h"                 // NOLINT,must be after assembler_*.h
-#include "src/s390/macro-assembler-s390.h"
 #elif V8_TARGET_ARCH_X87
 #include "src/assembler.h"
 #include "src/x87/assembler-x87.h"

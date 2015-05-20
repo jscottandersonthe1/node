@@ -30,6 +30,8 @@
 #include "src/arm64/regexp-macro-assembler-arm64.h"  // NOLINT
 #elif V8_TARGET_ARCH_ARM
 #include "src/arm/regexp-macro-assembler-arm.h"  // NOLINT
+#elif V8_TARGET_ARCH_S390
+#include "src/s390/regexp-macro-assembler-s390.h" // NOLINT
 #elif V8_TARGET_ARCH_PPC
 #include "src/ppc/regexp-macro-assembler-ppc.h"  // NOLINT
 #elif V8_TARGET_ARCH_MIPS
@@ -38,8 +40,6 @@
 #include "src/mips64/regexp-macro-assembler-mips64.h"  // NOLINT
 #elif V8_TARGET_ARCH_X87
 #include "src/x87/regexp-macro-assembler-x87.h"  // NOLINT
-#elif V8_TARGET_ARCH_S390
-#include "src/s390/regexp-macro-assembler-s390.h"  // NOLINT
 #else
 #error Unsupported target architecture.
 #endif

@@ -52,7 +52,9 @@ enum TypeofState { INSIDE_TYPEOF, NOT_INSIDE_TYPEOF };
 #elif V8_TARGET_ARCH_ARM64
 #include "src/arm64/codegen-arm64.h"  // NOLINT
 #elif V8_TARGET_ARCH_ARM
-#include "src/arm/codegen-arm.h"  // NOLINT
+#include "src/arm/codegen-arm.h" // NOLINT
+#elif V8_TARGET_ARCH_S390
+#include "src/s390/codegen-s390.h" // NOLINT
 #elif V8_TARGET_ARCH_PPC
 #include "src/ppc/codegen-ppc.h"  // NOLINT
 #elif V8_TARGET_ARCH_MIPS
@@ -61,8 +63,6 @@ enum TypeofState { INSIDE_TYPEOF, NOT_INSIDE_TYPEOF };
 #include "src/mips64/codegen-mips64.h"  // NOLINT
 #elif V8_TARGET_ARCH_X87
 #include "src/x87/codegen-x87.h"  // NOLINT
-#elif V8_TARGET_ARCH_S390
-#include "src/s390/codegen-s390.h"  // NOLINT
 #else
 #error Unsupported target architecture.
 #endif

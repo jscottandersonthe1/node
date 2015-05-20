@@ -808,7 +808,7 @@ void MemoryAllocator::ReportStatistics() {
          "d"
          ", available: %%%d\n\n",
          static_cast<intptr_t>(capacity_), static_cast<intptr_t>(size_),
-         static_cast<int>(pct*100));
+         static_cast<int>(pct * 100));
 }
 #endif
 
@@ -995,7 +995,8 @@ bool PagedSpace::Expand() {
 intptr_t PagedSpace::SizeOfFirstPage() {
   // If using an ool constant pool then transfer the constant pool allowance
   // from the code space to the old pointer space.
-  static const int constant_pool_delta = FLAG_enable_ool_constant_pool ? 48 : 0;
+  static const int constant_pool_delta =
+      FLAG_enable_ool_constant_pool_in_heapobject ? 48 : 0;
   int size = 0;
   switch (identity()) {
     case OLD_POINTER_SPACE:
@@ -1371,7 +1372,6 @@ bool NewSpace::AddFreshPage() {
   Address limit = NewSpacePage::FromLimit(top)->area_end();
   if (heap()->gc_state() == Heap::SCAVENGE) {
     heap()->promotion_queue()->SetNewLimit(limit);
-    heap()->promotion_queue()->ActivateGuardIfOnTheSamePage();
   }
 
   int remaining_in_page = static_cast<int>(limit - top);

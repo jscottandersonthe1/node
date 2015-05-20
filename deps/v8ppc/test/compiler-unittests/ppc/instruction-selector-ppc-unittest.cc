@@ -11,7 +11,7 @@ namespace compiler {
 class InstructionSelectorPPCTest : public InstructionSelectorTest {};
 
 
-TARGET_TEST_F(InstructionSelectorPPCTest, Int32AddP) {
+COMPILER_TEST_F(InstructionSelectorPPCTest, Int32AddP) {
   StreamBuilder m(this, kMachineWord32, kMachineWord32, kMachineWord32);
   m.Return(m.Int32Add(m.Parameter(0), m.Parameter(1)));
   Stream s = m.Build();

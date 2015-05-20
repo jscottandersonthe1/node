@@ -2920,9 +2920,6 @@ FixedArrayBase* Map::GetInitialElements() {
       GetHeap()->EmptyFixedTypedArrayForMap(this);
     DCHECK(!GetHeap()->InNewSpace(empty_array));
     return empty_array;
-  } else if (has_dictionary_elements()) {
-    DCHECK(!GetHeap()->InNewSpace(GetHeap()->empty_slow_element_dictionary()));
-    return GetHeap()->empty_slow_element_dictionary();
   } else {
     UNREACHABLE();
   }
@@ -3376,7 +3373,6 @@ bool Name::Equals(Handle<Name> one, Handle<Name> two) {
 ACCESSORS(Symbol, name, Object, kNameOffset)
 ACCESSORS(Symbol, flags, Smi, kFlagsOffset)
 BOOL_ACCESSORS(Symbol, flags, is_private, kPrivateBit)
-BOOL_ACCESSORS(Symbol, flags, is_own, kOwnBit)
 
 
 bool String::Equals(String* other) {
@@ -4984,12 +4980,23 @@ bool Code::is_debug_stub() {
 }
 
 
-ConstantPoolArray* Code::constant_pool() {
-  return ConstantPoolArray::cast(READ_FIELD(this, kConstantPoolOffset));
+Address Code::constant_pool() {
+  Address constant_pool = NULL;
+  if (FLAG_enable_ool_constant_pool_in_heapobject) {
+    constant_pool = reinterpret_cast<Address>(
+        READ_FIELD(this, kConstantPoolOffset));
+  } else if (FLAG_enable_ool_constant_pool_in_code) {
+    int offset = constant_pool_offset();
+    if (offset < instruction_size()) {
+      constant_pool = FIELD_ADDR(this, kHeaderSize + offset);
+    }
+  }
+  return constant_pool;
 }
 
 
 void Code::set_constant_pool(Object* value) {
+  DCHECK(FLAG_enable_ool_constant_pool_in_heapobject);
   DCHECK(value->IsConstantPoolArray());
   WRITE_FIELD(this, kConstantPoolOffset, value);
   WRITE_BARRIER(GetHeap(), this, kConstantPoolOffset, value);
@@ -6162,6 +6169,7 @@ SMI_ACCESSORS(JSMessageObject, end_position, kEndPositionOffset)
 
 INT_ACCESSORS(Code, instruction_size, kInstructionSizeOffset)
 INT_ACCESSORS(Code, prologue_offset, kPrologueOffset)
+INT_ACCESSORS(Code, constant_pool_offset, kConstantPoolOffset)
 ACCESSORS(Code, relocation_info, ByteArray, kRelocationInfoOffset)
 ACCESSORS(Code, handler_table, FixedArray, kHandlerTableOffset)
 ACCESSORS(Code, deoptimization_data, FixedArray, kDeoptimizationDataOffset)
@@ -6173,7 +6181,9 @@ void Code::WipeOutHeader() {
   WRITE_FIELD(this, kRelocationInfoOffset, NULL);
   WRITE_FIELD(this, kHandlerTableOffset, NULL);
   WRITE_FIELD(this, kDeoptimizationDataOffset, NULL);
-  WRITE_FIELD(this, kConstantPoolOffset, NULL);
+  if (FLAG_enable_ool_constant_pool_in_heapobject) {
+    WRITE_FIELD(this, kConstantPoolOffset, NULL);
+  }
   // Do not wipe out major/minor keys on a code stub or IC
   if (!READ_FIELD(this, kTypeFeedbackInfoOffset)->IsSmi()) {
     WRITE_FIELD(this, kTypeFeedbackInfoOffset, NULL);
@@ -6509,10 +6519,6 @@ uint32_t Name::Hash() {
   return String::cast(this)->ComputeAndSetHash();
 }
 
-bool Name::IsOwn() {
-  return this->IsSymbol() && Symbol::cast(this)->is_own();
-}
-
 
 StringHasher::StringHasher(int length, uint32_t seed)
   : length_(length),
@@ -6658,16 +6664,11 @@ void String::SetForwardedInternalizedString(String* canonical) {
   DCHECK(SlowEquals(canonical));
   DCHECK(canonical->IsInternalizedString());
   DCHECK(canonical->HasHashCode());
+  WRITE_FIELD(this, kHashFieldSlot, canonical);
 
   // Setting the hash field to a tagged value sets the LSB, causing the hash
   // code to be interpreted as uninitialized.  We use this fact to recognize
   // that we have a forwarded string.
-  if (kHashNotComputedMask != kHeapObjectTag) {
-    canonical = reinterpret_cast<String *>(
-        (uintptr_t)canonical | kHashNotComputedMask);
-  }
-
-  WRITE_FIELD(this, kHashFieldSlot, canonical);
   DCHECK(!HasHashCode());
 }
 
@@ -6675,14 +6676,7 @@ void String::SetForwardedInternalizedString(String* canonical) {
 String* String::GetForwardedInternalizedString() {
   DCHECK(IsInternalizedString());
   if (HasHashCode()) return this;
-  Object *object = READ_FIELD(this, kHashFieldSlot);
-
-  if (kHashNotComputedMask != kHeapObjectTag) {
-    object = reinterpret_cast<Object *>(
-        (uintptr_t)object & ~kHashNotComputedMask);
-  }
-
-  String* canonical = String::cast(object);
+  String* canonical = String::cast(READ_FIELD(this, kHashFieldSlot));
   DCHECK(canonical->IsInternalizedString());
   DCHECK(SlowEquals(canonical));
   DCHECK(canonical->HasHashCode());

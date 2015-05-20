@@ -36,8 +36,8 @@
 #include "src/ppc/regexp-macro-assembler-ppc.h"  // NOLINT
 #endif
 #if V8_TARGET_ARCH_S390 && !V8_INTERPRETED_REGEXP
-#include "src/regexp-macro-assembler.h"  // NOLINT
-#include "src/s390/regexp-macro-assembler-s390.h"  // NOLINT
+#include "src/regexp-macro-assembler.h" // NOLINT
+#include "src/s390/regexp-macro-assembler-s390.h" // NOLINT
 #endif
 #if V8_TARGET_ARCH_ARM && !V8_INTERPRETED_REGEXP
 #include "src/regexp-macro-assembler.h"          // NOLINT
@@ -1382,7 +1382,6 @@ void PromotionQueue::Initialize() {
   front_ = rear_ =
       reinterpret_cast<intptr_t*>(heap_->new_space()->ToSpaceEnd());
   emergency_stack_ = NULL;
-  guard_ = false;
 }
 
 
@@ -1980,14 +1979,15 @@ class ScavengingVisitor : public StaticVisitorBase {
 
     HeapObject* target = NULL;  // Initialization to please compiler.
     if (allocation.To(&target)) {
+      // Order is important here: Set the promotion limit before storing a
+      // filler for double alignment or migrating the object. Otherwise we
+      // may end up overwriting promotion queue entries when we migrate the
+      // object.
+      heap->promotion_queue()->SetNewLimit(heap->new_space()->top());
+
       if (alignment != kObjectAlignment) {
         target = EnsureDoubleAligned(heap, target, allocation_size);
       }
-
-      // Order is important here: Set the promotion limit before migrating
-      // the object. Otherwise we may end up overwriting promotion queue
-      // entries when we migrate the object.
-      heap->promotion_queue()->SetNewLimit(heap->new_space()->top());
 
       // Order is important: slot might be inside of the target if target
       // was allocated over a dead object and slot comes from the store
@@ -2843,7 +2843,7 @@ void Heap::CreateInitialObjects() {
 
   // Allocate the dictionary of intrinsic function names.
   Handle<NameDictionary> intrinsic_names =
-      NameDictionary::New(isolate(), Runtime::kNumFunctions, TENURED);
+      NameDictionary::New(isolate(), Runtime::kNumFunctions);
   Runtime::InitializeIntrinsicFunctionNames(isolate(), intrinsic_names);
   set_intrinsic_function_names(*intrinsic_names);
 
@@ -3467,14 +3467,17 @@ AllocationResult Heap::AllocateCode(int object_size, bool immovable) {
 AllocationResult Heap::CopyCode(Code* code) {
   AllocationResult allocation;
   HeapObject* new_constant_pool;
-  if (FLAG_enable_ool_constant_pool &&
-      code->constant_pool() != empty_constant_pool_array()) {
-    // Copy the constant pool, since edits to the copied code may modify
-    // the constant pool.
-    allocation = CopyConstantPoolArray(code->constant_pool());
-    if (!allocation.To(&new_constant_pool)) return allocation;
-  } else {
-    new_constant_pool = empty_constant_pool_array();
+  if (FLAG_enable_ool_constant_pool_in_heapobject) {
+    ConstantPoolArray* constant_pool =
+        reinterpret_cast<ConstantPoolArray*>(code->constant_pool());
+    if (constant_pool != empty_constant_pool_array()) {
+      // Copy the constant pool, since edits to the copied code may modify
+      // the constant pool.
+      allocation = CopyConstantPoolArray(constant_pool);
+      if (!allocation.To(&new_constant_pool)) return allocation;
+    } else {
+      new_constant_pool = empty_constant_pool_array();
+    }
   }
 
   HeapObject* result;
@@ -3489,8 +3492,10 @@ AllocationResult Heap::CopyCode(Code* code) {
   CopyBlock(new_addr, old_addr, obj_size);
   Code* new_code = Code::cast(result);
 
-  // Update the constant pool.
-  new_code->set_constant_pool(new_constant_pool);
+  if (FLAG_enable_ool_constant_pool_in_heapobject) {
+    // Update the constant pool.
+    new_code->set_constant_pool(new_constant_pool);
+  }
 
   // Relocate the copy.
   DCHECK(isolate_->code_range() == NULL || !isolate_->code_range()->valid() ||
@@ -3510,14 +3515,17 @@ AllocationResult Heap::CopyCode(Code* code, Vector<byte> reloc_info) {
     if (!allocation.To(&reloc_info_array)) return allocation;
   }
   HeapObject* new_constant_pool;
-  if (FLAG_enable_ool_constant_pool &&
-      code->constant_pool() != empty_constant_pool_array()) {
-    // Copy the constant pool, since edits to the copied code may modify
-    // the constant pool.
-    AllocationResult allocation = CopyConstantPoolArray(code->constant_pool());
-    if (!allocation.To(&new_constant_pool)) return allocation;
-  } else {
-    new_constant_pool = empty_constant_pool_array();
+  if (FLAG_enable_ool_constant_pool_in_heapobject) {
+    ConstantPoolArray* constant_pool =
+        reinterpret_cast<ConstantPoolArray*>(code->constant_pool());
+    if (constant_pool != empty_constant_pool_array()) {
+      // Copy the constant pool, since edits to the copied code may modify
+      // the constant pool.
+      AllocationResult allocation = CopyConstantPoolArray(constant_pool);
+      if (!allocation.To(&new_constant_pool)) return allocation;
+    } else {
+      new_constant_pool = empty_constant_pool_array();
+    }
   }
 
   int new_body_size = RoundUp(code->instruction_size(), kObjectAlignment);
@@ -3543,8 +3551,10 @@ AllocationResult Heap::CopyCode(Code* code, Vector<byte> reloc_info) {
   Code* new_code = Code::cast(result);
   new_code->set_relocation_info(reloc_info_array);
 
-  // Update constant pool.
-  new_code->set_constant_pool(new_constant_pool);
+  if (FLAG_enable_ool_constant_pool_in_heapobject) {
+    // Update constant pool.
+    new_code->set_constant_pool(new_constant_pool);
+  }
 
   // Copy patched rinfo.
   CopyBytes(new_code->relocation_start(), reloc_info.start(),

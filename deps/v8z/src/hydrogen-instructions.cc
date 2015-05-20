@@ -17,6 +17,8 @@
 #include "src/arm64/lithium-arm64.h"  // NOLINT
 #elif V8_TARGET_ARCH_ARM
 #include "src/arm/lithium-arm.h"  // NOLINT
+#elif V8_TARGET_ARCH_S390
+#include "src/s390/lithium-s390.h" // NOLINT
 #elif V8_TARGET_ARCH_PPC
 #include "src/ppc/lithium-ppc.h"  // NOLINT
 #elif V8_TARGET_ARCH_MIPS
@@ -25,8 +27,6 @@
 #include "src/mips64/lithium-mips64.h"  // NOLINT
 #elif V8_TARGET_ARCH_X87
 #include "src/x87/lithium-x87.h"  // NOLINT
-#elif V8_TARGET_ARCH_S390
-#include "src/s390/lithium-s390.h"  // NOLINT
 #else
 #error Unsupported target architecture.
 #endif
@@ -1515,17 +1515,8 @@ HInstruction* HForceRepresentation::New(Zone* zone, HValue* context,
        HValue* value, Representation representation) {
   if (FLAG_fold_constants && value->IsConstant()) {
     HConstant* c = HConstant::cast(value);
-    if (c->HasNumberValue()) {
-      double double_res = c->DoubleValue();
-      if (representation.IsDouble()) {
-        return HConstant::New(zone, context, double_res);
-
-      } else if (representation.CanContainDouble(double_res)) {
-        return HConstant::New(zone, context,
-                              static_cast<int32_t>(double_res),
-                              representation);
-      }
-    }
+    c = c->CopyToRepresentation(representation, zone);
+    if (c != NULL) return c;
   }
   return new(zone) HForceRepresentation(value, representation);
 }
