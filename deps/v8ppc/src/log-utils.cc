@@ -58,6 +58,7 @@ void Log::Initialize(const char* log_file_name) {
                Version::GetMinor(), Version::GetBuild(), Version::GetPatch(),
                Version::IsCandidate());
     msg.WriteToLogFile();
+  }
 }
 
 
