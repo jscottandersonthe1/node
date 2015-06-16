@@ -479,6 +479,8 @@ CPU::CPU() : stepping_(0),
   has_fpu_ = HasListItem(cpu_model, "FPU");
   delete[] cpu_model;
 
+#elif V8_HOST_ARCH_ARM64
+
   CPUInfo cpu_info;
 
   // Extract implementor from the "CPU implementer" field.
@@ -577,9 +579,7 @@ CPU::CPU() : stepping_(0),
   }
 #endif  // V8_OS_AIX
 #endif  // !USE_SIMULATOR
-#elif V8_HOST_ARCH_S390
-  // TODO(joransiu): Port the AUXV/STFLE checks here.
-#endif  // V8_HOST_ARCH_S390
+#endif  // V8_HOST_ARCH_PPC
 }
 
 } }  // namespace v8::base

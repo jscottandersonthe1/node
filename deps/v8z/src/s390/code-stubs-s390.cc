@@ -2597,7 +2597,7 @@ void RegExpExecStub::Generate(MacroAssembler* masm) {
 
   __ la(fp, MemOperand(sp, 13 * kPointerSize));
 
-  // r2: result
+  // r2: result (int32)
   // subject: subject string -- needed to reload
   __ LoadP(subject, MemOperand(fp, kSubjectOffset));
 
@@ -2605,14 +2605,14 @@ void RegExpExecStub::Generate(MacroAssembler* masm) {
   // last_match_info_elements: Last match info elements (callee saved)
   // Check the result.
   Label success;
-  __ CmpP(r2, Operand(1));
+  __ Cmp32(r2, Operand(1));
   // We expect exactly one result since we force the called regexp to behave
   // as non-global.
   __ beq(&success);
   Label failure;
-  __ CmpP(r2, Operand(NativeRegExpMacroAssembler::FAILURE));
+  __ Cmp32(r2, Operand(NativeRegExpMacroAssembler::FAILURE));
   __ beq(&failure);
-  __ CmpP(r2, Operand(NativeRegExpMacroAssembler::EXCEPTION));
+  __ Cmp32(r2, Operand(NativeRegExpMacroAssembler::EXCEPTION));
   // If not exception it can only be retry. Handle that in the runtime system.
   __ bne(&runtime);
   // Result must now be exception. If there is no pending exception already a
@@ -4228,10 +4228,19 @@ void DirectCEntryStub::GenerateCall(MacroAssembler* masm,
   __ Move(ip, target);
 #endif
 
+#if defined(USE_SIMULATOR)
+  Label return_label;
+  __ larl(r14, &return_label);
+  __ StoreP(r14, MemOperand(sp, kStackFrameRASlot * kPointerSize));
+#endif
+
   intptr_t code =
       reinterpret_cast<intptr_t>(GetCode().location());
   __ mov(r1, Operand(code, RelocInfo::CODE_TARGET));
   __ Call(r1);  // Call the stub.
+#if defined(USE_SIMULATOR)
+  __ bind(&return_label);
+#endif
 }
 
 
@@ -4797,9 +4806,12 @@ void ProfileEntryHookStub::Generate(MacroAssembler* masm) {
 #if V8_TARGET_ARCH_S390X
   const int32_t kReturnAddressDistanceFromFunctionStart =
       Assembler::kCallTargetAddressOffset + 18;  // LAY + STG * 2
-#else
+#elif V8_HOST_ARCH_S390
   const int32_t kReturnAddressDistanceFromFunctionStart =
       Assembler::kCallTargetAddressOffset + 18;  // NILH + LAY + ST * 2
+#else
+  const int32_t kReturnAddressDistanceFromFunctionStart =
+      Assembler::kCallTargetAddressOffset + 14;  // LAY + ST * 2
 #endif
 
   // This should contain all kJSCallerSaved registers.
@@ -4842,6 +4854,7 @@ void ProfileEntryHookStub::Generate(MacroAssembler* masm) {
   __ LoadP(ip, MemOperand(ip, 0));
   // ip already set.
 #endif
+#endif
 
   // zLinux ABI requires caller's frame to have sufficient space for callee
   // preserved regsiter save area.
@@ -4850,7 +4863,7 @@ void ProfileEntryHookStub::Generate(MacroAssembler* masm) {
                           kNumRequiredStackFrameSlots * kPointerSize));
   __ lay(sp, MemOperand(sp, -kCalleeRegisterSaveAreaSize -
                         kNumRequiredStackFrameSlots * kPointerSize));
-#else
+#if defined(USE_SIMULATOR)
   // Under the simulator we need to indirect the entry hook through a
   // trampoline function at a known address.
   // It additionally takes an isolate as a third parameter
@@ -4863,12 +4876,10 @@ void ProfileEntryHookStub::Generate(MacroAssembler* masm) {
 #endif
   __ Call(ip);
 
-#if !defined(USE_SIMULATOR)
   // zLinux ABI requires caller's frame to have sufficient space for callee
   // preserved regsiter save area.
   __ la(sp, MemOperand(sp, kCalleeRegisterSaveAreaSize +
                        kNumRequiredStackFrameSlots * kPointerSize));
-#endif
 
   // Restore the stack pointer if needed.
   if (frame_alignment > kPointerSize) {

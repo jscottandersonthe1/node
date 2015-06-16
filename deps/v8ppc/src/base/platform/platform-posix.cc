@@ -299,9 +299,8 @@ size_t OS::AllocateAlignment() {
 }
 
 
-void OS::Sleep(int milliseconds) {
-  useconds_t ms = static_cast<useconds_t>(milliseconds);
-  usleep(1000 * ms);
+void OS::Sleep(TimeDelta interval) {
+  usleep(static_cast<useconds_t>(interval.InMicroseconds()));
 }
 
 
@@ -653,7 +652,7 @@ void Thread::Join() {
 
 void Thread::YieldCPU() {
 #if V8_TARGET_ARCH_PPC && !V8_OS_AIX
-  OS::Sleep(0);
+  OS::Sleep(base::TimeDelta::FromMilliseconds(0));
 #else
   int result = sched_yield();
   DCHECK_EQ(0, result);

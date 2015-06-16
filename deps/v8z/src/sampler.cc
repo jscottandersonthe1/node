@@ -257,6 +257,7 @@ class SimulatorHelper {
     state->fp = reinterpret_cast<Address>(simulator_->get_register(
         Simulator::fp));
 #elif V8_TARGET_ARCH_MIPS64
+>>>>>>> v8ppc/3.28-ppc
     state->pc = reinterpret_cast<Address>(simulator_->get_pc());
     state->sp = reinterpret_cast<Address>(simulator_->get_register(
         Simulator::sp));
@@ -585,7 +586,7 @@ class SamplerThread : public base::Thread {
           sampler->DoSample();
         }
       }
-      base::OS::Sleep(interval_);
+      base::OS::Sleep(base::TimeDelta::FromMilliseconds(interval_));
     }
   }
 

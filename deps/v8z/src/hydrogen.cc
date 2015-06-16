@@ -50,6 +50,8 @@
 #include "src/arm64/lithium-codegen-arm64.h"  // NOLINT
 #elif V8_TARGET_ARCH_ARM
 #include "src/arm/lithium-codegen-arm.h"  // NOLINT
+#elif V8_TARGET_ARCH_S390
+#include "src/s390/lithium-codegen-s390.h" // NOLINT
 #elif V8_TARGET_ARCH_PPC
 #include "src/ppc/lithium-codegen-ppc.h"  // NOLINT
 #elif V8_TARGET_ARCH_MIPS
@@ -58,8 +60,6 @@
 #include "src/mips64/lithium-codegen-mips64.h"  // NOLINT
 #elif V8_TARGET_ARCH_X87
 #include "src/x87/lithium-codegen-x87.h"  // NOLINT
-#elif V8_TARGET_ARCH_S390
-#include "src/s390/lithium-codegen-s390.h"  // NOLINT
 #else
 #error Unsupported target architecture.
 #endif
@@ -8807,6 +8807,12 @@ HValue* HOptimizedGraphBuilder::BuildArrayIndexOf(HValue* receiver,
 
   Push(graph()->GetConstantMinus1());
   if (IsFastDoubleElementsKind(kind) || IsFastSmiElementsKind(kind)) {
+    // Make sure that we can actually compare numbers correctly below, see
+    // https://code.google.com/p/chromium/issues/detail?id=407946 for details.
+    search_element = AddUncasted<HForceRepresentation>(
+        search_element, IsFastSmiElementsKind(kind) ? Representation::Smi()
+                                                    : Representation::Double());
+
     LoopBuilder loop(this, context(), direction);
     {
       HValue* index = loop.BeginBody(initial, terminating, token);
@@ -8814,12 +8820,8 @@ HValue* HOptimizedGraphBuilder::BuildArrayIndexOf(HValue* receiver,
           elements, index, static_cast<HValue*>(NULL),
           kind, ALLOW_RETURN_HOLE);
       IfBuilder if_issame(this);
-      if (IsFastDoubleElementsKind(kind)) {
-        if_issame.If<HCompareNumericAndBranch>(
-            element, search_element, Token::EQ_STRICT);
-      } else {
-        if_issame.If<HCompareObjectEqAndBranch>(element, search_element);
-      }
+      if_issame.If<HCompareNumericAndBranch>(element, search_element,
+                                             Token::EQ_STRICT);
       if_issame.Then();
       {
         Drop(1);

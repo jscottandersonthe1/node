@@ -48,8 +48,6 @@ function TestArrayPrototype() {
   assertHasOwnProperty(Array.prototype, 'values', DONT_ENUM);
   assertHasOwnProperty(Array.prototype, 'keys', DONT_ENUM);
   assertHasOwnProperty(Array.prototype, Symbol.iterator, DONT_ENUM);
-
-  assertEquals(Array.prototype.values, Array.prototype[Symbol.iterator]);
 }
 TestArrayPrototype();
 
@@ -242,7 +240,7 @@ TestForArrayValues();
 
 function TestNonOwnSlots() {
   var array = [0];
-  var iterator = array.values();
+  var iterator = array[Symbol.iterator]();
   var object = {__proto__: iterator};
 
   assertThrows(function() {

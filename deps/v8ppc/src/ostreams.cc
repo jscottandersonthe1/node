@@ -163,17 +163,15 @@ OFStream& OFStream::flush() {
   return *this;
 }
 
-
 OStream& operator<<(OStream& os, const AsReversiblyEscapedUC16& c) {
   char buf[10];
   const char* format =
-      (std::isprint(c.value) || std::isspace(c.value)) && c.value != '\\'
-          ? "%c"
-          : (c.value <= 0xff) ? "\\x%02x" : "\\u%04x";
+       (std::isprint(c.value) || std::isspace(c.value)) && c.value != '\\'
+           ? "%c"
+           : (c.value <= 0xff) ? "\\x%02x" : "\\u%04x";
   snprintf(buf, sizeof(buf), format, c.value);
   return os << buf;
 }
-
 
 OStream& operator<<(OStream& os, const AsUC16& c) {
   char buf[10];

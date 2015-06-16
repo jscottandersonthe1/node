@@ -539,14 +539,14 @@ class RuntimeCallHelper {
 #include "src/arm64/code-stubs-arm64.h"
 #elif V8_TARGET_ARCH_ARM
 #include "src/arm/code-stubs-arm.h"
+#elif V8_TARGET_ARCH_S390
+#include "src/s390/code-stubs-s390.h"
 #elif V8_TARGET_ARCH_PPC
 #include "src/ppc/code-stubs-ppc.h"
 #elif V8_TARGET_ARCH_MIPS
 #include "src/mips/code-stubs-mips.h"
 #elif V8_TARGET_ARCH_MIPS64
 #include "src/mips64/code-stubs-mips64.h"
-#elif V8_TARGET_ARCH_S390
-#include "src/s390/code-stubs-s390.h"
 #elif V8_TARGET_ARCH_X87
 #include "src/x87/code-stubs-x87.h"
 #else

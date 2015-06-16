@@ -90,9 +90,12 @@ void Deoptimizer::FillInputFrame(Address tos, JavaScriptFrame* frame) {
   // Set the register values. The values are not important as there are no
   // callee saved registers in JavaScript frames, so all registers are
   // spilled. Registers fp and sp are set to the correct values though.
+  // We ensure the values are Smis to avoid confusing the garbage
+  // collector in the event that any values are retreived and stored
+  // elsewhere.
 
   for (int i = 0; i < Register::kNumRegisters; i++) {
-    input_->SetRegister(i, i * 4);
+    input_->SetRegister(i, reinterpret_cast<intptr_t>(Smi::FromInt(i)));
   }
   input_->SetRegister(sp.code(), reinterpret_cast<intptr_t>(frame->sp()));
   input_->SetRegister(fp.code(), reinterpret_cast<intptr_t>(frame->fp()));
@@ -349,13 +352,8 @@ void FrameDescription::SetCallerFp(unsigned offset, intptr_t value) {
 
 
 void FrameDescription::SetCallerConstantPool(unsigned offset, intptr_t value) {
-#if V8_OOL_CONSTANT_POOL
   DCHECK(FLAG_enable_ool_constant_pool);
   SetFrameSlot(offset, value);
-#else
-  // No out-of-line constant pool support.
-  UNREACHABLE();
-#endif
 }
 
 
