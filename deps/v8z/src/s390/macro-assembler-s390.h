@@ -601,8 +601,8 @@ class MacroAssembler: public Assembler {
     StoreP(src1, MemOperand(sp, kPointerSize * 4));
     StoreP(src2, MemOperand(sp, kPointerSize * 3));
     StoreP(src3, MemOperand(sp, kPointerSize * 2));
-    StoreP(src3, MemOperand(sp, kPointerSize));
-    StoreP(src4, MemOperand(sp, 0));
+    StoreP(src4, MemOperand(sp, kPointerSize));
+    StoreP(src5, MemOperand(sp, 0));
   }
 
   void Pop(Register dst) { pop(dst); }
@@ -1875,9 +1875,20 @@ class MacroAssembler: public Assembler {
 
   template<typename Field>
   void DecodeFieldToSmi(Register dst, Register src) {
-    // TODO(joransiu): Optimize into single instruction
-    DecodeField<Field>(dst, src);
-    SmiTag(dst);
+    if (CpuFeatures::IsSupported(GENERAL_INSTR_EXT)) {
+      int rangeStart = Field::kShift + Field::kSize - 1;
+      int rangeEnd = Field::kShift;
+      // Convert to shift left.
+      int shiftAmount = (64 - rangeEnd + kSmiShift) % 64;
+      // End is always LSB after shifting.
+      int endBit = (63 - kSmiShift) % 64;
+      int startBit = (63 - rangeStart + rangeEnd - kSmiShift) % 64;
+      risbg(dst, src, Operand(startBit), Operand(endBit), Operand(shiftAmount),
+            true);
+    } else {
+      DecodeField<Field>(dst, src);
+      SmiTag(dst);
+    }
   }
 
   template<typename Field>
