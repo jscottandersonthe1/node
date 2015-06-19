@@ -418,7 +418,10 @@ def host_arch_cc():
   for i in matchup:
     if i in k and k[i] != '0':
       rtn = matchup[i]
-      break
+      if (rtn == 's390'):
+        continue
+      else:
+        break
 
   return rtn
 
