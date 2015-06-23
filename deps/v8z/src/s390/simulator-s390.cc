@@ -1299,14 +1299,11 @@ void Simulator::SoftwareInterrupt(Instruction* instr) {
          (redirection->type() == ExternalReference::BUILTIN_COMPARE_CALL) ||
          (redirection->type() == ExternalReference::BUILTIN_FP_CALL) ||
          (redirection->type() == ExternalReference::BUILTIN_FP_INT_CALL);
-      // This is dodgy but it works because the C entry stubs are never moved.
-      // See comment in codegen-arm.cc and bug 1242173.
-      int64_t saved_lr = get_register(r14);
-#if (!V8_TARGET_ARCH_S390X && V8_HOST_ARCH_S390)
-      // On zLinux-31, the saved_lr might be tagged with a high bit of 1.
-      // Cleanse it before proceeding with simulation.
-      saved_lr &= 0x7FFFFFFF;
-#endif
+
+      // Place the return address on the stack, making the call GC safe.
+      *reinterpret_cast<intptr_t*>(get_register(sp)
+          + kStackFrameRASlot * kPointerSize) = get_register(r14);
+
       intptr_t external =
           reinterpret_cast<intptr_t>(redirection->external_function());
       if (fp_call) {
@@ -1540,6 +1537,13 @@ void Simulator::SoftwareInterrupt(Instruction* instr) {
         }
 #endif
       }
+      int64_t saved_lr = *reinterpret_cast<intptr_t*>(get_register(sp)
+                             + kStackFrameRASlot * kPointerSize);
+#if (!V8_TARGET_ARCH_S390X && V8_HOST_ARCH_S390)
+      // On zLinux-31, the saved_lr might be tagged with a high bit of 1.
+      // Cleanse it before proceeding with simulation.
+      saved_lr &= 0x7FFFFFFF;
+#endif
       set_pc(saved_lr);
       break;
     }
@@ -1884,11 +1888,16 @@ bool Simulator::DecodeTwoByte(Instruction* instr) {
       int r1 = rrinst->R1Value();
       int r2 = rrinst->R2Value();
       int32_t r2_val = get_low_register<int32_t>(r2);
+      int32_t original_r2_val = r2_val;
       r2_val = ~r2_val;
       r2_val = r2_val+1;
       set_low_register(r1, r2_val);
       SetS390ConditionCode<int32_t>(r2_val, 0);
-      if (r2_val == -2147483647 - 1) {  // bypass gcc complain
+      // Checks for overflow where r2_val = -2147483648.
+      // Cannot do int comparison due to GCC 4.8 bug on x86.
+      // Detect INT_MIN alternatively, as it is the only value where both
+      // original and result are negative due to overflow.
+      if (r2_val < 0 && original_r2_val < 0) {
         SetS390OverflowCode(true);
       }
       break;
@@ -1922,6 +1931,29 @@ bool Simulator::DecodeFourByte(Instruction* instr) {
       int r2 = rreInst->R2Value();
       int32_t r2_val = get_low_register<int32_t>(r2);
       set_register(r1, static_cast<uint64_t>(r2_val));
+      break;
+    }
+    case BC: {
+      RXbInstruction * rxbinst = reinterpret_cast<RXbInstruction*>(instr);
+      int m1 = rxbinst->M1Value();
+      int x2 = rxbinst->X2Value();
+      int b2 = rxbinst->B2Value();
+      intptr_t d2_val = rxbinst->D2Value();
+
+      int64_t x2_val = (x2 == 0) ? 0 : get_register(x2);
+      int64_t b2_val = (b2 == 0) ? 0 : get_register(b2);
+      intptr_t mem_addr = x2_val + b2_val + d2_val;
+
+      if (TestConditionCode(Condition(m1))) {
+#if (!V8_TARGET_ARCH_S390X && V8_HOST_ARCH_S390)
+        // On 31-bit, the top most bit may be 0 or 1, but is ignored by the
+        // hardware.  Cleanse the top bit before jumping to it, unless it's one
+        // of the special PCs
+        if (mem_addr != bad_lr && mem_addr != end_sim_pc)
+          mem_addr &= 0x7FFFFFFF;
+#endif
+        set_pc(mem_addr);
+      }
       break;
     }
     case EX: {
@@ -3202,6 +3234,14 @@ bool Simulator::DecodeFourByteFloatingPoint(Instruction* instr) {
       UNIMPLEMENTED();
       break;
     }
+    case LDEBR: {
+      RREInstruction* rreInstr = reinterpret_cast<RREInstruction*>(instr);
+      int r1 = rreInstr->R1Value();
+      int r2 = rreInstr->R2Value();
+      float r2_val = get_float_from_d_register(r2);
+      set_d_register_from_double(r1, static_cast<double>(r2_val));
+      break;
+    }
     default: {
       UNREACHABLE();
       return false;
@@ -3702,7 +3742,7 @@ bool Simulator::DecodeSixByte(Instruction* instr) {
       int64_t b2_val = (b2 == 0) ? 0 : get_register(b2);
       int64_t x2_val = (x2 == 0) ? 0 : get_register(x2);
       intptr_t d2_val = rxyInstr->D2Value();
-      uint16_t mem_val = ReadBU(b2_val + d2_val + x2_val);
+      uint8_t mem_val = ReadBU(b2_val + d2_val + x2_val);
       if (op == LLC) {
         set_low_register(r1, static_cast<uint32_t>(mem_val));
       } else if (op == LLGC) {
@@ -3745,6 +3785,10 @@ bool Simulator::DecodeSixByte(Instruction* instr) {
       bool zero_remaining = (0 != (rieInstr->I4Value() & 0x80));
 
       uint64_t src_val = get_register(r2);
+
+      // assume end_bit is always greater than or equal to start_bit.
+      // otherwise we need to wrap around from bit 63 to bit 0
+      DCHECK(start_bit <= end_bit);
 
       // Rotate Left by Shift Amount first
       uint64_t rotated_val = (src_val << shift_amount) |
@@ -3923,12 +3967,17 @@ bool Simulator::DecodeSixByteArithmetic(Instruction *instr) {
       int64_t b2_val = (b2 == 0) ? 0 : get_register(b2);
       int32_t alu_out = get_low_register<int32_t>(r1);
       int32_t mem_val = ReadW(b2_val + x2_val + d2, instr);
+      bool isOF = false;
       if (op == AY) {
+        isOF = CheckOverflowForIntAdd(alu_out, mem_val);
         alu_out += mem_val;
         SetS390ConditionCode<int32_t>(alu_out, 0);
+        SetS390OverflowCode(isOF);
       } else if (op == SY) {
+        isOF = CheckOverflowForIntSub(alu_out, mem_val);
         alu_out -= mem_val;
         SetS390ConditionCode<int32_t>(alu_out, 0);
+        SetS390OverflowCode(isOF);
       } else if (op == NY) {
         alu_out &= mem_val;
         SetS390BitWiseConditionCode<uint32_t>(alu_out);
@@ -4513,7 +4562,7 @@ double Simulator::CallFPReturnsDouble(byte* entry, double d0, double d1) {
 
 
 uintptr_t Simulator::PushAddress(uintptr_t address) {
-  uint64_t new_sp = get_register(sp) - sizeof(uint64_t);
+  uintptr_t new_sp = get_register(sp) - sizeof(uintptr_t);
   uintptr_t* stack_slot = reinterpret_cast<uintptr_t*>(new_sp);
   *stack_slot = address;
   set_register(sp, new_sp);
@@ -4522,7 +4571,7 @@ uintptr_t Simulator::PushAddress(uintptr_t address) {
 
 
 uintptr_t Simulator::PopAddress() {
-  uint64_t current_sp = get_register(sp);
+  uintptr_t current_sp = get_register(sp);
   uintptr_t* stack_slot = reinterpret_cast<uintptr_t*>(current_sp);
   uintptr_t address = *stack_slot;
   set_register(sp, current_sp + sizeof(uintptr_t));

@@ -227,7 +227,6 @@ struct DoubleRegister {
 #else
   static const int kNumVolatileRegisters = 14;     // d0-d15 except d4 and d6
 #endif
-  // TODO(JOHN): may not be true
   static const int kAllocatableRangeBegin  = 1;
   static const int kAllocatableRangeEnd    = 12;
   static const int kNumAllocatable =
@@ -649,7 +648,10 @@ class Assembler : public AssemblerBase {
   void bgt(Register r) { b(gt, r); }
   void bge(Register r) { b(ge, r); }
   void b(Register r)   { b(al, r); }
+  void b(Register r, Disp d) { bc(al, r0, r, d); }
+
   void jmp(Register r) { b(al, r); }
+  void jmp(Register r, Disp d) { bc(al, r0, r, d); }
   void bunordered(Register r) { b(unordered, r); }
   void bordered(Register r)   { b(ordered, r);   }
 
@@ -714,6 +716,11 @@ void name(Condition m1, Register r2)
 void name(Register r1, Register x2, Register b2, \
                  Disp d2);\
 void name(Register r1, const MemOperand& opnd)
+
+#define RX_b_FORM(name)\
+void name(Condition m1, Register x2, Register b2, \
+                 Disp d2);\
+void name(Condition m, const MemOperand& opnd)
 
 #define RI1_FORM(name)\
 void name(Register r,  const Operand& i)
@@ -908,7 +915,7 @@ RR_FORM(balr);
 RX_FORM(bas);
 RR_FORM(basr);
 RR_FORM(bassm);
-RX_FORM(bc);
+RX_b_FORM(bc);
 RX_FORM(bct);
 RXY_FORM(bctg);
 RRE_FORM(bctgr);
@@ -1807,7 +1814,7 @@ SS2_FORM(zap);
 #endif
 
 
-  static bool IsCmpRegister(Instr instr);
+  static bool IsCmpRegister(Address addr);
   static bool IsCmpImmediate(Instr instr);
   static bool IsRlwinm(Instr instr);
   static bool IsNop(SixByteInstr instr, int type = NON_MARKING_NOP);
@@ -1920,6 +1927,11 @@ SS2_FORM(zap);
                      Disp d2);
   inline void rx_form(Opcode op, DoubleRegister r1,
                       Register x2, Register b2, Disp d2);
+  inline void rx_b_form(Opcode op,
+                     Condition m1,
+                     Register x2,
+                     Register b2,
+                     Disp d2);
 
 
 // RI1 format: <insn> R1,I2

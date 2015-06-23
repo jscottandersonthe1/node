@@ -377,10 +377,12 @@ bool Assembler::Is32BitLoadIntoIP(SixByteInstr instr) {
 }
 #endif
 
-bool Assembler::IsCmpRegister(Instr instr) {
-  // @TODO Re-enable this properly
-  DCHECK(false);
-  return Instruction::S390OpcodeValue(reinterpret_cast<byte*>(&instr)) == CR;
+bool Assembler::IsCmpRegister(Address addr) {
+#if V8_TARGET_ARCH_S390X
+  return Instruction::S390OpcodeValue(addr) == CGR;
+#else
+  return Instruction::S390OpcodeValue(addr) == CR;
+#endif
 }
 
 
@@ -841,6 +843,34 @@ void Assembler::rx_form(Opcode op,
   DCHECK(is_uint8(op));
   DCHECK(is_uint12(d2));
     emit4bytes(op*B24 | r1.code()*B20 |
+             x2.code()*B16 | b2.code()*B12 | d2);
+}
+
+
+// RX_b format: <insn> M1,D2(X2,B2)
+//    +--------+----+----+----+-------------+
+//    | OpCode | M1 | X2 | B2 |     D2      |
+//    +--------+----+----+----+-------------+
+//    0        8    12   16   20           31
+#define RX_b_FORM_EMIT(name, op) \
+void Assembler::name(Condition m, const MemOperand& opnd) { \
+    name(m, opnd.getIndexRegister(), opnd.getBaseRegister(), \
+         opnd.getDisplacement());\
+}\
+void Assembler::name(Condition m1, Register x2, \
+                     Register b2, Disp d2) {\
+    rx_b_form(op, m1, x2, b2, d2);\
+}
+
+void Assembler::rx_b_form(Opcode op,
+                        Condition m1,
+                        Register x2,
+                        Register b2,
+                        Disp d2) {
+    DCHECK(is_uint8(op));
+    DCHECK(is_uint4(m1));
+    DCHECK(is_uint12(d2));
+    emit4bytes(op*B24 | m1 * B20 |
              x2.code()*B16 | b2.code()*B12 | d2);
 }
 
@@ -1780,7 +1810,7 @@ RX_FORM_EMIT(bal, BAL)
 RR_FORM_EMIT(balr, BALR)
 RX_FORM_EMIT(bas, BAS)
 RR_FORM_EMIT(bassm, BASSM)
-RX_FORM_EMIT(bc, BC)
+RX_b_FORM_EMIT(bc, BC)
 RRE_FORM_EMIT(bctgr, BCTGR)
 RR_FORM_EMIT(bctr, BCTR)
 RIL1_FORM_EMIT(brcth, BRCTH)
@@ -2477,7 +2507,7 @@ void Assembler::m(Register r1, const MemOperand& opnd) {
 
 // Multiply Logical Register-Storage (64<32)
 void Assembler::ml(Register r1, const MemOperand& opnd) {
-  rxy_form(ML, r1, opnd.rb(), opnd.rx(), opnd.offset());
+  rxy_form(ML, r1, opnd.rx(), opnd.rb(), opnd.offset());
 }
 
 
@@ -2648,7 +2678,7 @@ void Assembler::ahy(Register r1, const MemOperand& opnd) {
 
 // Subtract Halfword Register-Storage (32)
 void Assembler::shy(Register r1, const MemOperand& opnd) {
-  rxy_form(AHY, r1, opnd.rx(), opnd.rb(), opnd.offset());
+  rxy_form(SHY, r1, opnd.rx(), opnd.rb(), opnd.offset());
 }
 
 
@@ -2732,7 +2762,7 @@ void Assembler::sl(Register r1, const MemOperand& opnd) {
 
 // Subtract Logical Register-Storage (32)
 void Assembler::sly(Register r1, const MemOperand& opnd) {
-  rxy_form(SL, r1, opnd.rx(), opnd.rb(), opnd.offset());
+  rxy_form(SLY, r1, opnd.rx(), opnd.rb(), opnd.offset());
 }
 
 

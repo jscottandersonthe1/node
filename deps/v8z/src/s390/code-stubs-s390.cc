@@ -3053,9 +3053,9 @@ void CallConstructStub::Generate(MacroAssembler* masm) {
   __ LoadP(jmp_reg, FieldMemOperand(r3, JSFunction::kSharedFunctionInfoOffset));
   __ LoadP(jmp_reg, FieldMemOperand(jmp_reg,
                                   SharedFunctionInfo::kConstructStubOffset));
-  // TODO(joransiu): Fold AddP into Jump
-  __ AddP(ip, jmp_reg, Operand(Code::kHeaderSize - kHeapObjectTag));
-  __ JumpToJSEntry(ip);
+  // __ AddP(ip, jmp_reg, Operand(Code::kHeaderSize - kHeapObjectTag));
+  // __ JumpToJSEntry(ip);
+  __ b(jmp_reg, Code::kHeaderSize - kHeapObjectTag);
 
   // r2: number of arguments
   // r3: called object
@@ -4228,19 +4228,10 @@ void DirectCEntryStub::GenerateCall(MacroAssembler* masm,
   __ Move(ip, target);
 #endif
 
-#if defined(USE_SIMULATOR)
-  Label return_label;
-  __ larl(r14, &return_label);
-  __ StoreP(r14, MemOperand(sp, kStackFrameRASlot * kPointerSize));
-#endif
-
   intptr_t code =
       reinterpret_cast<intptr_t>(GetCode().location());
   __ mov(r1, Operand(code, RelocInfo::CODE_TARGET));
   __ Call(r1);  // Call the stub.
-#if defined(USE_SIMULATOR)
-  __ bind(&return_label);
-#endif
 }
 
 

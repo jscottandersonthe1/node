@@ -1485,11 +1485,6 @@ void LCodeGen::DoFlooringDivI(LFlooringDivI* instr) {
 
   __ lr(result, r1);  // Move quotient to result register
 
-  // TODO(joransiu) : Fix sequence to Z instructions.
-  // DCHECK(0);
-//  __ divw(result, dividend, divisor, SetOE, SetRC);
-
-
   Label done;
   Register scratch = scratch0();
   // If both operands have the same sign then we are done.
@@ -2627,9 +2622,13 @@ void LCodeGen::DoCmpHoleAndBranch(LCmpHoleAndBranch* instr) {
   EmitFalseBranch(instr, ordered);
 
   Register scratch = scratch0();
-  // TODO(joransiu): Use double to int instruction instead.
+#if V8_TARGET_ARCH_S390X
+  __ lgdr(scratch, input_reg);
+  __ ExtractBitRange(scratch, scratch, 63, 32);
+#else
   __ stdy(input_reg, MemOperand(sp, -kDoubleSize));
   __ LoadlW(scratch, MemOperand(sp, -kDoubleSize + Register::kExponentOffset));
+#endif
   __ CmpP(scratch, Operand(kHoleNanUpper32));
   EmitBranch(instr, eq);
 }
@@ -2644,11 +2643,8 @@ void LCodeGen::DoCompareMinusZeroAndBranch(LCompareMinusZeroAndBranch* instr) {
     DoubleRegister value = ToDoubleRegister(instr->value());
     __ cdbr(value, kDoubleRegZero);
     EmitFalseBranch(instr, ne);
-    // TODO(joransiu): Use doubleToInt instruction.
-    __ stdy(value, MemOperand(sp, -kDoubleSize));
-    __ LoadlW(scratch,
-              MemOperand(sp, -kDoubleSize + Register::kExponentOffset));
-    __ Cmp32(scratch, Operand::Zero());
+    __ lgdr(scratch, value);
+    __ ltgr(scratch, scratch);
     EmitBranch(instr, lt);
   } else {
     Register value = ToRegister(instr->value());
@@ -4020,8 +4016,7 @@ void LCodeGen::EmitMathAbs(LMathAbs* instr) {
   __ CmpP(input, Operand::Zero());
   __ Move(result, input);
   __ bge(&done, Label::kNear);
-  __ LoadComplementRR(result, result/*, SetOE, SetRC*/);
-  // TODO(john): might be a problem removing SetOE here.
+  __ LoadComplementRR(result, result);
   // Deoptimize on overflow.
   DeoptimizeIf(overflow, instr->environment(), cr0);
   __ bind(&done);
@@ -4130,11 +4125,8 @@ void LCodeGen::DoMathRound(LMathRound* instr) {
   // If the input is +0.5, the result is 1.
   __ bgt(&convert, Label::kNear);  // Out of [-0.5, +0.5].
   if (instr->hydrogen()->CheckFlag(HValue::kBailoutOnMinusZero)) {
-    // TODO(joransiu): Better Sequence here?
-    __ stdy(input, MemOperand(sp, -kDoubleSize));
-    __ LoadlW(scratch1,
-              MemOperand(sp, -kDoubleSize + Register::kExponentOffset));
-    __ Cmp32(scratch1, Operand::Zero());
+    __ lgdr(scratch1, input);
+    __ ltgr(scratch1, scratch1);
     DeoptimizeIf(lt, instr->environment());  // [-0.5, -0].
   }
   Label return_zero;
@@ -5459,11 +5451,8 @@ void LCodeGen::DoDoubleToI(LDoubleToI* instr) {
       Label done;
       __ CmpP(result_reg, Operand::Zero());
       __ bne(&done, Label::kNear);
-      // TODO(joransiu): Use move double to int.
-      __ stdy(double_input, MemOperand(sp, -kDoubleSize));
-      __ LoadlW(scratch1,
-                MemOperand(sp, -kDoubleSize + Register::kExponentOffset));
-      __ Cmp32(scratch1, Operand::Zero());
+      __ lgdr(scratch1, double_input);
+      __ ltgr(scratch1, scratch1);
       DeoptimizeIf(lt, instr->environment());
       __ bind(&done);
     }
@@ -5488,11 +5477,8 @@ void LCodeGen::DoDoubleToSmi(LDoubleToSmi* instr) {
       Label done;
       __ CmpP(result_reg, Operand::Zero());
       __ bne(&done, Label::kNear);
-      // TODO(joransiu): Use move double to int.
-      __ stdy(double_input, MemOperand(sp, -kDoubleSize));
-      __ LoadlW(scratch1,
-                MemOperand(sp, -kDoubleSize + Register::kExponentOffset));
-      __ Cmp32(scratch1, Operand::Zero());
+      __ lgdr(scratch1, double_input);
+      __ ltgr(scratch1, scratch1);
       DeoptimizeIf(lt, instr->environment());
       __ bind(&done);
     }
