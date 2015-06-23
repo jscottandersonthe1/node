@@ -51,7 +51,9 @@
 
 #include <sys/pollset.h>
 #include <ctype.h>
+#ifdef HAVE_SYS_AHAFS_EVPRODS_H
 #include <sys/ahafs_evProds.h>
+#endif
 
 #include <sys/mntctl.h>
 #include <sys/vmount.h>
@@ -389,6 +391,7 @@ void uv_loadavg(double avg[3]) {
 }
 
 
+#ifdef HAVE_SYS_AHAFS_EVPRODS_H
 static char *uv__rawname(char *cp) {
   static char rawbuf[FILENAME_MAX+1];
   char *dp = rindex(cp, '/');
@@ -438,7 +441,7 @@ static int uv__is_ahafs_mounted(void){
   const char *dev = "/aha";
   char *obj, *stub;
 
-  p = malloc(siz);
+  p = uv__malloc(siz);
   if (p == NULL)
     return -errno;
 
@@ -449,8 +452,8 @@ static int uv__is_ahafs_mounted(void){
   if (rv == 0) {
     /* buffer was not large enough, reallocate to correct size */
     siz = *(int*)p;
-    free(p);
-    p = malloc(siz);
+    uv__free(p);
+    p = uv__malloc(siz);
     if (p == NULL)
       return -errno;
     rv = mntctl(MCTL_QUERY, siz, (char*)p);
@@ -464,7 +467,7 @@ static int uv__is_ahafs_mounted(void){
     stub = vmt2dataptr(vmt, VMT_STUB);      /* mount point */
 
     if (EQ(obj, dev) || EQ(uv__rawname(obj), dev) || EQ(stub, dev)) {
-      free(p);  /* Found a match */
+      uv__free(p);  /* Found a match */
       return 0;
     }
     vmt = (struct vmount *) ((char *) vmt + vmt->vmt_length);
@@ -669,7 +672,7 @@ static int uv__parse_data(char *buf, int *events, uv_fs_event_t* handle) {
 
         /* Scan out the name of the file that triggered the event*/
         if (sscanf(p, "BEGIN_EVPROD_INFO\n%sEND_EVPROD_INFO", filename) == 1) {
-          handle->dir_filename = strdup((const char*)&filename);
+          handle->dir_filename = uv__strdup((const char*)&filename);
         } else
           return -1;
         }
@@ -747,11 +750,16 @@ static void uv__ahafs_event(uv_loop_t* loop, uv__io_t* event_watch, unsigned int
   else /* Call the actual JavaScript callback function */
     handle->cb(handle, (const char*)&fname, events, 0);
 }
+#endif
 
 
 int uv_fs_event_init(uv_loop_t* loop, uv_fs_event_t* handle) {
+#ifdef HAVE_SYS_AHAFS_EVPRODS_H
   uv__handle_init(loop, (uv_handle_t*)handle, UV_FS_EVENT);
   return 0;
+#else
+  return -ENOSYS;
+#endif
 }
 
 
@@ -759,6 +767,7 @@ int uv_fs_event_start(uv_fs_event_t* handle,
                       uv_fs_event_cb cb,
                       const char* filename,
                       unsigned int flags) {
+#ifdef HAVE_SYS_AHAFS_EVPRODS_H
   int  fd, rc, i = 0, res = 0;
   char cwd[PATH_MAX];
   char absolute_path[PATH_MAX];
@@ -819,17 +828,20 @@ int uv_fs_event_start(uv_fs_event_t* handle,
   /* Setup/Initialize all the libuv routines */
   uv__handle_start(handle);
   uv__io_init(&handle->event_watcher, uv__ahafs_event, fd);
-  handle->path = strdup((const char*)&absolute_path);
+  handle->path = uv__strdup((const char*)&absolute_path);
   handle->cb = cb;
 
   uv__io_start(handle->loop, &handle->event_watcher, UV__POLLIN);
 
   return 0;
+#else
+  return -ENOSYS;
+#endif
 }
 
 
 int uv_fs_event_stop(uv_fs_event_t* handle) {
-
+#ifdef HAVE_SYS_AHAFS_EVPRODS_H
   if (!uv__is_active(handle))
     return 0;
 
@@ -837,21 +849,28 @@ int uv_fs_event_stop(uv_fs_event_t* handle) {
   uv__handle_stop(handle);
 
   if (uv__path_is_a_directory(handle->path) == 0) {
-    free(handle->dir_filename);
+    uv__free(handle->dir_filename);
     handle->dir_filename = NULL;
   }
 
-  free(handle->path);
+  uv__free(handle->path);
   handle->path = NULL;
   uv__close(handle->event_watcher.fd);
   handle->event_watcher.fd = -1;
 
   return 0;
+#else
+  return -ENOSYS;
+#endif
 }
 
 
 void uv__fs_event_close(uv_fs_event_t* handle) {
+#ifdef HAVE_SYS_AHAFS_EVPRODS_H
   uv_fs_event_stop(handle);
+#else
+  UNREACHABLE();
+#endif
 }
 
 
@@ -940,7 +959,7 @@ int uv_cpu_info(uv_cpu_info_t** cpu_infos, int* count) {
     return -ENOSYS;
   }
 
-  ps_cpus = (perfstat_cpu_t*) malloc(ncpus * sizeof(perfstat_cpu_t));
+  ps_cpus = (perfstat_cpu_t*) uv__malloc(ncpus * sizeof(perfstat_cpu_t));
   if (!ps_cpus) {
     return -ENOMEM;
   }
@@ -948,13 +967,13 @@ int uv_cpu_info(uv_cpu_info_t** cpu_infos, int* count) {
   strcpy(cpu_id.name, FIRST_CPU);
   result = perfstat_cpu(&cpu_id, ps_cpus, sizeof(perfstat_cpu_t), ncpus);
   if (result == -1) {
-    free(ps_cpus);
+    uv__free(ps_cpus);
     return -ENOSYS;
   }
 
-  *cpu_infos = (uv_cpu_info_t*) malloc(ncpus * sizeof(uv_cpu_info_t));
+  *cpu_infos = (uv_cpu_info_t*) uv__malloc(ncpus * sizeof(uv_cpu_info_t));
   if (!*cpu_infos) {
-    free(ps_cpus);
+    uv__free(ps_cpus);
     return -ENOMEM;
   }
 
@@ -963,7 +982,7 @@ int uv_cpu_info(uv_cpu_info_t** cpu_infos, int* count) {
   cpu_info = *cpu_infos;
   while (idx < ncpus) {
     cpu_info->speed = (int)(ps_total.processorHZ / 1000000);
-    cpu_info->model = strdup(ps_total.description);
+    cpu_info->model = uv__strdup(ps_total.description);
     cpu_info->cpu_times.user = ps_cpus[idx].user;
     cpu_info->cpu_times.sys = ps_cpus[idx].sys;
     cpu_info->cpu_times.idle = ps_cpus[idx].idle;
@@ -973,7 +992,7 @@ int uv_cpu_info(uv_cpu_info_t** cpu_infos, int* count) {
     idx++;
   }
 
-  free(ps_cpus);
+  uv__free(ps_cpus);
   return 0;
 }
 
@@ -982,10 +1001,10 @@ void uv_free_cpu_info(uv_cpu_info_t* cpu_infos, int count) {
   int i;
 
   for (i = 0; i < count; ++i) {
-    free(cpu_infos[i].model);
+    uv__free(cpu_infos[i].model);
   }
 
-  free(cpu_infos);
+  uv__free(cpu_infos);
 }
 
 
@@ -1007,7 +1026,7 @@ int uv_interface_addresses(uv_interface_address_t** addresses,
     return -errno;
   }
 
-  ifc.ifc_req = (struct ifreq*)malloc(size);
+  ifc.ifc_req = (struct ifreq*)uv__malloc(size);
   ifc.ifc_len = size;
   if (ioctl(sockfd, SIOCGIFCONF, &ifc) == -1) {
     SAVE_ERRNO(uv__close(sockfd));
@@ -1041,7 +1060,7 @@ int uv_interface_addresses(uv_interface_address_t** addresses,
 
   /* Alloc the return interface structs */
   *addresses = (uv_interface_address_t*)
-    malloc(*count * sizeof(uv_interface_address_t));
+    uv__malloc(*count * sizeof(uv_interface_address_t));
   if (!(*addresses)) {
     uv__close(sockfd);
     return -ENOMEM;
@@ -1069,7 +1088,7 @@ int uv_interface_addresses(uv_interface_address_t** addresses,
 
     /* All conditions above must match count loop */
 
-    address->name = strdup(p->ifr_name);
+    address->name = uv__strdup(p->ifr_name);
 
     if (p->ifr_addr.sa_family == AF_INET6) {
       address->address.address6 = *((struct sockaddr_in6*) &p->ifr_addr);
@@ -1096,10 +1115,10 @@ void uv_free_interface_addresses(uv_interface_address_t* addresses,
   int i;
 
   for (i = 0; i < count; ++i) {
-    free(addresses[i].name);
+    uv__free(addresses[i].name);
   }
 
-  free(addresses);
+  uv__free(addresses);
 }
 
 void uv__platform_invalidate_fd(uv_loop_t* loop, int fd) {
