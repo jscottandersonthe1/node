@@ -5,6 +5,7 @@ PYTHON ?= python
 NINJA ?= ninja
 DESTDIR ?=
 SIGN ?=
+FLAKY_TESTS ?= run
 
 NODE ?= ./node
 
@@ -101,6 +102,9 @@ test-all-http1: all
 test-all-valgrind: all
 	$(PYTHON) tools/test.py --mode=debug,release --valgrind
 
+test-ci:
+	$(PYTHON) tools/test.py -p tap --logfile test.tap --mode=release --arch=$(DESTCPU) --flaky-tests=$(FLAKY_TESTS) simple message internet
+
 test-release: all
 	$(PYTHON) tools/test.py --mode=release
 
@@ -194,6 +198,11 @@ docopen: out/doc/api/all.html
 
 docclean:
 	-rm -rf out/doc
+
+run-ci:
+	$(PYTHON) ./configure --without-snapshot $(CONFIG_FLAGS)
+	$(MAKE)
+	$(MAKE) test-ci
 
 RAWVER=$(shell $(PYTHON) tools/getnodeversion.py)
 VERSION=v$(RAWVER)
@@ -397,4 +406,8 @@ cpplint:
 
 lint: jslint cpplint
 
-.PHONY: lint cpplint jslint bench clean docopen docclean doc dist distclean check uninstall install install-includes install-bin all staticlib dynamiclib test test-all website-upload pkg blog blogclean tar binary release-only bench-http-simple bench-idle bench-all bench bench-misc bench-array bench-buffer bench-net bench-http bench-fs bench-tls
+.PHONY: lint cpplint jslint bench clean docopen docclean doc dist distclean \
+	check uninstall install install-includes install-bin all staticlib \
+	dynamiclib test test-all website-upload pkg blog blogclean tar binary \
+	release-only bench-http-simple bench-idle bench-all bench bench-misc \
+	bench-array bench-buffer bench-net bench-http bench-fs bench-tls run-ci

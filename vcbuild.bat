@@ -35,6 +35,7 @@ set noetw_msi_arg=
 set noperfctr=
 set noperfctr_arg=
 set noperfctr_msi_arg=
+set flaky_tests_arg=
 
 :next-arg
 if "%1"=="" goto args-done
@@ -58,11 +59,13 @@ if /i "%1"=="test-simple"   set test=test-simple&goto arg-ok
 if /i "%1"=="test-message"  set test=test-message&goto arg-ok
 if /i "%1"=="test-gc"       set test=test-gc&set buildnodeweak=1&goto arg-ok
 if /i "%1"=="test-all"      set test=test-all&set buildnodeweak=1&goto arg-ok
-if /i "%1"=="test"          set test=test&goto arg-ok
+if /i "%1"=="test-ci"       set test=test-ci&set nosnapshot=1&goto arg-ok
+if /i "%1"=="test"          set test=test&set jslint=1&goto arg-ok
 if /i "%1"=="msi"           set msi=1&set licensertf=1&goto arg-ok
 if /i "%1"=="upload"        set upload=1&goto arg-ok
 if /i "%1"=="jslint"        set jslint=1&goto arg-ok
 if /i "%1"=="build-release" set nosnapshot=1&set config=Release&set msi=1&set licensertf=1&goto arg-ok
+if /i "%1"=="ignore-flaky"  set flaky_tests_arg=--flaky-tests=dontcare&goto arg-ok
 
 echo Warning: ignoring invalid command line option `%1`.
 
@@ -73,7 +76,6 @@ goto next-arg
 
 :args-done
 if defined upload goto upload
-if defined jslint goto jslint
 
 if "%config%"=="Debug" set debug_arg=--debug
 if "%target_arch%"=="x64" set msiplatform=x64
@@ -166,12 +168,15 @@ if errorlevel 1 echo Failed to sign msi&goto exit
 
 :run
 @rem Run tests if requested.
-if "%test%"=="" goto exit
+if "%test%"=="" goto jslint
 
 if "%config%"=="Debug" set test_args=--mode=debug
 if "%config%"=="Release" set test_args=--mode=release
 
+set test_args=%test_args% --arch=%target_arch% 
+
 if "%test%"=="test" set test_args=%test_args% simple message
+if "%test%"=="test-ci" set test_args=%test_args% -p tap --logfile test.tap %flaky_tests_arg% simple message internet 
 if "%test%"=="test-internet" set test_args=%test_args% internet
 if "%test%"=="test-pummel" set test_args=%test_args% pummel
 if "%test%"=="test-simple" set test_args=%test_args% simple
@@ -193,8 +198,7 @@ goto exit
 :run-tests
 echo running 'python tools/test.py %test_args%'
 python tools/test.py %test_args%
-if "%test%"=="test" goto jslint
-goto exit
+goto jslint
 
 :create-msvs-files-failed
 echo Failed to create vc project files. 
@@ -212,6 +216,7 @@ scp Release\node.pdb node@nodejs.org:~/web/nodejs.org/dist/v%NODE_VERSION%/node.
 goto exit
 
 :jslint
+if not defined jslint goto exit
 echo running jslint
 set PYTHONPATH=tools/closure_linter/
 python tools/closure_linter/closure_linter/gjslint.py --unix_mode --strict --nojsdoc -r lib/ -r src/ --exclude_files lib/punycode.js
