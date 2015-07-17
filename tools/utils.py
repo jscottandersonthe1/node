@@ -87,6 +87,8 @@ def GuessArchitecture():
     return 'ia32'
   elif id.startswith('ppc'):
     return 'ppc'
+  elif id == 's390x':
+    return 's390'
   else: 
     id = platform.processor()
     if id == 'powerpc':
