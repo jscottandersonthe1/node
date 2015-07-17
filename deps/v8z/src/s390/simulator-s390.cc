@@ -2489,6 +2489,7 @@ bool Simulator::DecodeFourByteArithmetic(Instruction* instr) {
       int64_t r2_val = static_cast<int64_t>(get_low_register<int32_t>(r2));
       bool isOF = false;
       isOF = CheckOverflowForIntSub(r1_val, r2_val);
+      r1_val -= r2_val;
       SetS390ConditionCode<int64_t>(r1_val, 0);
       SetS390OverflowCode(isOF);
       set_register(r1, r1_val);
@@ -4155,7 +4156,7 @@ bool Simulator::DecodeSixByteArithmetic(Instruction *instr) {
       break;
     }
     case AGSI: {
-      int i2 = siyInstr->I2Value();
+      int8_t i2 = static_cast<int8_t>(siyInstr->I2Value());
       int b1 = siyInstr->B1Value();
       intptr_t b1_val = (b1 == 0) ? 0 : get_register(b1);
 
@@ -4178,6 +4179,7 @@ bool Simulator::DecodeSixByteArithmetic(Instruction *instr) {
       DCHECK(false);
 #endif
       RXYInstruction* rxyInstr = reinterpret_cast<RXYInstruction*>(instr);
+      int r1 = rxyInstr->R1Value();
       uint64_t r1_val = get_register(rxyInstr->R1Value());
       int b2 = rxyInstr->B2Value();
       int x2 = rxyInstr->X2Value();
