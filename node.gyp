@@ -353,11 +353,6 @@
             ],
         }],
       ],
-      'msvs_settings': {
-        'VCLinkerTool': {
-          'SubSystem': 1, # /subsystem:console
-        },
-      },
     },
   ], # end targets
   }], # end non-aix section
