@@ -353,6 +353,12 @@
             ],
         }],
       ],
+      'msvs_settings': {
+        'VCManifestTool': {
+          'EmbedManifest': 'true',
+          'AdditionalManifestFiles': 'src/res/node.exe.extra.manifest'
+        }
+      },
     },
   ], # end targets
   }], # end non-aix section
