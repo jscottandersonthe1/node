@@ -28,7 +28,7 @@ parser = optparse.OptionParser()
 valid_os = ('win', 'mac', 'solaris', 'freebsd', 'openbsd', 'linux',
             'android', 'aix')
 valid_arch = ('arm', 'arm64', 'ia32', 'mips', 'mipsel', 'ppc', 'ppc64', 'x32',
-              'x64', 'x86')
+              'x64', 'x86', 's390', 's390x')
 valid_arm_float_abi = ('soft', 'softfp', 'hard')
 valid_mips_arch = ('loongson', 'r1', 'r2', 'r6', 'rx')
 valid_mips_fpu = ('fp32', 'fp64', 'fpxx')
@@ -571,6 +571,8 @@ def host_arch_cc():
     '__PPC64__'   : 'ppc64',
     '__PPC__'     : 'ppc',
     '__x86_64__'  : 'x64',
+    '__s390__'    : 's390',
+    '__s390x__'   : 's390x',
   }
 
   rtn = 'ia32' # default
@@ -656,6 +658,11 @@ def configure_node(o):
     configure_arm(o)
   elif target_arch in ('mips', 'mipsel'):
     configure_mips(o)
+
+  if target_arch in ('s390', 's390x'):
+    o['variables']['v8_parent_path'] = 'deps/v8z'
+  else:
+    o['variables']['v8_parent_path'] = 'deps/v8'
 
   if flavor in ('solaris', 'mac', 'linux', 'freebsd'):
     use_dtrace = not options.without_dtrace
