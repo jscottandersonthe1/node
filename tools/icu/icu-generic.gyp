@@ -394,7 +394,6 @@
           #'../../deps/icu/source/common/ubidi_props_data.h',
           # and the callers
           '../../deps/icu/source/common/ushape.cpp',
-          '../../deps/icu/source/common/usprep.cpp',
           '../../deps/icu/source/common/uts46.cpp',
         ]}],
         [ 'OS == "solaris"', { 'defines': [
