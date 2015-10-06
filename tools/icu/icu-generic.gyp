@@ -395,6 +395,7 @@
           # and the callers
           '../../deps/icu/source/common/ushape.cpp',
           '../../deps/icu/source/common/uts46.cpp',
+          '../../deps/icu/source/common/uidna.cpp',
         ]}],
         [ 'OS == "solaris"', { 'defines': [
           '_XOPEN_SOURCE_EXTENDED=0',
