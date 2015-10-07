@@ -346,11 +346,6 @@ parser.add_option('--enable-static',
     dest='enable_static',
     help='build as static library')
 
-parser.add_option('--static-libstdc++',
-    action='store',
-    dest='use_static_libstdcpp',
-    help='statically link to libstdc++ library instead of dynamically linking')
-
 (options, args) = parser.parse_args()
 
 # Expand ~ in the install prefix now, it gets written to multiple files.
@@ -712,12 +707,6 @@ def configure_node(o):
     o['variables']['node_tag'] = '-' + options.tag
   else:
     o['variables']['node_tag'] = ''
-
-
-  if options.use_static_libstdcpp:
-    o['variables']['node_use_static_libstdcpp'] = 'true'
-  else:
-    o['variables']['node_use_static_libstdcpp'] = 'false'
 
   o['variables']['node_release_urlbase'] = options.release_urlbase or ''
 
