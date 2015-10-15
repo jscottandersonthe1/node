@@ -18,3 +18,5 @@ test-vm-syntax-error-stderr                     : PASS,FLAKY
 
 [$system==freebsd]
 
+[$system==aix]
+test-fs-watch                                   : FAIL,FLAKY

@@ -23,3 +23,6 @@ test-debug-signal-cluster         : PASS,FLAKY
 
 [$system==freebsd]
 test-net-socket-local-address     : PASS,FLAKY
+
+[$system==aix]
+test-async-wrap-check-providers   : FAIL,FLAKY
