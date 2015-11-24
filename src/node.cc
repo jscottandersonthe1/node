@@ -3037,9 +3037,15 @@ static void ParseArgs(int* argc,
       printf("%s\n", NODE_VERSION);
       exit(0);
     } else if (strcmp(arg, "--enable-ssl2") == 0) {
+#if HAVE_OPENSSL
       SSL2_ENABLE = true;
+#endif
     } else if (strcmp(arg, "--enable-ssl3") == 0) {
+#if HAVE_OPENSSL
       SSL3_ENABLE = true;
+#endif
+    } else if (strcmp(arg, "--allow-insecure-server-dhparam") == 0) {
+      ALLOW_INSECURE_SERVER_DHPARAM = true;
     } else if (strcmp(arg, "--help") == 0 || strcmp(arg, "-h") == 0) {
       PrintHelp();
       exit(0);
