@@ -161,7 +161,7 @@ def headers(action):
   ], 'include/node/')
 
   # Add the expfile that is created on AIX
-  if 'aix' in sys.platform:
+  if sys.platform.startswith('aix'):
     action(['out/Release/node.exp'], 'include/node/')
 
   subdir_files('deps/cares/include', 'include/node/', action)
