@@ -79,6 +79,19 @@ var opensslCli = null;
 var inFreeBSDJail = null;
 var localhostIPv4 = null;
 
+exports.localIPv6Hosts = [
+  // Debian/Ubuntu
+  'ip6-localhost',
+  'ip6-loopback',
+
+  // SUSE
+  'ipv6-localhost',
+  'ipv6-loopback',
+
+  // Typically universal
+  'localhost',
+];
+
 Object.defineProperty(exports, 'inFreeBSDJail', {
   get: function() {
     if (inFreeBSDJail !== null) return inFreeBSDJail;
@@ -243,10 +256,15 @@ exports.platformTimeout = function(ms) {
   if (process.arch !== 'arm')
     return ms;
 
-  if (process.config.variables.arm_version === '6')
+  const armv = process.config.variables.arm_version;
+
+  if (armv === '6')
     return 7 * ms;  // ARMv6
 
-  return 2 * ms;  // ARMv7 and up.
+  if (armv === '7')
+    return 2 * ms;  // ARMv7
+
+  return ms; // ARMv8+
 };
 
 var knownGlobals = [setTimeout,
