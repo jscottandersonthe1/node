@@ -147,7 +147,7 @@ $ man doc/node.1
 To test if Node.js was built correctly:
 
 ```
-$ node -e "console.log('Hello from node.js ' + process.version)"
+$ node -e "console.log('Hello from Node.js ' + process.version)"
 ```
 
 ### Windows
@@ -174,7 +174,7 @@ To run the tests:
 To test if Node.js was built correctly:
 
 ```
-$ node -e "console.log('Hello from node.js ' + process.version)"
+$ node -e "console.log('Hello from Node.js ' + process.version)"
 ```
 
 ### Android / Android based devices, aka. Firefox OS
@@ -329,7 +329,9 @@ Instructions:
    Appendix A in the [security policy]
    (http://csrc.nist.gov/groups/STM/cmvp/documents/140-1/140sp/140sp1747.pdf).
    The only exception is that `./config no-asm` can be
-   used in place of `./config` )
+   used in place of `./config`, and the FIPSDIR environment variable
+   may be used to specify a non-standard install folder for the
+   validated module, as per User Guide sections 4.2.1, 4.2.2, and 4.2.3.
 6. Get into Node.js checkout folder
 7. `./configure --openssl-fips=/path/to/openssl-fips/installdir`
    For example on ubuntu 12 the installation directory was
@@ -348,7 +350,7 @@ Instructions:
 
 ## Security
 
-All security bugs in node.js are taken seriously and should be reported by
+All security bugs in Node.js are taken seriously and should be reported by
 emailing security@nodejs.org. This will be delivered to a subset of the project
 team who handle security issues. Please don't disclose security bugs
 publicly until they have been handled by the security team.

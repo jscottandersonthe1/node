@@ -188,7 +188,6 @@
           '-fsanitize=address',
           '-DLEAK_SANITIZER'
         ],
-        'cflags_cc+': [ '-gline-tables-only' ],
         'cflags!': [ '-fomit-frame-pointer' ],
         'ldflags': [ '-fsanitize=address' ],
       }],
