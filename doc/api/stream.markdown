@@ -11,19 +11,17 @@ You can load the Stream base classes by doing `require('stream')`.
 There are base classes provided for [Readable][] streams, [Writable][]
 streams, [Duplex][] streams, and [Transform][] streams.
 
-This document is split up into 3 sections.  The first explains the
-parts of the API that you need to be aware of to use streams in your
-programs.  If you never implement a streaming API yourself, you can
-stop there.
+This document is split up into 3 sections:
 
-The second section explains the parts of the API that you need to use
-if you implement your own custom streams yourself.  The API is
-designed to make this easy for you to do.
-
-The third section goes into more depth about how streams work,
-including some of the internal mechanisms and functions that you
-should probably not modify unless you definitely know what you are
-doing.
+1. The first section explains the parts of the API that you need to be
+   aware of to use streams in your programs.
+2. The second section explains the parts of the API that you need to
+   use if you implement your own custom streams yourself.  The API is
+   designed to make this easy for you to do.
+3. The third section goes into more depth about how streams work,
+   including some of the internal mechanisms and functions that you
+   should probably not modify unless you definitely know what you are
+   doing.
 
 
 ## API for Stream Consumers
@@ -723,7 +721,7 @@ To implement any sort of stream, the pattern is the same:
    [`util.inherits`][] method is particularly helpful for this.)
 2. Call the appropriate parent class constructor in your constructor,
    to be sure that the internal mechanisms are set up properly.
-2. Implement one or more specific methods, as detailed below.
+3. Implement one or more specific methods, as detailed below.
 
 The class to extend and the method(s) to implement depend on the sort
 of stream class you are writing:
@@ -761,7 +759,7 @@ of stream class you are writing:
       <p>[Writable](#stream_class_stream_writable_1)</p>
     </td>
     <td>
-      <p><code>[_write][]</code>, <code>_writev</code></p>
+      <p><code>[_write][]</code>, <code>[_writev][]</code></p>
     </td>
   </tr>
   <tr>
@@ -772,7 +770,7 @@ of stream class you are writing:
       <p>[Duplex](#stream_class_stream_duplex_1)</p>
     </td>
     <td>
-      <p><code>[_read][]</code>, <code>[_write][]</code>, <code>_writev</code></p>
+      <p><code>[_read][]</code>, <code>[_write][]</code>, <code>[_writev][]</code></p>
     </td>
   </tr>
   <tr>
@@ -783,7 +781,7 @@ of stream class you are writing:
       <p>[Transform](#stream_class_stream_transform_1)</p>
     </td>
     <td>
-      <p><code>_transform</code>, <code>_flush</code></p>
+      <p><code>[_transform][]</code>, <code>[_flush][]</code></p>
     </td>
   </tr>
 </table>
@@ -1728,3 +1726,12 @@ horribly wrong.
 [Writable]: #stream_class_stream_writable
 [zlib streams]: zlib.html
 [zlib]: zlib.html
+[_transform]: #stream_transform_transform_chunk_encoding_callback
+[`_transform()`]: #stream_transform_transform_chunk_encoding_callback
+[`_transform(chunk, encoding, callback)`]: #stream_transform_transform_chunk_encoding_callback
+[_flush]: #stream_transform_flush_callback
+[`_flush()`]: #stream_transform_flush_callback
+[`_flush(callback)`]: #stream_transform_flush_callback
+[_writev]: #stream_writable_writev_chunks_callback
+[`_writev()`]: #stream_writable_writev_chunks_callback
+[`_writev(chunks, callback)`]: #stream_writable_writev_chunks_callback

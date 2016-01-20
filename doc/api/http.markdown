@@ -375,6 +375,9 @@ Once a socket is assigned to this request and is connected
 Once a socket is assigned to this request and is connected
 [`socket.setTimeout()`][] will be called.
 
+* `timeout` {Number} Milliseconds before a request is considered to be timed out.
+* `callback` {Function} Optional function to be called when a timeout occurs. Same as binding to the `timeout` event.
+
 ### request.write(chunk[, encoding][, callback])
 
 Sends a chunk of the body.  By calling this method
@@ -502,6 +505,8 @@ Listening on a file descriptor is not supported on Windows.
 
 This function is asynchronous. The last parameter `callback` will be added as
 a listener for the `'listening'` event. See also [`net.Server.listen()`][].
+
+Returns `server`.
 
 ### server.listen(path[, callback])
 
@@ -778,7 +783,7 @@ should be used to determine the number of bytes in a given encoding.
 And Node.js does not check whether Content-Length and the length of the body
 which has been transmitted are equal or not.
 
-## http.IncomingMessage
+## Class: http.IncomingMessage
 
 An `IncomingMessage` object is created by [`http.Server`][] or
 [`http.ClientRequest`][] and passed as the first argument to the `'request'`
@@ -987,7 +992,7 @@ automatically parsed with [`url.parse()`][].
 
 Options:
 
-- `protocol`: Protocol to use. Defaults to `'http'`.
+- `protocol`: Protocol to use. Defaults to `'http:'`.
 - `host`: A domain name or IP address of the server to issue the request to.
   Defaults to `'localhost'`.
 - `hostname`: Alias for `host`. To support [`url.parse()`][] `hostname` is
