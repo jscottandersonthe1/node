@@ -64,9 +64,8 @@
 #if defined(_MSC_VER)
 #include <direct.h>
 #include <io.h>
-#include <process.h>
 #define strcasecmp _stricmp
-#define getpid _getpid
+#define getpid GetCurrentProcessId
 #define umask _umask
 typedef int mode_t;
 #else
@@ -1482,8 +1481,6 @@ void AppendExceptionLine(Environment* env,
   arrow[off + 1] = '\0';
 
   Local<String> arrow_str = String::NewFromUtf8(env->isolate(), arrow);
-  Local<Value> msg;
-  Local<Value> stack;
 
   // Allocation failed, just print it out
   if (arrow_str.IsEmpty() || err_obj.IsEmpty() || !err_obj->IsNativeError())
@@ -1548,8 +1545,10 @@ static void ReportException(Environment* env,
         name.IsEmpty() ||
         name->IsUndefined()) {
       // Not an error object. Just print as-is.
-      node::Utf8Value message(env->isolate(), er);
-      PrintErrorString("%s\n", *message);
+      String::Utf8Value message(er);
+
+      PrintErrorString("%s\n", *message ? *message :
+                                          "<toString() threw exception>");
     } else {
       node::Utf8Value name_string(env->isolate(), name);
       node::Utf8Value message_string(env->isolate(), message);

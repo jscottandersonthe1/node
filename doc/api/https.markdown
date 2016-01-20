@@ -32,31 +32,31 @@ automatically added to the `'request'` event.
 Example:
 
     // curl -k https://localhost:8000/
-    var https = require('https');
-    var fs = require('fs');
+    const https = require('https');
+    const fs = require('fs');
 
-    var options = {
+    const options = {
       key: fs.readFileSync('test/fixtures/keys/agent2-key.pem'),
       cert: fs.readFileSync('test/fixtures/keys/agent2-cert.pem')
     };
 
-    https.createServer(options, function (req, res) {
+    https.createServer(options, (req, res) => {
       res.writeHead(200);
-      res.end("hello world\n");
+      res.end('hello world\n');
     }).listen(8000);
 
 Or
 
-    var https = require('https');
-    var fs = require('fs');
+    const https = require('https');
+    const fs = require('fs');
 
-    var options = {
+    const options = {
       pfx: fs.readFileSync('server.pfx')
     };
 
-    https.createServer(options, function (req, res) {
+    https.createServer(options, (req, res) => {
       res.writeHead(200);
-      res.end("hello world\n");
+      res.end('hello world\n');
     }).listen(8000);
 
 ### server.close([callback])
@@ -78,17 +78,17 @@ automatically parsed with [`url.parse()`][].
 
 Example:
 
-    var https = require('https');
+    const https = require('https');
 
-    https.get('https://encrypted.google.com/', function(res) {
-      console.log("statusCode: ", res.statusCode);
-      console.log("headers: ", res.headers);
+    https.get('https://encrypted.google.com/', (res) => {
+      console.log('statusCode: ', res.statusCode);
+      console.log('headers: ', res.headers);
 
-      res.on('data', function(d) {
+      res.on('data', (d) => {
         process.stdout.write(d);
       });
 
-    }).on('error', function(e) {
+    }).on('error', (e) => {
       console.error(e);
     });
 
@@ -107,7 +107,7 @@ All options from [`http.request()`][] are valid.
 
 Example:
 
-    var https = require('https');
+    const https = require('https');
 
     var options = {
       hostname: 'encrypted.google.com',
@@ -116,17 +116,17 @@ Example:
       method: 'GET'
     };
 
-    var req = https.request(options, function(res) {
-      console.log("statusCode: ", res.statusCode);
-      console.log("headers: ", res.headers);
+    var req = https.request(options, (res) => {
+      console.log('statusCode: ', res.statusCode);
+      console.log('headers: ', res.headers);
 
-      res.on('data', function(d) {
+      res.on('data', (d) => {
         process.stdout.write(d);
       });
     });
     req.end();
 
-    req.on('error', function(e) {
+    req.on('error', (e) => {
       console.error(e);
     });
 
@@ -164,8 +164,9 @@ The following options from [`tls.connect()`][] can also be specified. However, a
 - `key`: Private key to use for SSL. Default `null`.
 - `passphrase`: A string of passphrase for the private key or pfx. Default `null`.
 - `cert`: Public x509 certificate to use. Default `null`.
-- `ca`: An authority certificate or array of authority certificates to check
-  the remote host against.
+- `ca`: A string, `Buffer` or array of strings or `Buffer`s of trusted
+  certificates in PEM format. If this is omitted several well known "root"
+  CAs will be used, like VeriSign. These are used to authorize connections.
 - `ciphers`: A string describing the ciphers to use or exclude. Consult
   <http://www.openssl.org/docs/apps/ciphers.html#CIPHER_LIST_FORMAT> for
   details on the format.
@@ -191,7 +192,7 @@ Example:
     };
     options.agent = new https.Agent(options);
 
-    var req = https.request(options, function(res) {
+    var req = https.request(options, (res) => {
       ...
     }
 
@@ -209,7 +210,7 @@ Example:
       agent: false
     };
 
-    var req = https.request(options, function(res) {
+    var req = https.request(options, (res) => {
       ...
     }
 
