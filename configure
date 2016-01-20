@@ -683,6 +683,10 @@ def configure_node(o):
   else:
     o['variables']['v8_parent_path'] = 'deps/v8'
 
+  if flavor == 'aix':
+    o['variables']['node_core_target_name'] = 'node_base'
+    o['variables']['node_target_type'] = 'static_library'
+
   if flavor in ('solaris', 'mac', 'linux', 'freebsd'):
     use_dtrace = not options.without_dtrace
     # Don't enable by default on linux and freebsd
