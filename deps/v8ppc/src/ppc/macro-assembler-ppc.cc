@@ -2282,11 +2282,6 @@ void MacroAssembler::ConvertToInt32(Register source,
                                     Register scratch2,
                                     DwVfpRegister double_scratch,
                                     Label *not_int32) {
-#if 0
-    ConvertToInt32_NoPPC64(source, dest, scratch, scratch2, double_scratch,
-                           not_int32);
-    return;
-#else
 #if !V8_TARGET_ARCH_PPC64
   if (!CpuFeatures::IsSupported(IS64BIT)) {
     ConvertToInt32_NoPPC64(source, dest, scratch, scratch2, double_scratch, 
@@ -2324,7 +2319,6 @@ void MacroAssembler::ConvertToInt32(Register source,
   TestIfInt32(scratch, dest, scratch2);
 #endif
   bne(not_int32);
-#endif
 }
 
 void MacroAssembler::EmitVFPTruncate_NoPPC64(VFPRoundingMode rounding_mode,
@@ -2379,14 +2373,6 @@ void MacroAssembler::EmitVFPTruncate(VFPRoundingMode rounding_mode,
                                      Register scratch,
                                      DwVfpRegister double_scratch,
                                      CheckForInexactConversion check_inexact) {
-	// TODO: Do this right after proving it works.
-#if 0
-    EmitVFPTruncate_NoPPC64(rounding_mode, result, double_input, scratch,
-                            double_scratch, check_inexact);
-    return;
-#else
-    //Note for TODO: Need to ensure following symbol is not defined for ppc32 build
-    //               and figure out the IsSupported macro.
 #if !V8_TARGET_ARCH_PPC64
   if (!CpuFeatures::IsSupported(IS64BIT)) {
     EmitVFPTruncate_NoPPC64(rounding_mode, result, double_input, scratch,
@@ -2431,12 +2417,10 @@ void MacroAssembler::EmitVFPTruncate(VFPRoundingMode rounding_mode,
     bne(&done);
 
     // convert back and compare
-    PrintF("Instruction = fcfid in function EmitVFPTruncate\n");
     fcfid(double_scratch, double_scratch);
     fcmpu(double_scratch, double_input);
     bind(&done);
   }
-#endif
 }
 
 
@@ -2582,11 +2566,6 @@ void MacroAssembler::EmitECMATruncate(Register result,
   ASSERT(!double_scratch.is(double_input));
 
   Label done;
-#if 0
-  EmitECMATruncate_NoPPC64(result, double_input, double_scratch,
-                           scratch, input_high, input_low);
-  return;
-#else
 
 #if !V8_TARGET_ARCH_PPC64
   if (!CpuFeatures::IsSupported(IS64BIT)) {
@@ -2639,7 +2618,6 @@ void MacroAssembler::EmitECMATruncate(Register result,
 
   // restore the stack
   addi(sp, sp, Operand(8));
-#endif
 }
 
 

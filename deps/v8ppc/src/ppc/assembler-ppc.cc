@@ -1199,26 +1199,26 @@ void Assembler::stdux(Register rs, const MemOperand &src) {
 }
 
 void Assembler::rldic(Register ra, Register rs, int sh, int mb, RCBit r) {
-//  md_form(EXT5 | RLDIC, ra, rs, sh, mb, r);
+  md_form(EXT5 | RLDIC, ra, rs, sh, mb, r);
 }
 
 void Assembler::rldicl(Register ra, Register rs, int sh, int mb, RCBit r) {
-//  md_form(EXT5 | RLDICL, ra, rs, sh, mb, r);
+  md_form(EXT5 | RLDICL, ra, rs, sh, mb, r);
 }
 
 void Assembler::rldicr(Register ra, Register rs, int sh, int me, RCBit r) {
-//  md_form(EXT5 | RLDICR, ra, rs, sh, me, r);
+  md_form(EXT5 | RLDICR, ra, rs, sh, me, r);
 }
 
 void Assembler::sldi(Register dst, Register src, const Operand& val,
                      RCBit rc) {
   ASSERT((64 > val.imm_)&&(val.imm_ >= 0));
-//  rldicr(dst, src, val.imm_, 63-val.imm_, rc);
+  rldicr(dst, src, val.imm_, 63-val.imm_, rc);
 }
 void Assembler::srdi(Register dst, Register src, const Operand& val,
                      RCBit rc) {
   ASSERT((64 > val.imm_)&&(val.imm_ >= 0));
-//  rldicl(dst, src, 64-val.imm_, val.imm_, rc);
+  rldicl(dst, src, 64-val.imm_, val.imm_, rc);
 }
 void Assembler::clrrdi(Register dst, Register src, const Operand& val,
                        RCBit rc) {
@@ -1239,15 +1239,15 @@ void Assembler::sradi(Register ra, Register rs, int sh, RCBit r) {
 }
 
 void Assembler::srd(Register dst, Register src1, Register src2, RCBit r) {
-//  x_form(EXT2 | SRDX, dst, src1, src2, r);
+  x_form(EXT2 | SRDX, dst, src1, src2, r);
 }
 
 void Assembler::sld(Register dst, Register src1, Register src2, RCBit r) {
-//  x_form(EXT2 | SLDX, dst, src1, src2, r);
+  x_form(EXT2 | SLDX, dst, src1, src2, r);
 }
 
 void Assembler::srad(Register ra, Register rs, Register rb, RCBit r) {
-//  x_form(EXT2 | SRAD, ra, rs, rb, r);
+  x_form(EXT2 | SRAD, ra, rs, rb, r);
 }
 
 void Assembler::cntlzd_(Register ra, Register rs, RCBit rc) {

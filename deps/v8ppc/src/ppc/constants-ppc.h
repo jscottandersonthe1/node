@@ -46,7 +46,8 @@ const int kNoRegister = -1;
 // For FlushICache
 // This constant will be different for other versions of PowerPC
 // It must be a power of 2
-const unsigned int kCacheLineSizeLog2 = 7;
+//const unsigned int kCacheLineSizeLog2 = 7;
+const unsigned int kCacheLineSizeLog2 = 5;
 const unsigned int kCacheLineSize = (1 << kCacheLineSizeLog2);
 
 // sign-extend the least significant 16-bit of value <imm>
@@ -301,8 +302,7 @@ enum OpcodeExt4 {
 enum OpcodeExt5 {
   RLDICL = 0 << 2,    // Rotate Left Double Word Immediate then Clear Left
   RLDICR = 1 << 2,    // Rotate Left Double Word Immediate then Clear Right
-  RLDIC  = 2 << 2,    // Rotate Left Double Word Immediate then Clear
-  RLDIMI = 3 << 2     // Rotate Left Double Word Immediate then Mask Insert
+  RLDIC  = 2 << 2     // Rotate Left Double Word Immediate then Clear
 };
 
 // Instruction encoding bits and masks.

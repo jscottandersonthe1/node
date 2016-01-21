@@ -719,10 +719,6 @@ void FloatingPointHelper::ConvertIntToFloatingPoint(MacroAssembler* masm,
   ASSERT(!src.is(scratch));
   ASSERT(!double_dst.is(double_scratch));
 
-#if 0
-  ConvertIntToFloatingPointNoPPC64(masm, src, double_dst, scratch, double_scratch, result_is_a_float, src_is_unsigned);
-  return;
-#else
 #if !V8_TARGET_ARCH_PPC64
   // If we have reduced 32-bit instruction set call out to
   // generate a compatible sequence
@@ -754,7 +750,6 @@ void FloatingPointHelper::ConvertIntToFloatingPoint(MacroAssembler* masm,
   }
 
   // Convert to double word FP from stack
-  PrintF("Instruction = fcfid in function ConvertIntToFloatingPoint\n");
   __ lfd(double_dst, MemOperand(sp, 0));
   __ fcfid(double_dst, double_dst);
 
@@ -764,7 +759,6 @@ void FloatingPointHelper::ConvertIntToFloatingPoint(MacroAssembler* masm,
     // Round to single word FP
     __ frsp(double_dst, double_dst);
   }
-#endif
 }
 
 void FloatingPointHelper::ConvertIntToDouble(MacroAssembler* masm,
