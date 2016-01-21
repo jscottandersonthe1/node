@@ -53,24 +53,6 @@
 #include "constants-ppc.h"
 #include "serialize.h"
 
-#define ABI_USES_FUNCTION_DESCRIPTORS \
-  (V8_HOST_ARCH_PPC && \
-    (defined(_AIX) || \
-      (defined(V8_TARGET_ARCH_PPC64) && (__BYTE_ORDER != __LITTLE_ENDIAN))))
-
-#define ABI_PASSES_HANDLES_IN_REGS \
-  (!V8_HOST_ARCH_PPC || defined(_AIX) || defined(V8_TARGET_ARCH_PPC64))
-
-#define ABI_RETURNS_HANDLES_IN_REGS \
-  (!V8_HOST_ARCH_PPC || (__BYTE_ORDER == __LITTLE_ENDIAN))
-
-#define ABI_RETURNS_OBJECT_PAIRS_IN_REGS \
-  (!V8_HOST_ARCH_PPC || (__BYTE_ORDER == __LITTLE_ENDIAN))
-
-#define ABI_TOC_ADDRESSABILITY_VIA_IP \
-  (V8_HOST_ARCH_PPC && defined(V8_TARGET_ARCH_PPC64) && \
-    (__BYTE_ORDER == __LITTLE_ENDIAN))
-
 namespace v8 {
 namespace internal {
 
@@ -437,7 +419,7 @@ class MemOperand BASE_EMBEDDED {
 
   explicit MemOperand(Register ra, Register rb);
 
-  int32_t offset() const {
+  uint32_t offset() const {
     ASSERT(rb_.is(no_reg));
     return offset_;
   }
@@ -735,8 +717,7 @@ class Assembler : public AssemblerBase {
   void b(int branch_offset, LKBit lk);
 
   void bcctr(BOfield bo, LKBit lk);
-  void bctr();
-  void bctrl();
+  void bcr();
 
   // Convenience branch instructions using labels
   void b(Label* L, LKBit lk = LeaveLK)  {
@@ -877,8 +858,6 @@ class Assembler : public AssemblerBase {
   void xor_(Register dst, Register src1, Register src2, RCBit rc = LeaveRC);
   void cmpi(Register src1, const Operand& src2, CRegister cr = cr7);
   void cmpli(Register src1, const Operand& src2, CRegister cr = cr7);
-  void cmpwi(Register src1, const Operand& src2, CRegister cr = cr7);
-  void cmplwi(Register src1, const Operand& src2, CRegister cr = cr7);
   void li(Register dst, const Operand& src);
   void lis(Register dst, const Operand& imm);
   void mr(Register dst, Register src);
@@ -922,7 +901,6 @@ class Assembler : public AssemblerBase {
   void rldic(Register dst, Register src, int sh, int mb, RCBit r = LeaveRC);
   void rldicl(Register dst, Register src, int sh, int mb, RCBit r = LeaveRC);
   void rldicr(Register dst, Register src, int sh, int me, RCBit r = LeaveRC);
-  void rldimi(Register dst, Register src, int sh, int mb, RCBit r = LeaveRC);
   void sldi(Register dst, Register src, const Operand& val, RCBit rc = LeaveRC);
   void srdi(Register dst, Register src, const Operand& val, RCBit rc = LeaveRC);
   void clrrdi(Register dst, Register src, const Operand& val,
@@ -963,8 +941,6 @@ class Assembler : public AssemblerBase {
 
   void cmp(Register src1, Register src2, CRegister cr = cr7);
   void cmpl(Register src1, Register src2, CRegister cr = cr7);
-  void cmpw(Register src1, Register src2, CRegister cr = cr7);
-  void cmplw(Register src1, Register src2, CRegister cr = cr7);
 
   void mov(Register dst, const Operand& src);
 

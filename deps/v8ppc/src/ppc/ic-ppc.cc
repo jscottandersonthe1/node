@@ -817,7 +817,8 @@ static MemOperand GenerateMappedArgumentsLookup(MacroAssembler* masm,
   __ LoadP(scratch1, FieldMemOperand(scratch1, FixedArray::kHeaderSize));
   __ SmiToPtrArrayOffset(scratch3, scratch2);
   __ addi(scratch3, scratch3, Operand(Context::kHeaderSize - kHeapObjectTag));
-  return MemOperand(scratch1, scratch3);
+  __ add(scratch1, scratch1, scratch3);
+  return MemOperand(scratch1);
 }
 
 
@@ -843,7 +844,8 @@ static MemOperand GenerateUnmappedArgumentsLookup(MacroAssembler* masm,
   __ addi(scratch,
           scratch,
           Operand(FixedArray::kHeaderSize - kHeapObjectTag));
-  return MemOperand(backing_store, scratch);
+  __ add(backing_store, backing_store, scratch);
+  return MemOperand(backing_store);
 }
 
 
@@ -856,13 +858,13 @@ void KeyedLoadIC::GenerateNonStrictArguments(MacroAssembler* masm) {
   Label slow, notin;
   MemOperand mapped_location =
       GenerateMappedArgumentsLookup(masm, r4, r3, r5, r6, r7, &notin, &slow);
-  __ LoadPX(r3, mapped_location);
+  __ LoadP(r3, mapped_location);
   __ Ret();
   __ bind(&notin);
   // The unmapped lookup expects that the parameter map is in r5.
   MemOperand unmapped_location =
       GenerateUnmappedArgumentsLookup(masm, r3, r5, r6, &slow);
-  __ LoadPX(r5, unmapped_location);
+  __ LoadP(r5, unmapped_location);
   __ LoadRoot(r6, Heap::kTheHoleValueRootIndex);
   __ cmp(r5, r6);
   __ beq(&slow);
@@ -883,23 +885,19 @@ void KeyedStoreIC::GenerateNonStrictArguments(MacroAssembler* masm) {
   Label slow, notin;
   MemOperand mapped_location =
       GenerateMappedArgumentsLookup(masm, r5, r4, r6, r7, r8, &notin, &slow);
-  Register mapped_base = mapped_location.ra();
-  Register mapped_offset = mapped_location.rb();
-  __ StorePX(r3, mapped_location);
-  __ add(r9, mapped_base, mapped_offset);
+  __ StoreP(r3, mapped_location);
+  __ mr(r9, r6);  // r6 is modified by GenerateMappedArgumentsLookup
   __ mr(r22, r3);
-  __ RecordWrite(mapped_base, r9, r22, kLRHasNotBeenSaved, kDontSaveFPRegs);
+  __ RecordWrite(r6, r9, r22, kLRHasNotBeenSaved, kDontSaveFPRegs);
   __ Ret();
   __ bind(&notin);
   // The unmapped lookup expects that the parameter map is in r6.
   MemOperand unmapped_location =
       GenerateUnmappedArgumentsLookup(masm, r4, r6, r7, &slow);
-  Register unmapped_base = unmapped_location.ra();
-  Register unmapped_offset = unmapped_location.rb();
-  __ StorePX(r3, unmapped_location);
-  __ add(r9, unmapped_base, unmapped_offset);
+  __ StoreP(r3, unmapped_location);
+  __ mr(r9, r6);  // r6 is modified by GenerateUnmappedArgumentsLookup
   __ mr(r22, r3);
-  __ RecordWrite(unmapped_base, r9, r22, kLRHasNotBeenSaved, kDontSaveFPRegs);
+  __ RecordWrite(r6, r9, r22, kLRHasNotBeenSaved, kDontSaveFPRegs);
   __ Ret();
   __ bind(&slow);
   GenerateMiss(masm, false);
@@ -917,13 +915,13 @@ void KeyedCallIC::GenerateNonStrictArguments(MacroAssembler* masm,
   __ LoadP(r4, MemOperand(sp, argc * kPointerSize), r0);
   MemOperand mapped_location =
       GenerateMappedArgumentsLookup(masm, r4, r5, r6, r7, r8, &notin, &slow);
-  __ LoadPX(r4, mapped_location);
+  __ LoadP(r4, mapped_location);
   GenerateFunctionTailCall(masm, argc, &slow, r6);
   __ bind(&notin);
   // The unmapped lookup expects that the parameter map is in r6.
   MemOperand unmapped_location =
       GenerateUnmappedArgumentsLookup(masm, r5, r6, r7, &slow);
-  __ LoadPX(r4, unmapped_location);
+  __ LoadP(r4, unmapped_location);
   __ LoadRoot(r6, Heap::kTheHoleValueRootIndex);
   __ cmp(r4, r6);
   __ beq(&slow);

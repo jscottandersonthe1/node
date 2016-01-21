@@ -520,15 +520,11 @@ class MacroAssembler: public Assembler {
 
 
 
-  void Add(Register dst, Register src, intptr_t value, Register scratch);
+  void Add(Register dst, Register src, uint32_t value, Register scratch);
   void Cmpi(Register src1, const Operand& src2, Register scratch,
             CRegister cr = cr7);
   void Cmpli(Register src1, const Operand& src2, Register scratch,
              CRegister cr = cr7);
-  void Cmpwi(Register src1, const Operand& src2, Register scratch,
-             CRegister cr = cr7);
-  void Cmplwi(Register src1, const Operand& src2, Register scratch,
-              CRegister cr = cr7);
   void And(Register ra, Register rs, const Operand& rb, RCBit rc = LeaveRC);
   void Or(Register ra, Register rs, const Operand& rb, RCBit rc = LeaveRC);
   void Xor(Register ra, Register rs, const Operand& rb, RCBit rc = LeaveRC);
@@ -988,6 +984,14 @@ class MacroAssembler: public Assembler {
                       DwVfpRegister double_scratch,
                       Label *not_int32);
 
+  // MT HACK
+  void ConvertToInt32_NoPPC64(Register source,
+                      Register dest,
+                      Register scratch,
+                      Register scratch2,
+                      DwVfpRegister double_scratch,
+                      Label *not_int32);
+
   // Truncates a double using a specific rounding mode, and writes the value
   // to the result register.
   // Clears the z flag (ne condition) if an overflow occurs.
@@ -995,6 +999,14 @@ class MacroAssembler: public Assembler {
   // conversion was inexact, i.e. if the double value could not be converted
   // exactly to a 32-bit integer.
   void EmitVFPTruncate(VFPRoundingMode rounding_mode,
+                       Register result,
+                       DwVfpRegister double_input,
+                       Register scratch,
+                       DwVfpRegister double_scratch,
+                       CheckForInexactConversion check
+                           = kDontCheckForInexactConversion);
+  // MT HACK
+  void EmitVFPTruncate_NoPPC64(VFPRoundingMode rounding_mode,
                        Register result,
                        DwVfpRegister double_input,
                        Register scratch,
@@ -1022,6 +1034,13 @@ class MacroAssembler: public Assembler {
                         Register scratch,
                         Register scratch2,
                         Register scratch3);
+  
+  void EmitECMATruncate_NoPPC64(Register result,
+                                DwVfpRegister double_input,
+                                DwVfpRegister double_scratch,
+                                Register scratch,
+                                Register input_high,
+                                Register input_low);
 
   // ---------------------------------------------------------------------------
   // Runtime calls

@@ -898,7 +898,7 @@ void LCodeGen::DoModI(LModI* instr) {
     if (divisor < 0) divisor = -divisor;
 
     Label positive_dividend;
-    __ cmpwi(dividend, Operand::Zero());
+    __ cmpi(dividend, Operand::Zero());
     __ bge(&positive_dividend);
     __ neg(result, dividend);
     __ mov(scratch, Operand(divisor - 1));
@@ -918,7 +918,7 @@ void LCodeGen::DoModI(LModI* instr) {
 
     // Check for x % 0.
     if (instr->hydrogen()->CheckFlag(HValue::kCanBeDivByZero)) {
-        __ cmpwi(divisor, Operand::Zero());
+        __ cmpi(divisor, Operand::Zero());
         DeoptimizeIf(eq, instr->environment());
     }
 
@@ -929,7 +929,7 @@ void LCodeGen::DoModI(LModI* instr) {
     __ sub(result, dividend, scratch, LeaveOE, SetRC);
 
     if (instr->hydrogen()->CheckFlag(HValue::kBailoutOnMinusZero)) {
-      __ cmpwi(dividend, Operand::Zero());
+      __ cmpi(dividend, Operand::Zero());
       __ bge(&done);
       DeoptimizeIf(eq, instr->environment(), cr0);
     }
@@ -949,16 +949,16 @@ void LCodeGen::DoDivI(LDivI* instr) {
 
   // Check for x / 0.
   if (instr->hydrogen()->CheckFlag(HValue::kCanBeDivByZero)) {
-    __ cmpwi(right, Operand::Zero());
+    __ cmpi(right, Operand::Zero());
     DeoptimizeIf(eq, instr->environment());
   }
 
   // Check for (0 / -x) that will produce negative zero.
   if (instr->hydrogen()->CheckFlag(HValue::kBailoutOnMinusZero)) {
     Label left_not_zero;
-    __ cmpwi(left, Operand::Zero());
+    __ cmpi(left, Operand::Zero());
     __ bne(&left_not_zero);
-    __ cmpwi(right, Operand::Zero());
+    __ cmpi(right, Operand::Zero());
     DeoptimizeIf(lt, instr->environment());
     __ bind(&left_not_zero);
   }
@@ -966,9 +966,9 @@ void LCodeGen::DoDivI(LDivI* instr) {
   // Check for (-kMinInt / -1).
   if (instr->hydrogen()->CheckFlag(HValue::kCanOverflow)) {
     Label left_not_min_int;
-    __ Cmpwi(left, Operand(kMinInt), r0);
+    __ Cmpi(left, Operand(kMinInt), r0);
     __ bne(&left_not_min_int);
-    __ cmpwi(right, Operand(-1));
+    __ cmpi(right, Operand(-1));
     DeoptimizeIf(eq, instr->environment());
     __ bind(&left_not_min_int);
   }
@@ -979,7 +979,7 @@ void LCodeGen::DoDivI(LDivI* instr) {
 
   // Deoptimize on non-zero remainder
   __ Mul(scratch, right, result);
-  __ cmpw(left, scratch);
+  __ cmp(left, scratch);
   DeoptimizeIf(ne, instr->environment());
 }
 
@@ -1126,7 +1126,7 @@ void LCodeGen::DoMulI(LMulI* instr) {
         if (bailout_on_minus_zero) {
           // If left is strictly negative and the constant is null, the
           // result is -0. Deoptimize if required, otherwise return 0.
-          __ cmpwi(left, Operand::Zero());
+          __ cmpi(left, Operand::Zero());
           DeoptimizeIf(lt, instr->environment());
         }
         __ li(result, Operand::Zero());
@@ -1194,7 +1194,7 @@ void LCodeGen::DoMulI(LMulI* instr) {
       Label done;
       __ cmpi(result, Operand::Zero());
       __ bne(&done);
-      __ cmpwi(ToRegister(instr->temp()), Operand::Zero());
+      __ cmpi(ToRegister(instr->temp()), Operand::Zero());
       DeoptimizeIf(lt, instr->environment());
       __ bind(&done);
     }
@@ -1314,8 +1314,8 @@ void LCodeGen::DoShiftI(LShiftI* instr) {
           __ srwi(result, left, Operand(shift_count));
         } else {
           if (instr->can_deopt()) {
-            __ cmpwi(left, Operand::Zero());
-            DeoptimizeIf(lt, instr->environment());
+            __ TestSignBit32(left, r0);
+            DeoptimizeIf(ne, instr->environment(), cr0);
           }
           __ Move(result, left);
         }
@@ -1549,7 +1549,7 @@ void LCodeGen::DoMathMinMax(LMathMinMax* instr) {
     Register right_reg = EmitLoadRegister(right, ip);
     Register result_reg = ToRegister(instr->result());
     Label return_left, done;
-    __ cmpw(left_reg, right_reg);
+    __ cmp(left_reg, right_reg);
     __ b(cond, &return_left);
     __ Move(result_reg, right_reg);
     __ b(&done);
@@ -1690,7 +1690,7 @@ void LCodeGen::DoBranch(LBranch* instr) {
   Representation r = instr->hydrogen()->value()->representation();
   if (r.IsInteger32()) {
     Register reg = ToRegister(instr->value());
-    __ cmpwi(reg, Operand::Zero());
+    __ cmpi(reg, Operand::Zero());
     EmitBranch(true_block, false_block, ne);
   } else if (r.IsDouble()) {
     DoubleRegister reg = ToDoubleRegister(instr->value());
@@ -1868,15 +1868,15 @@ void LCodeGen::DoCmpIDAndBranch(LCmpIDAndBranch* instr) {
       __ bunordered(chunk_->GetAssemblyLabel(false_block));
     } else {
       if (right->IsConstantOperand()) {
-        __ Cmpwi(ToRegister(left),
+        __ Cmpi(ToRegister(left),
                 Operand(ToInteger32(LConstantOperand::cast(right))), r0);
       } else if (left->IsConstantOperand()) {
-        __ Cmpwi(ToRegister(right),
+        __ Cmpi(ToRegister(right),
                 Operand(ToInteger32(LConstantOperand::cast(left))), r0);
         // We transposed the operands. Reverse the condition.
         cond = ReverseCondition(cond);
       } else {
-        __ cmpw(ToRegister(left), ToRegister(right));
+        __ cmp(ToRegister(left), ToRegister(right));
       }
     }
     EmitBranch(true_block, false_block, cond);
@@ -2781,7 +2781,7 @@ void LCodeGen::DoLoadKeyedFastElement(LLoadKeyedFastElement* instr) {
     __ add(scratch, elements, r0);
     offset = FixedArray::OffsetOfElementAt(instr->additional_index());
   }
-  __ LoadP(result, FieldMemOperand(store_base, offset), r0);
+  __ LoadP(result, FieldMemOperand(store_base, offset));
 
   // Check for the hole value.
   if (instr->hydrogen()->RequiresHoleCheck()) {
@@ -3000,7 +3000,7 @@ void LCodeGen::DoLoadKeyedSpecializedArrayElement(
         }
         if (!instr->hydrogen()->CheckFlag(HInstruction::kUint32)) {
           __ lis(r0, Operand(SIGN_EXT_IMM16(0x8000)));
-          __ cmplw(result, r0);
+          __ cmpl(result, r0);
           DeoptimizeIf(ge, instr->environment());
         }
         break;
@@ -3323,10 +3323,10 @@ void LCodeGen::DoDeferredMathAbsTaggedHeapNumber(LUnaryMathOperation* instr) {
   __ lwz(exponent, FieldMemOperand(input, HeapNumber::kExponentOffset));
   // Check the sign of the argument. If the argument is positive, just
   // return it.
-  __ cmpwi(exponent, Operand::Zero());
+  __ TestSignBit32(exponent, r0);
   // Move the input to the result if necessary.
   __ Move(result, input);
-  __ bge(&done);
+  __ beq(&done, cr0);
 
   // Input is negative. Reverse its sign.
   // Preserve the value of all registers.
@@ -3451,8 +3451,8 @@ void LCodeGen::DoMathFloor(LUnaryMathOperation* instr) {
     __ lwz(scratch, MemOperand(sp, 0));
 #endif
     __ addi(sp, sp, Operand(8));
-    __ cmpwi(scratch, Operand::Zero());
-    DeoptimizeIf(lt, instr->environment());
+    __ TestSignBit32(scratch, r0);
+    DeoptimizeIf(ne, instr->environment(), cr0);
     __ bind(&done);
   }
 }
@@ -3540,8 +3540,8 @@ void LCodeGen::DoMathRound(LUnaryMathOperation* instr) {
     __ lwz(scratch, MemOperand(sp, 0));
 #endif
     __ addi(sp, sp, Operand(8));
-    __ cmpwi(scratch, Operand::Zero());
-    DeoptimizeIf(lt, instr->environment());
+    __ TestSignBit32(scratch, r0);
+    DeoptimizeIf(ne, instr->environment(), cr0);
   }
   __ bind(&done);
 }
@@ -3550,6 +3550,17 @@ void LCodeGen::DoMathRound(LUnaryMathOperation* instr) {
 void LCodeGen::DoMathSqrt(LUnaryMathOperation* instr) {
   DoubleRegister input = ToDoubleRegister(instr->value());
   DoubleRegister result = ToDoubleRegister(instr->result());
+#if !V8_TARGET_ARCH_PPC64
+  if (!CpuFeatures::IsSupported(GENERAL)) {
+    // load registers as the stub expects
+    __ fmr(d1, input);
+    __ LoadDoubleLiteral(d2, 0.5, scratch0());
+    MathPowStub stub(MathPowStub::DOUBLE);
+    __ CallStub(&stub);
+    __ fmr(result, d3);
+    return;
+  }
+#endif
   __ fsqrt(result, input);
 }
 
@@ -3572,6 +3583,22 @@ void LCodeGen::DoMathPowHalf(LUnaryMathOperation* instr) {
 
   // Add +0 to convert -0 to +0.
   __ bind(&skip);
+#if !V8_TARGET_ARCH_PPC64
+  if (!CpuFeatures::IsSupported(GENERAL)) {
+    // load registers as the stub expects
+    __ subi(sp, sp, Operand(4));
+    __ stw(r3, MemOperand(sp, 0)); 
+    __ fmr(d1, input);
+    __ LoadDoubleLiteral(d2, 0.5, scratch0());
+    MathPowStub stub(MathPowStub::DOUBLE);
+    __ CallStub(&stub);
+    __ fmr(result, d3);
+    __ lwz(r3, MemOperand(sp, 0));
+    __ addi(sp, sp, Operand(4));
+    __ bind(&done);
+    return;
+  }
+#endif
   __ fadd(result, input, kDoubleRegZero);
   __ fsqrt(result, result);
   __ bind(&done);
@@ -3687,7 +3714,6 @@ void LCodeGen::DoRandom(LRandom* instr) {
   __ stw(r4, MemOperand(sp, 0));
   __ stw(r3, MemOperand(sp, 4));
 #endif
-  __ nop();  // LHS/RAW optimization
   __ lfd(d7, MemOperand(sp, 0));
 
   // Move 0x4130000000000000 to VFP.
@@ -3699,7 +3725,6 @@ void LCodeGen::DoRandom(LRandom* instr) {
   __ stw(r4, MemOperand(sp, 0));
   __ stw(r3, MemOperand(sp, 4));
 #endif
-  __ nop();  // LHS/RAW optimization
   __ lfd(d8, MemOperand(sp, 0));
 
   __ addi(sp, sp, Operand(8));
@@ -4690,8 +4715,8 @@ void LCodeGen::DoDeferredTaggedToI(LTaggedToI* instr) {
 #else
       __ lwz(scratch1, FieldMemOperand(scratch2, HeapNumber::kValueOffset));
 #endif
-      __ cmpwi(scratch1, Operand::Zero());
-      DeoptimizeIf(lt, instr->environment());
+      __ TestSignBit32(scratch1, r0);
+      DeoptimizeIf(ne, instr->environment(), cr0);
     }
   }
   __ bind(&done);

@@ -1,74 +1,33 @@
-Evented I/O for V8 javascript. [![Build Status](https://secure.travis-ci.org/joyent/node.png)](http://travis-ci.org/joyent/node)
-===
+### node runtime targeted to an embedded ppc MPC8378E (e300c4 core) running on a Linux 2.6.21 kernel
 
 ### To build:
 
-Prerequisites (Unix only):
+Build environment:
 
-    * GCC 4.2 or newer
-    * Python 2.6 or 2.7
-    * GNU Make 3.81 or newer
-    * libexecinfo (FreeBSD and OpenBSD only)
+    // Cross development tools built using example configuration for e300c3 core.
+    // Used Linux headers for 2.6.32 (oldest permitted by crosstool)
+    * powerpc-e300c3-linux-gnu-gcc (crosstool-NG 1.21.0) 4.8.3
+    * Python 2.7.5
+    * GNU Make 3.82
+      Built for x86_64-redhat-linux-gnu
 
-Unix/Macintosh:
+Build steps:
+    export TOOL_PREFIX=/home/the1/x-tools/powerpc-e300c3-linux-gnu/bin/powerpc-e300c3-linux-gnu
+    export LINK=$TOOL_PREFIX-g++
+    export CXX=$TOOL_PREFIX-g++
+    export AR=$TOOL_PREFIX-ar
+    export RANLIB=$TOOL_PREFIX-ranlib
+    export CC=$TOOL_PREFIX-gcc
+    export LD=$TOOL_PREFIX-ld
 
-    ./configure
-    make
-    make install
+    ./configure --without-snapshot --dest-cpu=ppc
+    make -j4
+    make install DESTDIR=<path/to/root>
+    // Note: default action installs to ${DESTDIR}/usr/local
 
-If your python binary is in a non-standard location or has a
-non-standard name, run the following instead:
+Refer to upstream for further information concerning node.
 
-    export PYTHON=/path/to/python
-    $PYTHON ./configure
-    make
-    make install
-
-Windows:
-
-    vcbuild.bat
-
-You can download pre-built binaries for various operating systems from
-[http://nodejs.org/download/](http://nodejs.org/download/).  The Windows
-and OS X installers will prompt you for the location to install to.
-The tarballs are self-contained; you can extract them to a local directory
-with:
-
-    tar xzf /path/to/node-<version>-<platform>-<arch>.tar.gz
-
-Or system-wide with:
-
-    cd /usr/local && tar --strip-components 1 -xzf \
-                         /path/to/node-<version>-<platform>-<arch>.tar.gz
-
-### To run the tests:
-
-Unix/Macintosh:
-
-    make test
-
-Windows:
-
-    vcbuild.bat test
-
-### To build the documentation:
-
-    make doc
-
-### To read the documentation:
-
-    man doc/node.1
-
-Resources for Newcomers
----
-  - [The Wiki](https://github.com/joyent/node/wiki)
-  - [nodejs.org](http://nodejs.org/)
-  - [how to install node.js and npm (node package manager)](http://www.joyent.com/blog/installing-node-and-npm/)
-  - [list of modules](https://github.com/joyent/node/wiki/modules)
-  - [searching the npm registry](http://npmjs.org/)
-  - [list of companies and projects using node](https://github.com/joyent/node/wiki/Projects,-Applications,-and-Companies-Using-Node)
-  - [node.js mailing list](http://groups.google.com/group/nodejs)
-  - irc chatroom, [#node.js on freenode.net](http://webchat.freenode.net?channels=node.js&uio=d4)
-  - [community](https://github.com/joyent/node/wiki/Community)
-  - [contributing](https://github.com/joyent/node/wiki/Contributing)
-  - [big list of all the helpful wiki pages](https://github.com/joyent/node/wiki/_pages)
+The deps/v8ppc directory has received a merge overlay of the files required for
+working with this 32-bit core which has a HW FPU.  The source for the v8-related
+files is the g4compat branch from repo https://github.com/andrewlow/v8ppc.git with
+one modification to recognize the ppc603 core.

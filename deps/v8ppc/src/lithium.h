@@ -156,8 +156,8 @@ class LUnallocated: public LOperand {
   };
 
   static const int kMaxVirtualRegisters = 1 << kVirtualRegisterWidth;
-  static const int kMaxFixedIndex = (1 << (kFixedIndexWidth - 1)) - 1;
-  static const int kMinFixedIndex = -(1 << (kFixedIndexWidth - 1));
+  static const int kMaxFixedIndex = (1 << kFixedIndexWidth) - 1;
+  static const int kMinFixedIndex = -(1 << kFixedIndexWidth);
 
   bool HasAnyPolicy() const {
     return policy() == ANY;
@@ -702,6 +702,9 @@ class LChunk: public ZoneObject {
   ZoneList<LPointerMap*> pointer_maps_;
   ZoneList<Handle<JSFunction> > inlined_closures_;
 };
+
+
+int ElementsKindToShiftSize(ElementsKind elements_kind);
 
 
 } }  // namespace v8::internal

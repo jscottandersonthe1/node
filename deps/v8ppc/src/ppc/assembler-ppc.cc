@@ -62,47 +62,47 @@ static unsigned CpuFeaturesImpliedByCompiler() {
 
 #if !defined(_AIX)
 // This function uses types in elf.h
-static bool is_processor(const char* p) {
-  static bool read_tried = false;
-  static char *auxv_cpu_type = NULL;
+static const char *read_cpu_type() {
+  char *result = NULL;
+  // Open the AUXV (auxilliary vector) psuedo-file
+  int fd = open("/proc/self/auxv", O_RDONLY);
 
-  if (!read_tried) {
-    // Open the AUXV (auxilliary vector) psuedo-file
-    int fd = open("/proc/self/auxv", O_RDONLY);
-
-    read_tried = true;
-    if (fd != -1) {
+  if (fd != -1) {
 #if V8_TARGET_ARCH_PPC64
-      static Elf64_auxv_t buffer[16];
-      Elf64_auxv_t *auxv_element;
+    Elf64_auxv_t buffer[16];
+    Elf64_auxv_t *auxv_element;
 #else
-      static Elf32_auxv_t buffer[16];
-      Elf32_auxv_t *auxv_element;
+    Elf32_auxv_t buffer[16];
+    Elf32_auxv_t *auxv_element;
 #endif
-      int bytes_read = 0;
-      while (bytes_read >= 0) {
-        // Read a chunk of the AUXV
-        bytes_read = read(fd, buffer, sizeof(buffer));
-        // Locate and read the platform field of AUXV if it is in the chunk
-        for (auxv_element = buffer;
-             auxv_element+sizeof(auxv_element) <= buffer+bytes_read &&
-             auxv_element->a_type != AT_NULL;
-             auxv_element++) {
-          if (auxv_element->a_type == AT_PLATFORM) {
-            /* Note: Both auxv_cpu_type and buffer are static */
-            auxv_cpu_type = reinterpret_cast<char*>(auxv_element->a_un.a_val);
-            goto done_reading;
-          }
+    int bytes_read = 0;
+    while (bytes_read >= 0) {
+      // Read a chunk of the AUXV
+      bytes_read = read(fd, buffer, sizeof(buffer));
+      // Locate and read the platform field of AUXV if it is in the chunk
+      for (auxv_element = buffer;
+           auxv_element < buffer+bytes_read && auxv_element->a_type != AT_NULL;
+           auxv_element++) {
+        if (auxv_element->a_type == AT_PLATFORM) {
+          result = reinterpret_cast<char*>(auxv_element->a_un.a_val);
+          goto done_reading;
         }
       }
-      done_reading:
-      close(fd);
     }
+    done_reading:
+    close(fd);
   }
 
+  return result;
+}
+
+static bool is_processor(const char* p) {
+  static const char *auxv_cpu_type = read_cpu_type();
   if (auxv_cpu_type == NULL) {
+    // PrintF("cpu_type = null\n");
     return false;
   }
+  // PrintF("cpu_type = %s\n", auxv_cpu_type);
   return (strcmp(auxv_cpu_type, p) == 0);
 }
 #endif
@@ -125,18 +125,38 @@ void CpuFeatures::Probe() {
     return;
   }
 
-  // Detect whether frim instruction is supported (POWER5+)
-  // For now we will just check for processors we know do not
-  // support it
+  // Detect instructions that are only supported on some 
+  // processors.
+  // FPU - whether frim instruction is supported (POWER5+)
+  //       G4 and G5 processors do not support this
+  // IS64BIT - whether the 64-bit instructions fctid, fctidz are supported
+  //           G4 is 32-bit and so doesn't support this
+  // GENERAL - whether "General group" optional instructions are supported
+  //           (fsqrt, fsqrts)
+  //           G4 doesn't support this
+  //
+  // Current approach is limted 
+  // - we will just check for processors we know do not support features 
+  //   and assume otherwise they are supported (rather than actually looking
+  //   at feature support info - eg HWCAP)
+  // - we only check on Linux, on other platforms we will assume support
+  // - we assume the only platforms are Linux and AIX (ie, that !AIX => Linux)
 #if !defined(_AIX)
   if (!is_processor("ppc970") /* G5 */ && !is_processor("ppc7450") /* G4 */) {
-    // Assume support
+    // Assume support if not a G4 or G5
     supported_ |= (1u << FPU);
   }
+  if (!(is_processor("ppc7450") || is_processor("ppc603"))) {
+    // Assume support if not a G4
+    supported_ |= (1u << IS64BIT);
+    supported_ |= (1u << GENERAL);
+  }
 #else
-  // Fallback: assume frim is supported -- will implement processor
-  // detection for other PPC platforms in is_processor() if required
+  // Fallback: assume all instrs supported -- will implement processor/feature
+  // detection for other PPC platforms if required
   supported_ |= (1u << FPU);
+  supported_ |= (1u << IS64BIT);
+  supported_ |= (1u << GENERAL);
 #endif
 }
 
@@ -714,26 +734,18 @@ void Assembler::blr() {
 }
 
 // Pseudo op - branch to count register -- used for "jump"
-void Assembler::bctr() {
+void Assembler::bcr() {
   bcctr(BA, LeaveLK);
 }
 
-void Assembler::bctrl() {
-  bcctr(BA, SetLK);
-}
-
 void Assembler::bc(int branch_offset, BOfield bo, int condition_bit, LKBit lk) {
-  if (lk == SetLK) {
-    positions_recorder()->WriteRecordedPositions();
-  }
+  positions_recorder()->WriteRecordedPositions();
   ASSERT(is_int16(branch_offset));
   emit(BCX | bo | condition_bit*B16 | (kImm16Mask & branch_offset) | lk);
 }
 
 void Assembler::b(int branch_offset, LKBit lk) {
-  if (lk == SetLK) {
-    positions_recorder()->WriteRecordedPositions();
-  }
+  positions_recorder()->WriteRecordedPositions();
   ASSERT((branch_offset & 3) == 0);
   int imm26 = branch_offset;
   ASSERT(is_int26(imm26));
@@ -956,43 +968,6 @@ void Assembler::cmpl(Register src1, Register src2, CRegister cr) {
   emit(EXT2 | CMPL | cr.code()*B23 | L*B21 | src1.code()*B16 |
        src2.code()*B11);
 }
-
-
-void Assembler::cmpwi(Register src1, const Operand& src2, CRegister cr) {
-  intptr_t imm16 = src2.imm_;
-  int L = 0;
-  ASSERT(is_int16(imm16));
-  ASSERT(cr.code() >= 0 && cr.code() <= 7);
-  imm16 &= kImm16Mask;
-  emit(CMPI | cr.code()*B23 | L*B21 | src1.code()*B16 | imm16);
-}
-
-
-void Assembler::cmplwi(Register src1, const Operand& src2, CRegister cr) {
-  uintptr_t uimm16 = src2.imm_;
-  int L = 0;
-  ASSERT(is_uint16(uimm16));
-  ASSERT(cr.code() >= 0 && cr.code() <= 7);
-  uimm16 &= kImm16Mask;
-  emit(CMPLI | cr.code()*B23 | L*B21 | src1.code()*B16 | uimm16);
-}
-
-
-void Assembler::cmpw(Register src1, Register src2, CRegister cr) {
-  int L = 0;
-  ASSERT(cr.code() >= 0 && cr.code() <= 7);
-  emit(EXT2 | CMP | cr.code()*B23 | L*B21 | src1.code()*B16 |
-       src2.code()*B11);
-}
-
-
-void Assembler::cmplw(Register src1, Register src2, CRegister cr) {
-  int L = 0;
-  ASSERT(cr.code() >= 0 && cr.code() <= 7);
-  emit(EXT2 | CMPL | cr.code()*B23 | L*B21 | src1.code()*B16 |
-       src2.code()*B11);
-}
-
 
 // Pseudo op - load immediate
 void Assembler::li(Register dst, const Operand &imm) {
@@ -1224,26 +1199,26 @@ void Assembler::stdux(Register rs, const MemOperand &src) {
 }
 
 void Assembler::rldic(Register ra, Register rs, int sh, int mb, RCBit r) {
-  md_form(EXT5 | RLDIC, ra, rs, sh, mb, r);
+//  md_form(EXT5 | RLDIC, ra, rs, sh, mb, r);
 }
 
 void Assembler::rldicl(Register ra, Register rs, int sh, int mb, RCBit r) {
-  md_form(EXT5 | RLDICL, ra, rs, sh, mb, r);
+//  md_form(EXT5 | RLDICL, ra, rs, sh, mb, r);
 }
 
 void Assembler::rldicr(Register ra, Register rs, int sh, int me, RCBit r) {
-  md_form(EXT5 | RLDICR, ra, rs, sh, me, r);
+//  md_form(EXT5 | RLDICR, ra, rs, sh, me, r);
 }
 
 void Assembler::sldi(Register dst, Register src, const Operand& val,
                      RCBit rc) {
   ASSERT((64 > val.imm_)&&(val.imm_ >= 0));
-  rldicr(dst, src, val.imm_, 63-val.imm_, rc);
+//  rldicr(dst, src, val.imm_, 63-val.imm_, rc);
 }
 void Assembler::srdi(Register dst, Register src, const Operand& val,
                      RCBit rc) {
   ASSERT((64 > val.imm_)&&(val.imm_ >= 0));
-  rldicl(dst, src, 64-val.imm_, val.imm_, rc);
+//  rldicl(dst, src, 64-val.imm_, val.imm_, rc);
 }
 void Assembler::clrrdi(Register dst, Register src, const Operand& val,
                        RCBit rc) {
@@ -1256,12 +1231,6 @@ void Assembler::clrldi(Register dst, Register src, const Operand& val,
   rldicl(dst, src, 0, val.imm_, rc);
 }
 
-
-void Assembler::rldimi(Register ra, Register rs, int sh, int mb, RCBit r) {
-  md_form(EXT5 | RLDIMI, ra, rs, sh, mb, r);
-}
-
-
 void Assembler::sradi(Register ra, Register rs, int sh, RCBit r) {
   int sh0_4 = sh & 0x1f;
   int sh5   = (sh >> 5) & 0x1;
@@ -1270,15 +1239,15 @@ void Assembler::sradi(Register ra, Register rs, int sh, RCBit r) {
 }
 
 void Assembler::srd(Register dst, Register src1, Register src2, RCBit r) {
-  x_form(EXT2 | SRDX, dst, src1, src2, r);
+//  x_form(EXT2 | SRDX, dst, src1, src2, r);
 }
 
 void Assembler::sld(Register dst, Register src1, Register src2, RCBit r) {
-  x_form(EXT2 | SLDX, dst, src1, src2, r);
+//  x_form(EXT2 | SLDX, dst, src1, src2, r);
 }
 
 void Assembler::srad(Register ra, Register rs, Register rb, RCBit r) {
-  x_form(EXT2 | SRAD, ra, rs, rb, r);
+//  x_form(EXT2 | SRAD, ra, rs, rb, r);
 }
 
 void Assembler::cntlzd_(Register ra, Register rs, RCBit rc) {
@@ -1346,73 +1315,42 @@ void Assembler::function_descriptor() {
 // Todo - break this dependency so we can optimize mov() in general
 // and only use the generic version when we require a fixed sequence
 void Assembler::mov(Register dst, const Operand& src) {
+  BlockTrampolinePoolScope block_trampoline_pool(this);
   if (src.rmode_ != RelocInfo::NONE) {
     // some form of relocation needed
     RecordRelocInfo(src.rmode_, src.imm_);
   }
 
-  intptr_t value = src.immediate();
-  bool canOptimize = (src.rmode_ == RelocInfo::NONE &&
-                      !is_trampoline_pool_blocked());
-
-  if (canOptimize) {
+#if V8_TARGET_ARCH_PPC64
+  int64_t value = src.immediate();
+  int32_t hi_32 = static_cast<int64_t>(value) >> 32;
+  int32_t lo_32 = static_cast<int32_t>(value);
+  int hi_word = static_cast<int>(hi_32) >> 16;
+  int lo_word = static_cast<int>(hi_32) & 0xFFFF;
+  lis(dst, Operand(SIGN_EXT_IMM16(hi_word)));
+  ori(dst, dst, Operand(lo_word));
+  sldi(dst, dst, Operand(32));
+  hi_word = (static_cast<int>(lo_32) >> 16) & 0xFFFF;
+  lo_word = static_cast<int>(lo_32) & 0xFFFF;
+  oris(dst, dst, Operand(hi_word));
+  ori(dst, dst, Operand(lo_word));
+#else
+  int value = src.immediate();
+  if (!is_trampoline_pool_blocked()) {
     if (is_int16(value)) {
       li(dst, Operand(value));
-    } else {
-      uint16_t u16;
-#if V8_TARGET_ARCH_PPC64
-      if (is_int32(value)) {
-#endif
-        lis(dst, Operand(value >> 16));
-#if V8_TARGET_ARCH_PPC64
-      } else {
-        if (is_int48(value)) {
-          li(dst, Operand(value >> 32));
-        } else {
-          lis(dst, Operand(value >> 48));
-          u16 = ((value >> 32) & 0xffff);
-          if (u16) {
-            ori(dst, dst, Operand(u16));
-          }
-        }
-        sldi(dst, dst, Operand(32));
-        u16 = ((value >> 16) & 0xffff);
-        if (u16) {
-          oris(dst, dst, Operand(u16));
-        }
-      }
-#endif
-      u16 = (value & 0xffff);
-      if (u16) {
-        ori(dst, dst, Operand(u16));
-      }
+      return;
     }
+  }
+  int hi_word = static_cast<int>(value) >> 16;
+  int lo_word = static_cast<int>(value) & 0XFFFF;
+
+  lis(dst, Operand(SIGN_EXT_IMM16(hi_word)));
+  if ((!is_trampoline_pool_blocked()) && (lo_word == 0)) {
     return;
   }
-
-  ASSERT(!canOptimize);
-
-  {
-    BlockTrampolinePoolScope block_trampoline_pool(this);
-#if V8_TARGET_ARCH_PPC64
-    int32_t hi_32 = static_cast<int32_t>(value >> 32);
-    int32_t lo_32 = static_cast<int32_t>(value);
-    int hi_word = static_cast<int>(hi_32 >> 16);
-    int lo_word = static_cast<int>(hi_32 & 0xffff);
-    lis(dst, Operand(SIGN_EXT_IMM16(hi_word)));
-    ori(dst, dst, Operand(lo_word));
-    sldi(dst, dst, Operand(32));
-    hi_word = static_cast<int>(((lo_32 >> 16) & 0xffff));
-    lo_word = static_cast<int>(lo_32 & 0xffff);
-    oris(dst, dst, Operand(hi_word));
-    ori(dst, dst, Operand(lo_word));
-#else
-    int hi_word = static_cast<int>(value >> 16);
-    int lo_word = static_cast<int>(value & 0xffff);
-    lis(dst, Operand(SIGN_EXT_IMM16(hi_word)));
-    ori(dst, dst, Operand(lo_word));
+  ori(dst, dst, Operand(lo_word));
 #endif
-  }
 }
 
 // Special register instructions
@@ -1835,7 +1773,7 @@ void Assembler::GrowBuffer() {
   // buffer nor pc absolute pointing inside the code buffer, so there is no need
   // to relocate any emitted relocation entries.
 
-#if ABI_USES_FUNCTION_DESCRIPTORS
+#if defined(_AIX) || defined(V8_TARGET_ARCH_PPC64)
   // Relocate runtime entries.
   for (RelocIterator it(desc); !it.done(); it.next()) {
     RelocInfo::Mode rmode = it.rinfo()->rmode();

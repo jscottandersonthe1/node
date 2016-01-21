@@ -3711,8 +3711,8 @@ void FullCodeGenerator::EmitFastAsciiArrayJoin(CallRuntime* expr) {
   // zero.
   __ cmpi(ip, Operand::Zero());
   __ bne(&bailout);
-  __ cmpwi(scratch2, Operand::Zero());
-  __ blt(&bailout);
+  __ TestSignBit32(scratch2, r0);
+  __ bne(&bailout, cr0);
 #endif
 
   __ AddAndCheckForOverflow(string_length, string_length, scratch2,
@@ -4529,7 +4529,7 @@ void FullCodeGenerator::EnterFinallyBlock() {
   ExternalReference has_pending_message =
       ExternalReference::address_of_has_pending_message(isolate());
   __ mov(ip, Operand(has_pending_message));
-  __ lbz(r4, MemOperand(ip));
+  __ LoadP(r4, MemOperand(ip));
   __ SmiTag(r4);
   __ push(r4);
 
@@ -4555,7 +4555,7 @@ void FullCodeGenerator::ExitFinallyBlock() {
   ExternalReference has_pending_message =
       ExternalReference::address_of_has_pending_message(isolate());
   __ mov(ip, Operand(has_pending_message));
-  __ stb(r4, MemOperand(ip));
+  __ StoreP(r4, MemOperand(ip));
 
   __ pop(r4);
   ExternalReference pending_message_obj =
@@ -4572,7 +4572,7 @@ void FullCodeGenerator::ExitFinallyBlock() {
   __ mov(ip, Operand(masm_->CodeObject()));
   __ add(ip, ip, r4);
   __ mtctr(ip);
-  __ bctr();
+  __ bcr();
 }
 
 

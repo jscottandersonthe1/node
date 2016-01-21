@@ -74,13 +74,12 @@ void BreakLocationIterator::SetDebugBreakAtReturn() {
   //   bkpt
   //
   CodePatcher patcher(rinfo()->pc(), Assembler::kJSReturnSequenceInstructions);
-  Assembler::BlockTrampolinePoolScope block_trampoline_pool(patcher.masm());
 // printf("SetDebugBreakAtReturn: pc=%08x\n", (unsigned int)rinfo()->pc());
   patcher.masm()->mov(v8::internal::r0,
     Operand(reinterpret_cast<intptr_t>(
       Isolate::Current()->debug()->debug_break_return()->entry())));
-  patcher.masm()->mtctr(v8::internal::r0);
-  patcher.masm()->bctrl();
+  patcher.masm()->mtlr(v8::internal::r0);
+  patcher.masm()->bclr(BA, SetLK);
   patcher.masm()->bkpt(0);
 }
 
@@ -127,13 +126,12 @@ void BreakLocationIterator::SetDebugBreakAtSlot() {
   // The 64bit sequence is +3 instructions longer for the load
   //
   CodePatcher patcher(rinfo()->pc(), Assembler::kDebugBreakSlotInstructions);
-  Assembler::BlockTrampolinePoolScope block_trampoline_pool(patcher.masm());
 // printf("SetDebugBreakAtSlot: pc=%08x\n", (unsigned int)rinfo()->pc());
   patcher.masm()->mov(v8::internal::r0,
             Operand(reinterpret_cast<intptr_t>(
                    Isolate::Current()->debug()->debug_break_slot()->entry())));
-  patcher.masm()->mtctr(v8::internal::r0);
-  patcher.masm()->bctrl();
+  patcher.masm()->mtlr(v8::internal::r0);
+  patcher.masm()->bclr(BA, SetLK);
 }
 
 

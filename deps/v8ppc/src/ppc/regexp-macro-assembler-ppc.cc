@@ -139,7 +139,7 @@ RegExpMacroAssemblerPPC::RegExpMacroAssemblerPPC(
   ASSERT_EQ(0, registers_to_save % 2);
 
   // Called from C
-#if ABI_USES_FUNCTION_DESCRIPTORS
+#if defined(_AIX) || defined(V8_TARGET_ARCH_PPC64)
   __ function_descriptor();
 #endif
 
@@ -198,7 +198,7 @@ void RegExpMacroAssemblerPPC::Backtrack() {
   Pop(r3);
   __ add(r3, r3, code_pointer());
   __ mtctr(r3);
-  __ bctr();
+  __ bcr();
 }
 
 
@@ -927,7 +927,7 @@ Handle<HeapObject> RegExpMacroAssemblerPPC::GetCode(Handle<String> source) {
     __ MultiPop(registers_to_retain);
     __ pop(r0);
     __ mtctr(r0);
-    __ bctr();
+    __ bcr();
 
     // Backtrack code (branch target for conditional backtracks).
     if (backtrack_label_.is_linked()) {
@@ -1213,7 +1213,7 @@ int RegExpMacroAssemblerPPC::CheckStackGuardState(Address* return_address,
   MaybeObject* result = Execution::HandleStackGuardInterrupt(isolate);
 
   if (*code_handle != re_code) {  // Return address no longer valid
-    intptr_t delta = code_handle->address() - re_code->address();
+    int delta = code_handle->address() - re_code->address();
     // Overwrite the return address on the stack.
     *return_address += delta;
   }
@@ -1434,14 +1434,12 @@ void RegExpCEntryStub::Generate(MacroAssembler* masm_) {
   extra_stack_slots += kNumRequiredStackFrameSlots;
   __ addi(sp, sp, Operand(-extra_stack_slots * kPointerSize));
 
-#if ABI_USES_FUNCTION_DESCRIPTORS && !defined(USE_SIMULATOR)
+#if !defined(USE_SIMULATOR) && \
+  (defined(_AIX) || defined(V8_TARGET_ARCH_PPC64))
   // Native AIX/PPC64 Linux use a function descriptor.
   __ LoadP(ToRegister(2), MemOperand(r26, kPointerSize));  // TOC
   __ LoadP(ip, MemOperand(r26, 0));  // Instruction address
   Register target = ip;
-#elif ABI_TOC_ADDRESSABILITY_VIA_IP
-  Register target = ip;
-  __ Move(target, r26);
 #else
   Register target = r26;
 #endif

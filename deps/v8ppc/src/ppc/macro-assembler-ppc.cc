@@ -58,7 +58,7 @@ MacroAssembler::MacroAssembler(Isolate* arg_isolate, void* buffer, int size)
 void MacroAssembler::Jump(Register target, Condition cond) {
   ASSERT(cond == al);
   mtctr(target);
-  bctr();
+  bcr();
 }
 
 
@@ -73,7 +73,7 @@ void MacroAssembler::Jump(intptr_t target, RelocInfo::Mode rmode,
 
   mov(r0, Operand(target, rmode));
   mtctr(r0);
-  bctr();
+  bcr();
 
   bind(&skip);
   //  mov(pc, Operand(target, rmode), LeaveCC, cond);
@@ -111,8 +111,8 @@ void MacroAssembler::Call(Register target, Condition cond) {
   positions_recorder()->WriteRecordedPositions();
 
   // branch via link register and set LK bit for return point
-  mtctr(target);
-  bctrl();
+  mtlr(target);
+  bclr(BA, SetLK);
 
   ASSERT_EQ(CallSize(target, cond), SizeOfCodeGeneratedSince(&start));
 }
@@ -193,8 +193,8 @@ void MacroAssembler::Call(Address target,
   //
 
   mov(ip, Operand(reinterpret_cast<intptr_t>(target), rmode));
-  mtctr(ip);
-  bctrl();
+  mtlr(ip);
+  bclr(BA, SetLK);
 
 #if V8_TARGET_ARCH_PPC64
   ASSERT(kCallTargetAddressOffset == 7 * kInstrSize);
@@ -1068,7 +1068,7 @@ void MacroAssembler::JumpToHandlerEntry() {
   SmiUntag(ip, r5);
   add(r0, r4, ip);
   mtctr(r0);
-  bctr();
+  bcr();
 }
 
 
@@ -2122,13 +2122,11 @@ void MacroAssembler::CallApiFunctionAndReturn(ExternalReference function,
   addi(r29, r29, Operand(1));
   stw(r29, MemOperand(r26, kLevelOffset));
 
-#if !ABI_RETURNS_HANDLES_IN_REGS
   // PPC LINUX ABI
   // The return value is pointer-sized non-scalar value.
   // Space has already been allocated on the stack which will pass as an
   // implicity first argument.
   addi(r3, sp, Operand((kStackFrameExtraParamSlot + 1) * kPointerSize));
-#endif
 
   // Native call returns to the DirectCEntry stub which redirects to the
   // return address pushed on stack (could have moved after GC).
@@ -2136,10 +2134,8 @@ void MacroAssembler::CallApiFunctionAndReturn(ExternalReference function,
   DirectCEntryStub stub;
   stub.GenerateCall(this, function);
 
-#if !ABI_RETURNS_HANDLES_IN_REGS
   // Retrieve return value from stack buffer
   LoadP(r3, MemOperand(r3));
-#endif
 
   Label promote_scheduled_exception;
   Label delete_allocated_handles;
@@ -2246,6 +2242,36 @@ void MacroAssembler::SmiToDoubleFPRegister(Register smi,
   FloatingPointHelper::ConvertIntToDouble(this, scratch1, value);
 }
 
+void MacroAssembler::ConvertToInt32_NoPPC64(Register source,
+                                    Register dest,
+                                    Register scratch,
+                                    Register scratch2,
+                                    DwVfpRegister double_scratch,
+                                    Label *not_int32) {
+  // Retrieve double from heap
+  lfd(double_scratch, FieldMemOperand(source, HeapNumber::kValueOffset));
+
+  // Convert
+  fctiwz(double_scratch, double_scratch);
+
+  addi(sp, sp, Operand(-kDoubleSize));
+  stfd(double_scratch, MemOperand(sp, 0));
+
+#if __FLOAT_WORD_ORDER == __LITTLE_ENDIAN
+  lwz(dest, MemOperand(sp, 0));
+#else
+  lwz(dest, MemOperand(sp, 4));
+#endif
+  addi(sp, sp, Operand(kDoubleSize));
+
+  lis(scratch, Operand(-0x8000));
+  cmp(dest, scratch);
+  beq(not_int32);
+  lis(scratch, Operand(0x7FFF));
+  ori(scratch, scratch, Operand(0xFFFF));
+  cmp(dest, scratch);
+  beq(not_int32);
+}
 
 // Tries to get a signed int32 out of a double precision floating point heap
 // number. Rounds towards 0. Branch to 'not_int32' if the double is out of the
@@ -2256,6 +2282,19 @@ void MacroAssembler::ConvertToInt32(Register source,
                                     Register scratch2,
                                     DwVfpRegister double_scratch,
                                     Label *not_int32) {
+#if 0
+    ConvertToInt32_NoPPC64(source, dest, scratch, scratch2, double_scratch,
+                           not_int32);
+    return;
+#else
+#if !V8_TARGET_ARCH_PPC64
+  if (!CpuFeatures::IsSupported(IS64BIT)) {
+    ConvertToInt32_NoPPC64(source, dest, scratch, scratch2, double_scratch, 
+                           not_int32);
+    return;
+  }
+#endif
+
   // Retrieve double from heap
   lfd(double_scratch, FieldMemOperand(source, HeapNumber::kValueOffset));
 
@@ -2264,7 +2303,6 @@ void MacroAssembler::ConvertToInt32(Register source,
 
   addi(sp, sp, Operand(-kDoubleSize));
   stfd(double_scratch, MemOperand(sp, 0));
-  nop();  // LHS/RAW optimization
 #if V8_TARGET_ARCH_PPC64
   ld(dest, MemOperand(sp, 0));
 #else
@@ -2286,8 +2324,54 @@ void MacroAssembler::ConvertToInt32(Register source,
   TestIfInt32(scratch, dest, scratch2);
 #endif
   bne(not_int32);
+#endif
 }
 
+void MacroAssembler::EmitVFPTruncate_NoPPC64(VFPRoundingMode rounding_mode,
+                                     Register result,
+                                     DwVfpRegister double_input,
+                                     Register scratch,
+                                     DwVfpRegister double_scratch,
+                                     CheckForInexactConversion check_inexact) {
+  // Convert
+  if (rounding_mode == kRoundToZero) {
+    fctiwz(double_scratch, double_input);
+  } else {
+    SetRoundingMode(rounding_mode);
+    fctiw(double_scratch, double_input);
+    ResetRoundingMode();
+  }
+
+  // reserve a slot on the stack
+  stfdu(double_scratch, MemOperand(sp, -kDoubleSize));
+#if __FLOAT_WORD_ORDER == __LITTLE_ENDIAN
+  lwz(result, MemOperand(sp, 0));
+#else
+  lwz(result, MemOperand(sp, 4));
+#endif
+  addi(sp, sp, Operand(kDoubleSize));
+
+  Label done, not_int32;
+  lis(scratch, Operand(-0x8000));
+  cmp(result, scratch);
+  beq(&not_int32);
+  lis(scratch, Operand(0x7FFF));
+  ori(scratch, scratch, Operand(0xFFFF));
+  cmp(result, scratch);
+  beq(&not_int32);
+  // TODO: Below quite inefficient!
+  // int32
+  if (check_inexact == kCheckForInexactConversion) {
+    fcmpu(double_scratch, double_input);
+  } else {
+    cmp(scratch, scratch); // always equal
+  }
+  b(&done);
+  // not int32
+  bind(&not_int32);
+  cmpi(scratch, Operand::Zero()); // always unequal
+  bind(&done);
+}
 
 void MacroAssembler::EmitVFPTruncate(VFPRoundingMode rounding_mode,
                                      Register result,
@@ -2295,6 +2379,21 @@ void MacroAssembler::EmitVFPTruncate(VFPRoundingMode rounding_mode,
                                      Register scratch,
                                      DwVfpRegister double_scratch,
                                      CheckForInexactConversion check_inexact) {
+	// TODO: Do this right after proving it works.
+#if 0
+    EmitVFPTruncate_NoPPC64(rounding_mode, result, double_input, scratch,
+                            double_scratch, check_inexact);
+    return;
+#else
+    //Note for TODO: Need to ensure following symbol is not defined for ppc32 build
+    //               and figure out the IsSupported macro.
+#if !V8_TARGET_ARCH_PPC64
+  if (!CpuFeatures::IsSupported(IS64BIT)) {
+    EmitVFPTruncate_NoPPC64(rounding_mode, result, double_input, scratch,
+                            double_scratch, check_inexact);
+    return;
+  }
+#endif
   // Convert
   if (rounding_mode == kRoundToZero) {
     fctidz(double_scratch, double_input);
@@ -2306,7 +2405,6 @@ void MacroAssembler::EmitVFPTruncate(VFPRoundingMode rounding_mode,
 
   addi(sp, sp, Operand(-kDoubleSize));
   stfd(double_scratch, MemOperand(sp, 0));
-  nop();  // LHS/RAW optimization
 #if V8_TARGET_ARCH_PPC64
   ld(result, MemOperand(sp, 0));
 #else
@@ -2333,10 +2431,12 @@ void MacroAssembler::EmitVFPTruncate(VFPRoundingMode rounding_mode,
     bne(&done);
 
     // convert back and compare
+    PrintF("Instruction = fcfid in function EmitVFPTruncate\n");
     fcfid(double_scratch, double_scratch);
     fcmpu(double_scratch, double_input);
     bind(&done);
   }
+#endif
 }
 
 
@@ -2420,6 +2520,52 @@ void MacroAssembler::EmitOutOfInt32RangeTruncate(Register result,
   bind(&done);
 }
 
+void MacroAssembler::EmitECMATruncate_NoPPC64(Register result,
+                                      DwVfpRegister double_input,
+                                      DwVfpRegister double_scratch,
+                                      Register scratch,
+                                      Register input_high,
+                                      Register input_low) {
+
+  fctiwz(double_scratch, double_input);
+  // reserve a slot on the stack
+  stfdu(double_scratch, MemOperand(sp, -kDoubleSize));
+#if __FLOAT_WORD_ORDER == __LITTLE_ENDIAN
+  lwz(result, MemOperand(sp, 0));
+#else
+  lwz(result, MemOperand(sp, 4));
+#endif
+
+  Label done, not_int32;
+  lis(scratch, Operand(-0x8000));
+  cmp(result, scratch);
+  beq(&not_int32);
+  lis(scratch, Operand(0x7FFF));
+  ori(scratch, scratch, Operand(0xFFFF));
+  cmp(result, scratch);
+  beq(&not_int32);
+  // int32
+  b(&done);
+  bind(&not_int32);
+  // not int32
+  stfd(double_input, MemOperand(sp));
+ #if __FLOAT_WORD_ORDER == __LITTLE_ENDIAN
+  lwz(input_low, MemOperand(sp));
+  lwz(input_high, MemOperand(sp, 4));
+#else
+  lwz(input_high, MemOperand(sp));
+  lwz(input_low, MemOperand(sp, 4));
+#endif
+  EmitOutOfInt32RangeTruncate(result,
+                              input_high,
+                              input_low,
+                              scratch);
+ 
+  bind(&done);
+
+  // restore the stack
+  addi(sp, sp, Operand(kDoubleSize));
+}
 
 void MacroAssembler::EmitECMATruncate(Register result,
                                       DwVfpRegister double_input,
@@ -2436,12 +2582,24 @@ void MacroAssembler::EmitECMATruncate(Register result,
   ASSERT(!double_scratch.is(double_input));
 
   Label done;
+#if 0
+  EmitECMATruncate_NoPPC64(result, double_input, double_scratch,
+                           scratch, input_high, input_low);
+  return;
+#else
+
+#if !V8_TARGET_ARCH_PPC64
+  if (!CpuFeatures::IsSupported(IS64BIT)) {
+    EmitECMATruncate_NoPPC64(result, double_input, double_scratch,
+                             scratch, input_high, input_low);
+    return;
+  }
+#endif
 
   fctidz(double_scratch, double_input);
 
   // reserve a slot on the stack
   stfdu(double_scratch, MemOperand(sp, -8));
-  nop();  // LHS/RAW optimization
 #if V8_TARGET_ARCH_PPC64
   ld(result, MemOperand(sp, 0));
 #else
@@ -2465,7 +2623,6 @@ void MacroAssembler::EmitECMATruncate(Register result,
 
   // Load the double value and perform a manual truncation.
   stfd(double_input, MemOperand(sp));
-  nop();  // LHS/RAW optimization
 #if __FLOAT_WORD_ORDER == __LITTLE_ENDIAN
   lwz(input_low, MemOperand(sp));
   lwz(input_high, MemOperand(sp, 4));
@@ -2482,6 +2639,7 @@ void MacroAssembler::EmitECMATruncate(Register result,
 
   // restore the stack
   addi(sp, sp, Operand(8));
+#endif
 }
 
 
@@ -3360,20 +3518,15 @@ void MacroAssembler::CallCFunctionHelper(Register function,
   // Just call directly. The function called cannot cause a GC, or
   // allow preemption, so the return address in the link register
   // stays correct.
-#if ABI_USES_FUNCTION_DESCRIPTORS && !defined(USE_SIMULATOR)
+#if !defined(USE_SIMULATOR) && \
+  (defined(_AIX) || defined(V8_TARGET_ARCH_PPC64))
   // AIX uses a function descriptor. When calling C code be aware
   // of this descriptor and pick up values from it
-  Register dest = ip;
   LoadP(ToRegister(2), MemOperand(function, kPointerSize));
-  LoadP(dest, MemOperand(function, 0));
-#elif ABI_TOC_ADDRESSABILITY_VIA_IP
-  Register dest = ip;
-  Move(ip, function);
-#else
-  Register dest = function;
+  LoadP(function, MemOperand(function, 0));
 #endif
 
-  Call(dest);
+  Call(function);
 
   int stack_passed_arguments = CalculateStackPassedWords(
       num_reg_arguments, num_double_arguments);
@@ -3541,7 +3694,7 @@ void MacroAssembler::GetRelocatedValueLocation(Register lis_location,
     lwz(scratch, MemOperand(lis_location, 3*kInstrSize));
   }
   sldi(result, result, Operand(16));
-  rldimi(result, scratch, 0, 48);
+  rlwimi(result, scratch, 0, 16, 31);
 
   lwz(scratch, MemOperand(lis_location, 4*kInstrSize));
   // scratch is now ori.
@@ -3552,7 +3705,7 @@ void MacroAssembler::GetRelocatedValueLocation(Register lis_location,
     lwz(scratch, MemOperand(lis_location, 4*kInstrSize));
   }
   sldi(result, result, Operand(16));
-  rldimi(result, scratch, 0, 48);
+  rlwimi(result, scratch, 0, 16, 31);
 #endif
 }
 
@@ -3847,7 +4000,6 @@ void MacroAssembler::ClampDoubleToUint8(Register result_reg,
 
   // reserve a slot on the stack
   stfdu(temp_double_reg, MemOperand(sp, -8));
-  nop();  // LHS/RAW optimization
 #if __FLOAT_WORD_ORDER == __LITTLE_ENDIAN
   lwz(result_reg, MemOperand(sp));
 #else
@@ -3971,14 +4123,13 @@ void MacroAssembler::LoadDoubleLiteral(DwVfpRegister result,
   LoadIntLiteral(scratch, litVal.ival[1]);
   stw(scratch, MemOperand(sp, 4));
 #endif
-  nop();  // LHS/RAW optimization
   lfd(result, MemOperand(sp, 0));
 
   addi(sp, sp, Operand(8));  // restore the stack ptr
 }
 
 void MacroAssembler::Add(Register dst, Register src,
-                         intptr_t value, Register scratch) {
+                         uint32_t value, Register scratch) {
   if (is_int16(value)) {
     addi(dst, src, Operand(value));
   } else {
@@ -4008,31 +4159,6 @@ void MacroAssembler::Cmpli(Register src1, const Operand& src2, Register scratch,
     cmpl(src1, scratch, cr);
   }
 }
-
-
-void MacroAssembler::Cmpwi(Register src1, const Operand& src2,
-                           Register scratch, CRegister cr) {
-  intptr_t value = src2.immediate();
-  if (is_int16(value)) {
-    cmpwi(src1, src2, cr);
-  } else {
-    mov(scratch, src2);
-    cmpw(src1, scratch, cr);
-  }
-}
-
-
-void MacroAssembler::Cmplwi(Register src1, const Operand& src2,
-                            Register scratch, CRegister cr) {
-  intptr_t value = src2.immediate();
-  if (is_uint16(value)) {
-    cmplwi(src1, src2, cr);
-  } else {
-    mov(scratch, src2);
-    cmplw(src1, scratch, cr);
-  }
-}
-
 
 void MacroAssembler::And(Register ra, Register rs, const Operand& rb,
                          RCBit rc) {
