@@ -1141,6 +1141,14 @@
       ['is_clang==1 or gcc_version>=43', {
         'cflags': ['-Wno-old-style-declaration'],
       }],
+      ['OS!="win"', {
+        'defines': [
+          '_DARWIN_USE_64_BIT_INODE=1',
+          '_LARGEFILE_SOURCE',
+          '_FILE_OFFSET_BITS=64',
+          '_GNU_SOURCE'
+        ]
+      }],
       ['OS=="solaris"', {
         'defines': ['__EXTENSIONS__'],
       }],
