@@ -1,7 +1,5 @@
 ### node runtime targeted to an embedded ppc MPC8378E (e300c4 core) running on a Linux 2.6.21 kernel
 
-### To build:
-
 Build environment:
 
     // Cross development tools built using example configuration for e300c3 core.
@@ -12,12 +10,19 @@ Build environment:
       Built for x86_64-redhat-linux-gnu
 
 Build steps:
+
     export TOOL_PREFIX=/home/the1/x-tools/powerpc-e300c3-linux-gnu/bin/powerpc-e300c3-linux-gnu
+
     export LINK=$TOOL_PREFIX-g++
+
     export CXX=$TOOL_PREFIX-g++
+
     export AR=$TOOL_PREFIX-ar
+
     export RANLIB=$TOOL_PREFIX-ranlib
+
     export CC=$TOOL_PREFIX-gcc
+
     export LD=$TOOL_PREFIX-ld
 
     ./configure --without-snapshot --dest-cpu=ppc
